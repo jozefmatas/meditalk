@@ -1,0 +1,67 @@
+{
+  "common": {
+    "appName": "MediTalk",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "close": "Close",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot Password?",
+    "rememberMe": "Remember Me",
+    "createAccount": "Create Account",
+    "alreadyHaveAccount": "Already have an account?",
+    "dontHaveAccount": "Don't have an account?"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome back",
+    "todaysAppointments": "Today's Appointments",
+    "upcomingAppointments": "Upcoming Appointments",
+    "recentPatients": "Recent Patients"
+  },
+  "patients": {
+    "title": "Patients",
+    "addPatient": "Add Patient",
+    "patientList": "Patient List",
+    "patientDetails": "Patient Details",
+    "firstName": "First Name",
+    "lastName": "Last Name",
+    "dateOfBirth": "Date of Birth",
+    "phoneNumber": "Phone Number",
+    "address": "Address",
+    "medicalHistory": "Medical History"
+  },
+  "medical": {
+    "diagnosis": "Diagnosis",
+    "prescription": "Prescription",
+    "medicalLetter": "Medical Letter",
+    "createLetter": "Create Letter",
+    "symptoms": "Symptoms",
+    "treatment": "Treatment",
+    "medications": "Medications",
+    "notes": "Notes"
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "patients": "Patients",
+    "appointments": "Appointments",
+    "settings": "Settings",
+    "profile": "Profile"
+  },
+  "home": {
+    "deployNow": "Deploy Now",
+    "documentation": "Documentation"
+  }
+}

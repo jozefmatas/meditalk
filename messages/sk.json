@@ -1,0 +1,67 @@
+{
+  "common": {
+    "appName": "MediTalk",
+    "loading": "Načítava sa...",
+    "error": "Vyskytla sa chyba",
+    "save": "Uložiť",
+    "cancel": "Zrušiť",
+    "delete": "Vymazať",
+    "edit": "Upraviť",
+    "search": "Hľadať",
+    "close": "Zavrieť",
+    "yes": "Áno",
+    "no": "Nie"
+  },
+  "auth": {
+    "signIn": "Prihlásiť sa",
+    "signUp": "Registrovať sa",
+    "signOut": "Odhlásiť sa",
+    "email": "E-mail",
+    "password": "Heslo",
+    "forgotPassword": "Zabudnuté heslo?",
+    "rememberMe": "Zapamätať si ma",
+    "createAccount": "Vytvoriť účet",
+    "alreadyHaveAccount": "Už máte účet?",
+    "dontHaveAccount": "Nemáte účet?"
+  },
+  "dashboard": {
+    "title": "Prehľad",
+    "welcome": "Vitajte späť",
+    "todaysAppointments": "Dnešné vyšetrenia",
+    "upcomingAppointments": "Nadchádzajúce vyšetrenia",
+    "recentPatients": "Nedávni pacienti"
+  },
+  "patients": {
+    "title": "Pacienti",
+    "addPatient": "Pridať pacienta",
+    "patientList": "Zoznam pacientov",
+    "patientDetails": "Detail pacienta",
+    "firstName": "Meno",
+    "lastName": "Priezvisko",
+    "dateOfBirth": "Dátum narodenia",
+    "phoneNumber": "Telefónne číslo",
+    "address": "Adresa",
+    "medicalHistory": "Zdravotná anamnéza"
+  },
+  "medical": {
+    "diagnosis": "Diagnóza",
+    "prescription": "Recept",
+    "medicalLetter": "Lekárska správa",
+    "createLetter": "Vytvoriť správu",
+    "symptoms": "Symptómy",
+    "treatment": "Liečba",
+    "medications": "Lieky",
+    "notes": "Poznámky"
+  },
+  "navigation": {
+    "dashboard": "Prehľad",
+    "patients": "Pacienti",
+    "appointments": "Vyšetrenia",
+    "settings": "Nastavenia",
+    "profile": "Profil"
+  },
+  "home": {
+    "deployNow": "Nasadiť teraz",
+    "documentation": "Dokumentácia"
+  }
+}
