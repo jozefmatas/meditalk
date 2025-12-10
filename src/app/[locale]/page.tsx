@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
 import Image from "next/image";
 import { useTranslations, useLocale } from "next-intl";
 import { LanguageSwitcher } from "@/components/language-switcher";
 
 export default function Home() {
-  const tCommon = useTranslations('common');
-  const tHome = useTranslations('home');
+  const tCommon = useTranslations("common");
+  const tHome = useTranslations("home");
   const locale = useLocale();
 
   return (
@@ -25,10 +25,10 @@ export default function Home() {
         />
         <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
           <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            {tCommon('appName')}
+            {tCommon("appName")}
           </h1>
           <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            {tCommon('loading')} - Current locale: {locale}
+            {tCommon("loading")} - Current locale: {locale}
           </p>
         </div>
         <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
@@ -45,15 +45,15 @@ export default function Home() {
               width={16}
               height={16}
             />
-            {tHome('deployNow')}
+            {tHome("deployNow")}
           </a>
           <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
+            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/8 px-5 transition-colors hover:border-transparent hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
             href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
             target="_blank"
             rel="noopener noreferrer"
           >
-            {tHome('documentation')}
+            {tHome("documentation")}
           </a>
         </div>
       </main>
