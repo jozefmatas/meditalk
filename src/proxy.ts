@@ -64,7 +64,28 @@ export async function proxy(request: NextRequest) {
   )
 
   // Refresh session if expired - required for Server Components
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // STEP 4: Protect routes — redirect unauthenticated users to /login
+  const pathname = url.pathname
+  const isLoginPage = pathname.includes('/login')
+  const isAuthCallback = pathname.startsWith('/auth/')
+  const isApiRoute = pathname.startsWith('/api/')
+
+  if (!user && !isLoginPage && !isAuthCallback && !isApiRoute) {
+    // Determine locale prefix for redirect
+    const localeMatch = pathname.match(/^\/(sk|cs|en)(\/|$)/)
+    const localePrefix = localeMatch ? `/${localeMatch[1]}` : ''
+    const loginUrl = new URL(`${localePrefix}/login`, request.url)
+    return NextResponse.redirect(loginUrl)
+  }
+
+  // If user is authenticated and on login page, redirect to home
+  if (user && isLoginPage) {
+    const localeMatch = pathname.match(/^\/(sk|cs|en)(\/|$)/)
+    const localePrefix = localeMatch ? `/${localeMatch[1]}` : ''
+    return NextResponse.redirect(new URL(`${localePrefix}/`, request.url))
+  }
 
   return supabaseResponse
 }

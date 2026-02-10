@@ -63,5 +63,14 @@
   "home": {
     "deployNow": "Nasadit nyní",
     "documentation": "Dokumentace"
+  },
+  "login": {
+    "description": "Přihlaste se pro přístup k pracovnímu prostoru pro lékařské přepisy",
+    "emailLabel": "E-mailová adresa",
+    "emailPlaceholder": "vas@email.com",
+    "sendLink": "Odeslat magický odkaz",
+    "checkEmail": "Zkontrolujte svůj e-mail pro přihlašovací odkaz.",
+    "errorSending": "Nepodařilo se odeslat odkaz. Zkuste to znovu.",
+    "errorAuth": "Ověření selhalo. Zkuste to znovu."
   }
 }

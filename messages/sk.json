@@ -63,5 +63,14 @@
   "home": {
     "deployNow": "Nasadiť teraz",
     "documentation": "Dokumentácia"
+  },
+  "login": {
+    "description": "Prihláste sa pre prístup k pracovnému priestoru pre medicínske prepisy",
+    "emailLabel": "E-mailová adresa",
+    "emailPlaceholder": "vas@email.com",
+    "sendLink": "Odoslať magický odkaz",
+    "checkEmail": "Skontrolujte svoju e-mailovú schránku pre prihlasovací odkaz.",
+    "errorSending": "Nepodarilo sa odoslať odkaz. Skúste to znova.",
+    "errorAuth": "Autentifikácia zlyhala. Skúste to znova."
   }
 }

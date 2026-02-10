@@ -63,5 +63,14 @@
   "home": {
     "deployNow": "Deploy Now",
     "documentation": "Documentation"
+  },
+  "login": {
+    "description": "Sign in to access your medical transcription workspace",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "sendLink": "Send magic link",
+    "checkEmail": "Check your email for a magic link to sign in.",
+    "errorSending": "Failed to send magic link. Please try again.",
+    "errorAuth": "Authentication failed. Please try again."
   }
 }

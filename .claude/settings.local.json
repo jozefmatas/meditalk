@@ -6,7 +6,13 @@
       "WebSearch",
       "mcp__Context7__get-library-docs",
       "Bash(test:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(npx shadcn@latest add:*)",
+      "Bash(curl:*)",
+      "Bash(npx next build:*)",
+      "Bash(node:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
