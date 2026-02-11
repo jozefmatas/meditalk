@@ -12,7 +12,8 @@
       "Bash(npx next build:*)",
       "Bash(node:*)",
       "Bash(grep:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "mcp__supabase__get_advisors"
     ],
     "deny": [],
     "ask": []
