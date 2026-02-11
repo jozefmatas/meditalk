@@ -2,17 +2,30 @@
 
 import Image from "next/image";
 import { useTranslations, useLocale } from "next-intl";
+import { useRouter } from "next/navigation";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
 
 export default function Home() {
   const tCommon = useTranslations("common");
   const tHome = useTranslations("home");
   const locale = useLocale();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.refresh();
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <div className="w-full flex justify-end mb-4">
+        <div className="w-full flex justify-end gap-2 mb-4">
+          <Button variant="outline" size="default" onClick={handleSignOut}>
+            Sign out
+          </Button>
           <LanguageSwitcher />
         </div>
         <Image
