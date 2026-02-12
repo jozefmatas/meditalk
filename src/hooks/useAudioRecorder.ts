@@ -8,11 +8,12 @@ function getSupportedMimeType(): string {
     'audio/webm',
     'audio/ogg;codecs=opus',
     'audio/ogg',
+    'audio/mp4',
   ];
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
-  return 'audio/webm';
+  return 'audio/mp4';
 }
 
 export function useAudioRecorder() {

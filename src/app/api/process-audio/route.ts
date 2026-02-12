@@ -32,7 +32,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
 
-    if (!ALLOWED_AUDIO_TYPES.has(file.type)) {
+    // Browser may send "audio/webm;codecs=opus" — match base MIME type
+    const baseMime = file.type.split(';')[0].trim();
+    if (!ALLOWED_AUDIO_TYPES.has(baseMime)) {
       return NextResponse.json(
         { error: `Unsupported file type: ${file.type}` },
         { status: 400 }
