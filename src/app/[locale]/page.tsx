@@ -581,11 +581,9 @@ export default function Home() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ScrollArea className="max-h-96">
-                      <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {patientLetter}
-                      </div>
-                    </ScrollArea>
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {patientLetter}
+                    </div>
                   </CardContent>
                 </Card>
               )}

@@ -49,8 +49,9 @@ export async function POST(request: NextRequest) {
     );
 
     if (rpcError) {
+      console.error('match_chunks RPC error:', rpcError);
       return NextResponse.json(
-        { error: 'Search failed' },
+        { error: `Search failed: ${rpcError.message}` },
         { status: 500 }
       );
     }
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
+    console.error('Search route error:', err);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -52,7 +52,15 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    if (rpcError || !matches || matches.length === 0) {
+    if (rpcError) {
+      console.error('match_chunks RPC error:', rpcError);
+      return NextResponse.json(
+        { error: `Chunk retrieval failed: ${rpcError.message}` },
+        { status: 500 }
+      );
+    }
+
+    if (!matches || matches.length === 0) {
       return NextResponse.json(
         { error: 'No chunks found for this transcript' },
         { status: 404 }
@@ -67,7 +75,20 @@ export async function POST(request: NextRequest) {
     );
 
     // Generate SOAP note and patient letter
-    const { soap, letter } = await generateSOAPAndLetter(chunkContents, language);
+    console.log('Calling Anthropic with', chunkContents.length, 'chunks, language:', language);
+    let soap: string;
+    let letter: string;
+    try {
+      const result = await generateSOAPAndLetter(chunkContents, language);
+      soap = result.soap;
+      letter = result.letter;
+    } catch (anthropicErr) {
+      console.error('Anthropic generation failed:', anthropicErr);
+      return NextResponse.json(
+        { error: `SOAP generation failed: ${anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr)}` },
+        { status: 500 }
+      );
+    }
 
     const response: GenerateResponse = {
       soap,
@@ -78,6 +99,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
+    console.error('Generate route error:', err);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

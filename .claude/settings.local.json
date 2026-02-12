@@ -14,7 +14,13 @@
       "Bash(grep:*)",
       "Bash(ls:*)",
       "mcp__supabase__get_advisors",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "mcp__supabase__list_migrations",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__get_logs",
+      "mcp__supabase__apply_migration",
+      "Bash(source:*)",
+      "Bash(export ANTHROPIC_API_KEY=\"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\")"
     ],
     "deny": [],
     "ask": []

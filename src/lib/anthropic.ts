@@ -72,6 +72,26 @@ export async function generateSOAPAndLetter(
     throw new Error('Failed to parse structured response from Claude');
   }
 
-  const parsed = JSON.parse(jsonMatch[0]) as { soap: string; letter: string };
-  return parsed;
+  const parsed = JSON.parse(jsonMatch[0]) as {
+    soap: string | Record<string, string>;
+    letter: string;
+  };
+
+  // Claude sometimes returns soap as {S, O, A, P} object — normalize to string
+  let soap: string;
+  if (typeof parsed.soap === 'object' && parsed.soap !== null) {
+    soap = Object.entries(parsed.soap)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('\n\n');
+  } else {
+    soap = parsed.soap;
+  }
+
+  // Same safety check for letter
+  const letter =
+    typeof parsed.letter === 'string'
+      ? parsed.letter
+      : JSON.stringify(parsed.letter);
+
+  return { soap, letter };
 }

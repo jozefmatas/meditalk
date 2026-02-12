@@ -47,7 +47,7 @@ returns table (
 )
 language plpgsql
 security definer
-set search_path = ''
+set search_path = 'public', 'extensions'
 as $$
 begin
   return query
