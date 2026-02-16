@@ -8,29 +8,30 @@ export async function POST(request: NextRequest) {
     const { supabase } = await requireAuth();
 
     const body = await request.json();
-    const { query, transcriptId, k = 10 } = body as {
+    // Support both visitId (new) and transcriptId (legacy)
+    const visitId = body.visitId || body.transcriptId;
+    const { query, k = 10 } = body as {
       query: string;
-      transcriptId: string;
       k?: number;
     };
 
-    if (!query || !transcriptId) {
+    if (!query || !visitId) {
       return NextResponse.json(
-        { error: 'Missing required fields: query, transcriptId' },
+        { error: 'Missing required fields: query, visitId' },
         { status: 400 }
       );
     }
 
-    // Verify transcript belongs to user (RLS handles this, but check existence)
-    const { data: transcript, error: txError } = await supabase
-      .from('transcripts')
+    // Verify visit belongs to user (RLS handles this, but check existence)
+    const { data: visit, error: visitError } = await supabase
+      .from('visits')
       .select('id')
-      .eq('id', transcriptId)
+      .eq('id', visitId)
       .single();
 
-    if (txError || !transcript) {
+    if (visitError || !visit) {
       return NextResponse.json(
-        { error: 'Transcript not found' },
+        { error: 'Visit not found' },
         { status: 404 }
       );
     }
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       {
         query_embedding: JSON.stringify(queryEmbedding),
         match_count: k,
-        p_transcript_id: transcriptId,
+        p_visit_id: visitId,
       }
     );
 

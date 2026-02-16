@@ -73,22 +73,24 @@ export async function POST(request: NextRequest) {
     // Transcribe via Whisper
     const rawText = await transcribeAudio(file, file.name);
 
-    // Insert transcript row
-    const { data: transcript, error: insertError } = await supabase
-      .from('transcripts')
+    // Insert visit row
+    const { data: visit, error: insertError } = await supabase
+      .from('visits')
       .insert({
         user_id: userId,
         title,
         audio_path: audioPath,
         raw_text: rawText,
         language,
+        visit_date: new Date().toISOString(),
+        status: 'draft',
       })
       .select('id')
       .single();
 
-    if (insertError || !transcript) {
+    if (insertError || !visit) {
       return NextResponse.json(
-        { error: 'Failed to save transcript' },
+        { error: 'Failed to save visit' },
         { status: 500 }
       );
     }
@@ -99,7 +101,7 @@ export async function POST(request: NextRequest) {
 
     // Insert chunks with embeddings
     const chunkRows = chunks.map((content, i) => ({
-      transcript_id: transcript.id,
+      visit_id: visit.id,
       chunk_index: i,
       content,
       embedding: JSON.stringify(embeddings[i]),
@@ -111,13 +113,13 @@ export async function POST(request: NextRequest) {
 
     if (chunksError) {
       return NextResponse.json(
-        { error: 'Failed to save transcript chunks' },
+        { error: 'Failed to save visit chunks' },
         { status: 500 }
       );
     }
 
     const response: ProcessAudioResponse = {
-      transcriptId: transcript.id,
+      visitId: visit.id,
       audioPath,
       chunkCount: chunks.length,
       transcriptText: rawText,

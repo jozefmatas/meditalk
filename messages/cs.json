@@ -24,9 +24,73 @@
     "alreadyHaveAccount": "Již máte účet?",
     "dontHaveAccount": "Nemáte účet?"
   },
+  "nav": {
+    "dashboard": "Přehled",
+    "newVisit": "Nová návštěva",
+    "settings": "Nastavení",
+    "patients": "Pacienti",
+    "profile": "Profil"
+  },
+  "visits": {
+    "title": "Návštěvy",
+    "newVisit": "Nová návštěva",
+    "untitled": "Bez názvu",
+    "search": "Hledat",
+    "searchPlaceholder": "Hledat návštěvy...",
+    "loading": "Načítání...",
+    "loadMore": "Načíst více",
+    "status": {
+      "draft": "Koncept",
+      "completed": "Dokončeno",
+      "archived": "Archivováno"
+    },
+    "type": {
+      "consultation": "Konzultace",
+      "follow_up": "Kontrola",
+      "preventive": "Preventivní prohlídka",
+      "acute": "Akutní vyšetření",
+      "specialist_referral": "Odborné vyšetření",
+      "telemedicine": "Telemedicína",
+      "home_visit": "Návštěvní služba"
+    },
+    "empty": {
+      "title": "Zatím žádné návštěvy",
+      "description": "Vytvořte svou první návštěvu"
+    },
+    "form": {
+      "title": "Název",
+      "titlePlaceholder": "např. Konzultace pacienta",
+      "patientName": "Jméno pacienta",
+      "patientNamePlaceholder": "Jméno pacienta (volitelné)",
+      "visitType": "Typ návštěvy",
+      "visitDate": "Datum návštěvy",
+      "language": "Jazyk",
+      "createVisit": "Vytvořit návštěvu",
+      "creating": "Vytváří se..."
+    },
+    "detail": {
+      "transcript": "Přepis",
+      "search": "Hledat",
+      "searchPlaceholder": "Hledat v návštěvě...",
+      "generate": "Generovat SOAP + dopis",
+      "generating": "Generuje se...",
+      "soapNote": "SOAP poznámka",
+      "patientLetter": "Dopis pro pacienta",
+      "noTranscript": "Přepis není k dispozici",
+      "uploadAudio": "Nahrát audio",
+      "recordAudio": "Nahrávat audio"
+    },
+    "delete": {
+      "title": "Smazat návštěvu",
+      "message": "Opravdu chcete smazat tuto návštěvu? Tuto akci nelze vrátit zpět.",
+      "confirm": "Smazat",
+      "cancel": "Zrušit"
+    }
+  },
   "dashboard": {
     "title": "Přehled",
     "welcome": "Vítejte zpět",
+    "recentVisits": "Nedávné návštěvy",
     "todaysAppointments": "Dnešní vyšetření",
     "upcomingAppointments": "Nadcházející vyšetření",
     "recentPatients": "Nedávní pacienti"

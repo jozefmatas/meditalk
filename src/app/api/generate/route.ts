@@ -15,30 +15,31 @@ export async function POST(request: NextRequest) {
     const { supabase } = await requireAuth();
 
     const body = await request.json();
-    const { transcriptId } = body as { transcriptId: string };
+    // Support both visitId (new) and transcriptId (legacy)
+    const visitId = body.visitId || body.transcriptId;
 
-    if (!transcriptId) {
+    if (!visitId) {
       return NextResponse.json(
-        { error: 'Missing required field: transcriptId' },
+        { error: 'Missing required field: visitId' },
         { status: 400 }
       );
     }
 
-    // Fetch the transcript to get its language (RLS enforces ownership)
-    const { data: transcript, error: txError } = await supabase
-      .from('transcripts')
+    // Fetch the visit to get its language (RLS enforces ownership)
+    const { data: visit, error: visitError } = await supabase
+      .from('visits')
       .select('id, language')
-      .eq('id', transcriptId)
+      .eq('id', visitId)
       .single();
 
-    if (txError || !transcript) {
+    if (visitError || !visit) {
       return NextResponse.json(
-        { error: 'Transcript not found' },
+        { error: 'Visit not found' },
         { status: 404 }
       );
     }
 
-    const language = (transcript.language as SupportedLanguage) || 'en';
+    const language = (visit.language as SupportedLanguage) || 'en';
 
     // Embed a clinical retrieval query to find the most relevant chunks
     const queryEmbedding = await embedText(RETRIEVAL_QUERY[language]);
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
       {
         query_embedding: JSON.stringify(queryEmbedding),
         match_count: 16,
-        p_transcript_id: transcriptId,
+        p_visit_id: visitId,
       }
     );
 
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
 
     if (!matches || matches.length === 0) {
       return NextResponse.json(
-        { error: 'No chunks found for this transcript' },
+        { error: 'No chunks found for this visit' },
         { status: 404 }
       );
     }
@@ -88,6 +89,20 @@ export async function POST(request: NextRequest) {
         { error: `SOAP generation failed: ${anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr)}` },
         { status: 500 }
       );
+    }
+
+    // Save generated content to the visit
+    const { error: updateError } = await supabase
+      .from('visits')
+      .update({
+        soap_note: soap,
+        patient_letter: letter,
+      })
+      .eq('id', visitId);
+
+    if (updateError) {
+      console.error('Failed to save generated content to visit:', updateError);
+      // Don't fail the request, just log the error
     }
 
     const response: GenerateResponse = {

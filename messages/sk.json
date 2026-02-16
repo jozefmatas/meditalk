@@ -24,9 +24,73 @@
     "alreadyHaveAccount": "Už máte účet?",
     "dontHaveAccount": "Nemáte účet?"
   },
+  "nav": {
+    "dashboard": "Prehľad",
+    "newVisit": "Nová návšteva",
+    "settings": "Nastavenia",
+    "patients": "Pacienti",
+    "profile": "Profil"
+  },
+  "visits": {
+    "title": "Návštevy",
+    "newVisit": "Nová návšteva",
+    "untitled": "Bez názvu",
+    "search": "Hľadať",
+    "searchPlaceholder": "Hľadať návštevy...",
+    "loading": "Načítava sa...",
+    "loadMore": "Načítať viac",
+    "status": {
+      "draft": "Koncept",
+      "completed": "Dokončené",
+      "archived": "Archivované"
+    },
+    "type": {
+      "consultation": "Konzultácia",
+      "follow_up": "Kontrola",
+      "preventive": "Preventívna prehliadka",
+      "acute": "Akútne vyšetrenie",
+      "specialist_referral": "Odborné vyšetrenie",
+      "telemedicine": "Telemedicína",
+      "home_visit": "Návštevná služba"
+    },
+    "empty": {
+      "title": "Zatiaľ žiadne návštevy",
+      "description": "Vytvorte svoju prvú návštevu"
+    },
+    "form": {
+      "title": "Názov",
+      "titlePlaceholder": "napr. Konzultácia pacienta",
+      "patientName": "Meno pacienta",
+      "patientNamePlaceholder": "Meno pacienta (voliteľné)",
+      "visitType": "Typ návštevy",
+      "visitDate": "Dátum návštevy",
+      "language": "Jazyk",
+      "createVisit": "Vytvoriť návštevu",
+      "creating": "Vytvára sa..."
+    },
+    "detail": {
+      "transcript": "Prepis",
+      "search": "Hľadať",
+      "searchPlaceholder": "Hľadať v návšteve...",
+      "generate": "Generovať SOAP + list",
+      "generating": "Generuje sa...",
+      "soapNote": "SOAP poznámka",
+      "patientLetter": "List pre pacienta",
+      "noTranscript": "Prepis nie je k dispozícii",
+      "uploadAudio": "Nahrať audio",
+      "recordAudio": "Nahrávať audio"
+    },
+    "delete": {
+      "title": "Vymazať návštevu",
+      "message": "Naozaj chcete vymazať túto návštevu? Táto akcia sa nedá vrátiť späť.",
+      "confirm": "Vymazať",
+      "cancel": "Zrušiť"
+    }
+  },
   "dashboard": {
     "title": "Prehľad",
     "welcome": "Vitajte späť",
+    "recentVisits": "Nedávne návštevy",
     "todaysAppointments": "Dnešné vyšetrenia",
     "upcomingAppointments": "Nadchádzajúce vyšetrenia",
     "recentPatients": "Nedávni pacienti"
