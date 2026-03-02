@@ -6,7 +6,7 @@ import { routing } from './i18n/routing'
 // Create next-intl middleware handler
 const handleI18nRouting = createIntlMiddleware(routing)
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const url = new URL(request.url)
   const pathname = url.pathname
 

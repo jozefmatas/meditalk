@@ -20,7 +20,16 @@
       "mcp__supabase__get_logs",
       "mcp__supabase__apply_migration",
       "Bash(source:*)",
-      "Bash(export ANTHROPIC_API_KEY=\"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\")"
+      "Bash(export ANTHROPIC_API_KEY=\"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\")",
+      "WebFetch(domain:intercom-help.eu)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:www.tandemhealth.ai)",
+      "WebFetch(domain:openclawdoc.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "mcp__supabase__list_tables"
     ],
     "deny": [],
     "ask": []
