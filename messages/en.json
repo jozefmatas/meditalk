@@ -29,7 +29,11 @@
     "newVisit": "New Visit",
     "settings": "Settings",
     "patients": "Patients",
-    "profile": "Profile"
+    "profile": "Profile",
+    "moreVisits": "Show more",
+    "openVisit": "Open Visit",
+    "markComplete": "Mark Complete",
+    "deleteVisit": "Delete Visit"
   },
   "visits": {
     "title": "Visits",

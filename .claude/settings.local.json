@@ -29,7 +29,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "mcp__supabase__list_tables"
+      "mcp__supabase__list_tables",
+      "Bash(find:*)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "mcp__Context7__resolve-library-id",
+      "mcp__Context7__query-docs",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []

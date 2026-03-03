@@ -2,12 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { useTranslations } from "next-intl";
+import { useLocalizedHref } from "@/hooks/use-localized-href";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
+import {
+  Breadcrumb,
+  BreadcrumbList,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 
-interface Breadcrumb {
+interface BreadcrumbData {
   label: string;
   href?: string;
 }
@@ -15,29 +23,22 @@ interface Breadcrumb {
 export function Header() {
   const t = useTranslations("nav");
   const tVisits = useTranslations("visits");
-  const locale = useLocale();
   const pathname = usePathname();
+  const getHref = useLocalizedHref();
 
-  const getLocalizedHref = (href: string) => {
-    const base = locale === "sk" ? "" : `/${locale}`;
-    return `${base}${href}` || "/";
-  };
-
-  // Build breadcrumbs based on current path
-  const buildBreadcrumbs = (): Breadcrumb[] => {
-    const crumbs: Breadcrumb[] = [{ label: t("dashboard"), href: getLocalizedHref("") }];
+  const buildBreadcrumbs = (): BreadcrumbData[] => {
+    const crumbs: BreadcrumbData[] = [{ label: t("dashboard"), href: getHref("") }];
 
     // Remove locale prefix for analysis
-    const cleanPath = pathname.replace(`/${locale}`, "").replace(/^\//, "");
+    const cleanPath = pathname.replace(/^\/(sk|cs|en)/, "").replace(/^\//, "");
     const segments = cleanPath.split("/").filter(Boolean);
 
     if (segments[0] === "visits") {
-      crumbs.push({ label: tVisits("title"), href: getLocalizedHref("") });
+      crumbs.push({ label: tVisits("title"), href: getHref("") });
 
       if (segments[1] === "new") {
         crumbs.push({ label: tVisits("newVisit") });
       } else if (segments[1]) {
-        // Visit detail - show truncated ID
         const visitId = segments[1];
         crumbs.push({ label: `${visitId.slice(0, 8)}...` });
       }
@@ -51,41 +52,28 @@ export function Header() {
   const breadcrumbs = buildBreadcrumbs();
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-card px-6">
-      {/* Breadcrumbs */}
-      <nav className="flex items-center gap-2 text-sm">
-        {breadcrumbs.map((crumb, index) => (
-          <span key={index} className="flex items-center gap-2">
-            {index > 0 && (
-              <HugeiconsIcon
-                icon={ArrowRight01Icon}
-                size={14}
-                className="text-muted-foreground"
-              />
-            )}
-            {crumb.href && index < breadcrumbs.length - 1 ? (
-              <Link
-                href={crumb.href}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {crumb.label}
-              </Link>
-            ) : (
-              <span className="font-medium">{crumb.label}</span>
-            )}
-          </span>
-        ))}
-      </nav>
-
-      {/* Quick actions */}
-      <div className="flex items-center gap-2">
-        <Button asChild size="sm">
-          <Link href={getLocalizedHref("/visits/new")}>
-            <HugeiconsIcon icon={Add01Icon} size={16} />
-            {tVisits("newVisit")}
-          </Link>
-        </Button>
-      </div>
+    <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-2 self-auto! h-4" />
+      <Breadcrumb>
+        <BreadcrumbList>
+          {breadcrumbs.map((crumb, index) => {
+            const isLast = index === breadcrumbs.length - 1;
+            return (
+              <BreadcrumbItem key={index}>
+                {index > 0 && <BreadcrumbSeparator />}
+                {!isLast && crumb.href ? (
+                  <BreadcrumbLink asChild>
+                    <Link href={crumb.href}>{crumb.label}</Link>
+                  </BreadcrumbLink>
+                ) : (
+                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                )}
+              </BreadcrumbItem>
+            );
+          })}
+        </BreadcrumbList>
+      </Breadcrumb>
     </header>
   );
 }

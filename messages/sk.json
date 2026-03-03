@@ -29,7 +29,11 @@
     "newVisit": "Nová návšteva",
     "settings": "Nastavenia",
     "patients": "Pacienti",
-    "profile": "Profil"
+    "profile": "Profil",
+    "moreVisits": "Zobraziť viac",
+    "openVisit": "Otvoriť návštevu",
+    "markComplete": "Označiť ako dokončenú",
+    "deleteVisit": "Vymazať návštevu"
   },
   "visits": {
     "title": "Návštevy",
