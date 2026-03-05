@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const title = (formData.get('title') as string) || null;
     const language = (formData.get('language') as string) || 'en';
+    const existingVisitId = (formData.get('visitId') as string) || null;
 
     if (!file) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
@@ -73,35 +74,66 @@ export async function POST(request: NextRequest) {
     // Transcribe via Whisper
     const rawText = await transcribeAudio(file, file.name);
 
-    // Insert visit row
-    const { data: visit, error: insertError } = await supabase
-      .from('visits')
-      .insert({
-        user_id: userId,
-        title,
-        audio_path: audioPath,
-        raw_text: rawText,
-        language,
-        visit_date: new Date().toISOString(),
-        status: 'draft',
-      })
-      .select('id')
-      .single();
+    let visitId: string;
 
-    if (insertError || !visit) {
-      return NextResponse.json(
-        { error: 'Failed to save visit' },
-        { status: 500 }
-      );
+    if (existingVisitId) {
+      // Attach audio to an existing visit
+      const { data: existing } = await supabase
+        .from('visits')
+        .select('id')
+        .eq('id', existingVisitId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!existing) {
+        return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
+      }
+
+      const { error: updateError } = await supabase
+        .from('visits')
+        .update({ audio_path: audioPath, raw_text: rawText })
+        .eq('id', existingVisitId);
+
+      if (updateError) {
+        return NextResponse.json({ error: 'Failed to update visit' }, { status: 500 });
+      }
+
+      // Remove old chunks before inserting new ones
+      await supabase
+        .from('transcript_chunks')
+        .delete()
+        .eq('visit_id', existingVisitId);
+
+      visitId = existingVisitId;
+    } else {
+      // Create a new visit row
+      const { data: visit, error: insertError } = await supabase
+        .from('visits')
+        .insert({
+          user_id: userId,
+          title,
+          audio_path: audioPath,
+          raw_text: rawText,
+          language,
+          visit_date: new Date().toISOString(),
+          status: 'draft',
+        })
+        .select('id')
+        .single();
+
+      if (insertError || !visit) {
+        return NextResponse.json({ error: 'Failed to save visit' }, { status: 500 });
+      }
+
+      visitId = visit.id;
     }
 
     // Chunk and embed
     const chunks = chunkText(rawText);
     const embeddings = await embedTexts(chunks);
 
-    // Insert chunks with embeddings
     const chunkRows = chunks.map((content, i) => ({
-      visit_id: visit.id,
+      visit_id: visitId,
       chunk_index: i,
       content,
       embedding: JSON.stringify(embeddings[i]),
@@ -112,14 +144,11 @@ export async function POST(request: NextRequest) {
       .insert(chunkRows);
 
     if (chunksError) {
-      return NextResponse.json(
-        { error: 'Failed to save visit chunks' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to save visit chunks' }, { status: 500 });
     }
 
     const response: ProcessAudioResponse = {
-      visitId: visit.id,
+      visitId,
       audioPath,
       chunkCount: chunks.length,
       transcriptText: rawText,

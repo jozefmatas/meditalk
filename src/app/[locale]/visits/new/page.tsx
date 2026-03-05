@@ -1,26 +1,33 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/nav/app-shell";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Mic01Icon,
-  Upload04Icon,
-  StopIcon,
+  Search01Icon,
   Loading03Icon,
   AlertCircleIcon,
-  Add01Icon,
+  MagicWand01Icon,
+  Note01Icon,
+  FloppyDiskIcon,
+  Tick02Icon,
+  ArrowLeft01Icon,
 } from "@hugeicons/core-free-icons";
-import type { VisitType } from "@/lib/types";
+import { TiptapEditor } from "@/components/editor/tiptap-editor";
+import { TemplateSelector } from "@/components/templates/template-selector";
+import { AudioSection } from "@/components/visits/audio-section";
+import { getDefaultTemplate } from "@/lib/templates";
+import type { VisitType, ChunkMatch } from "@/lib/types";
 
 const VISIT_TYPES: VisitType[] = [
   "consultation",
@@ -34,336 +41,488 @@ const VISIT_TYPES: VisitType[] = [
 
 export default function NewVisitPage() {
   const t = useTranslations("visits");
+  const tTemplates = useTranslations("templates");
   const tPoc = useTranslations("poc");
   const locale = useLocale();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const templateParam = searchParams.get("template");
+  const getHref = useLocalizedHref();
 
-  // Form state
+  // Visit creation state
+  const [visitId, setVisitId] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Metadata
   const [title, setTitle] = useState("");
   const [patientName, setPatientName] = useState("");
   const [visitType, setVisitType] = useState<VisitType>("consultation");
-  const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Processing state
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState("");
+  // Transcript
+  const [rawText, setRawText] = useState<string | null>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<ChunkMatch[]>([]);
+
+  // Template + generation state
+  const [selectedTemplateId, setSelectedTemplateId] = useState(
+    templateParam || getDefaultTemplate().id
+  );
+  const [doctorNotes, setDoctorNotes] = useState("");
+  const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
+
   const [error, setError] = useState<string | null>(null);
 
-  // Audio recorder
-  const recorder = useAudioRecorder();
+  // Auto-create visit on mount (so audio can be attached immediately)
+  useEffect(() => {
+    if (visitId) return;
 
-  const getLocalizedHref = (href: string) => {
-    const base = locale === "sk" ? "" : `/${locale}`;
-    return `${base}${href}`;
-  };
-
-  const createVisit = async (audioFile?: File) => {
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      if (audioFile) {
-        // Create visit with audio
-        setProcessingStatus(tPoc("transcribing"));
-        const formData = new FormData();
-        formData.append("file", audioFile);
-        formData.append("language", locale);
-        if (title.trim()) formData.append("title", title.trim());
-
-        const res = await fetch("/api/process-audio", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || tPoc("errorUpload"));
-        }
-
-        const data = await res.json();
-
-        // Update visit with patient name and visit type
-        if (patientName.trim() || visitType !== "consultation") {
-          await fetch(`/api/visits/${data.visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              patient_name: patientName.trim() || null,
-              visit_type: visitType,
-            }),
-          });
-        }
-
-        router.push(getLocalizedHref(`/visits/${data.visitId}`));
-      } else {
-        // Create visit without audio
+    const createVisit = async () => {
+      setIsCreating(true);
+      try {
         const res = await fetch("/api/visits", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: title.trim() || null,
-            patient_name: patientName.trim() || null,
-            visit_type: visitType,
             language: locale,
+            ...(templateParam ? { metadata: { template_id: templateParam } } : {}),
           }),
         });
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Failed to create visit");
-        }
+        if (!res.ok) throw new Error("Failed to create visit");
 
         const visit = await res.json();
-        router.push(getLocalizedHref(`/visits/${visit.id}`));
+        setVisitId(visit.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to create visit");
+      } finally {
+        setIsCreating(false);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create visit");
-    } finally {
-      setIsProcessing(false);
-      setProcessingStatus("");
-    }
-  };
+    };
 
-  const handleProcessUpload = () => {
-    if (!file) {
-      setError(tPoc("errorNoFile"));
-      return;
-    }
-    createVisit(file);
-  };
-
-  const handleProcessRecording = () => {
-    if (!recorder.audioBlob) return;
-    const audioFile = new File([recorder.audioBlob], "recording.webm", {
-      type: recorder.audioBlob.type,
-    });
-    createVisit(audioFile);
-  };
-
-  const handleCreateWithoutAudio = () => {
     createVisit();
+  }, [visitId, locale, templateParam]);
+
+  // Save metadata on blur
+  const handleMetadataBlur = useCallback(async () => {
+    if (!visitId) return;
+
+    try {
+      await fetch(`/api/visits/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim() || null,
+          patient_name: patientName.trim() || null,
+          visit_type: visitType,
+        }),
+      });
+    } catch {
+      // Silent fail
+    }
+  }, [visitId, title, patientName, visitType]);
+
+  // Auto-save doctor notes (2s debounce)
+  const initialDoctorNotesRef = useRef("");
+  useEffect(() => {
+    if (!visitId || doctorNotes === initialDoctorNotesRef.current) return;
+
+    const timeout = setTimeout(async () => {
+      try {
+        await fetch(`/api/visits/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metadata: { doctor_notes: doctorNotes, template_id: selectedTemplateId },
+          }),
+        });
+        initialDoctorNotesRef.current = doctorNotes;
+      } catch {
+        // Silent fail
+      }
+    }, 2000);
+
+    return () => clearTimeout(timeout);
+  }, [doctorNotes, visitId, selectedTemplateId]);
+
+  const handleTranscriptReady = (text: string) => {
+    setRawText(text);
   };
 
-  const formatDuration = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
+  const handleSearch = async () => {
+    if (!searchQuery.trim() || !visitId) return;
+    setIsSearching(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: searchQuery.trim(), visitId, k: 10 }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || tPoc("errorSearch"));
+      }
+
+      const data = await res.json();
+      setSearchResults(data.matches);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tPoc("errorSearch"));
+    } finally {
+      setIsSearching(false);
+    }
   };
 
-  const busy = isProcessing;
+  const handleGenerate = async () => {
+    if (!visitId) return;
+    setIsGenerating(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visitId,
+          templateId: selectedTemplateId,
+          doctorNotes: doctorNotes || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || tPoc("errorGenerate"));
+      }
+
+      const data = await res.json();
+      setGeneratedNoteHtml(data.generatedNote);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tPoc("errorGenerate"));
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSaveNote = useCallback(async () => {
+    if (!visitId || !generatedNoteHtml) return;
+    setIsSaving(true);
+    setSaveStatus("idle");
+
+    try {
+      const res = await fetch(`/api/visits/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ soap_note: generatedNoteHtml }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save note");
+
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save note");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [visitId, generatedNoteHtml]);
+
+  const isHtmlContent = (content: string) => content.trimStart().startsWith("<");
+  const canGenerate = !!(rawText || doctorNotes.trim());
+  const busy = isCreating || isGenerating;
 
   return (
-    <AppShell>
-      <div className="max-w-2xl">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("newVisit")}</h1>
+    <div className="min-h-screen bg-background">
+      {/* Top bar */}
+      <div className="border-b">
+        <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href={getHref("")}>
+              <HugeiconsIcon icon={ArrowLeft01Icon} size={16} />
+            </Link>
+          </Button>
+          <h1 className="text-lg font-semibold">{t("newVisit")}</h1>
         </div>
+      </div>
 
+      {/* Content */}
+      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
         {/* Error alert */}
         {error && (
-          <Alert variant="destructive" className="mb-4">
+          <Alert variant="destructive">
             <HugeiconsIcon icon={AlertCircleIcon} size={16} />
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        {/* Visit details form */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>{t("form.title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                {t("form.title")}
-              </label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={t("form.titlePlaceholder")}
-                disabled={busy}
-              />
-            </div>
+        {/* Visit metadata */}
+        <div className="space-y-3">
+          <Input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={handleMetadataBlur}
+            placeholder={t("form.titlePlaceholder")}
+            disabled={busy}
+            className="text-lg font-semibold border-none shadow-none px-0 h-auto focus-visible:ring-0"
+          />
+          <div className="flex items-center gap-3">
+            <Input
+              value={patientName}
+              onChange={(e) => setPatientName(e.target.value)}
+              onBlur={handleMetadataBlur}
+              placeholder={t("form.patientNamePlaceholder")}
+              disabled={busy}
+              className="h-8 max-w-48 text-sm"
+            />
+            <select
+              value={visitType}
+              onChange={(e) => {
+                setVisitType(e.target.value as VisitType);
+                setTimeout(handleMetadataBlur, 0);
+              }}
+              disabled={busy}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {VISIT_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {t(`type.${type}`)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                {t("form.patientName")}
-              </label>
-              <Input
-                value={patientName}
-                onChange={(e) => setPatientName(e.target.value)}
-                placeholder={t("form.patientNamePlaceholder")}
-                disabled={busy}
-              />
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-sm font-medium">
-                {t("form.visitType")}
-              </label>
-              <select
-                value={visitType}
-                onChange={(e) => setVisitType(e.target.value as VisitType)}
-                disabled={busy}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                {VISIT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {t(`type.${type}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Audio input */}
-        <Card className="mb-6">
-          <CardContent>
-            <Tabs defaultValue="upload">
-              <TabsList className="mb-4 w-full">
-                <TabsTrigger value="upload" className="flex-1">
-                  <HugeiconsIcon icon={Upload04Icon} size={16} />
-                  {tPoc("tabUpload")}
-                </TabsTrigger>
-                <TabsTrigger value="record" className="flex-1">
-                  <HugeiconsIcon icon={Mic01Icon} size={16} />
-                  {tPoc("tabRecord")}
-                </TabsTrigger>
-              </TabsList>
-
-              {/* Upload tab */}
-              <TabsContent value="upload">
-                <div className="space-y-4">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium">
-                      {tPoc("fileLabel")}
-                    </label>
-                    <Input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="audio/*"
-                      disabled={busy}
-                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                    />
-                  </div>
-                  <Button
-                    onClick={handleProcessUpload}
-                    disabled={!file || busy}
-                    className="w-full"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <HugeiconsIcon
-                          icon={Loading03Icon}
-                          size={16}
-                          className="animate-spin"
-                        />
-                        {processingStatus || tPoc("processing")}
-                      </>
-                    ) : (
-                      <>
-                        <HugeiconsIcon icon={Upload04Icon} size={16} />
-                        {tPoc("process")}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </TabsContent>
-
-              {/* Record tab */}
-              <TabsContent value="record">
-                <div className="space-y-4">
-                  {recorder.error && (
-                    <Alert variant="destructive">
-                      <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                      <AlertDescription>{tPoc("errorRecording")}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div className="flex items-center gap-3">
-                    {!recorder.isRecording ? (
-                      <Button
-                        onClick={recorder.start}
-                        disabled={busy}
-                        variant="default"
-                      >
-                        <HugeiconsIcon icon={Mic01Icon} size={16} />
-                        {tPoc("recordStart")}
-                      </Button>
-                    ) : (
-                      <Button onClick={recorder.stop} variant="destructive">
-                        <HugeiconsIcon icon={StopIcon} size={16} />
-                        {tPoc("recordStop")}
-                      </Button>
-                    )}
-
-                    {(recorder.isRecording || recorder.duration > 0) && (
-                      <span className="tabular-nums text-sm text-muted-foreground">
-                        {recorder.isRecording && (
-                          <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                        )}
-                        {formatDuration(recorder.duration)}
-                      </span>
-                    )}
-                  </div>
-
-                  {recorder.audioUrl && (
-                    <audio src={recorder.audioUrl} controls className="w-full" />
-                  )}
-
-                  <Button
-                    onClick={handleProcessRecording}
-                    disabled={!recorder.audioBlob || busy}
-                    className="w-full"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <HugeiconsIcon
-                          icon={Loading03Icon}
-                          size={16}
-                          className="animate-spin"
-                        />
-                        {processingStatus || tPoc("processing")}
-                      </>
-                    ) : (
-                      <>
-                        <HugeiconsIcon icon={Mic01Icon} size={16} />
-                        {tPoc("processRecording")}
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        {/* Processing skeleton */}
-        {isProcessing && (
-          <Card className="mb-6">
-            <CardContent className="space-y-3">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-2/3" />
+        {/* Audio Section */}
+        {visitId ? (
+          <AudioSection
+            visitId={visitId}
+            locale={locale}
+            hasTranscript={!!rawText}
+            disabled={busy}
+            onTranscriptReady={handleTranscriptReady}
+            onError={(msg) => setError(msg || null)}
+          />
+        ) : (
+          <Card>
+            <CardContent className="py-6">
+              <Skeleton className="mx-auto h-4 w-48" />
             </CardContent>
           </Card>
         )}
 
-        {/* Create without audio */}
-        <div className="text-center">
-          <Button
-            variant="outline"
-            onClick={handleCreateWithoutAudio}
+        {/* Template Selector */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">
+            {tTemplates("selectTemplate")}
+          </label>
+          <TemplateSelector
+            value={selectedTemplateId}
+            onChange={setSelectedTemplateId}
             disabled={busy}
-          >
-            <HugeiconsIcon icon={Add01Icon} size={16} />
-            {t("form.createVisit")} (without audio)
-          </Button>
+          />
         </div>
+
+        {/* Doctor's Notes + AI Transcript tabs */}
+        <Tabs defaultValue="notes">
+          <TabsList className="w-full">
+            <TabsTrigger value="notes" className="flex-1">
+              {tTemplates("doctorNotes")}
+            </TabsTrigger>
+            <TabsTrigger value="transcript" className="flex-1">
+              {t("detail.transcript")}
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Doctor's Notes tab */}
+          <TabsContent value="notes">
+            <TiptapEditor
+              content={doctorNotes}
+              onChange={setDoctorNotes}
+              placeholder={tTemplates("doctorNotesPlaceholder")}
+              className="min-h-48"
+            />
+          </TabsContent>
+
+          {/* AI Transcript tab */}
+          <TabsContent value="transcript" className="space-y-4">
+            {rawText ? (
+              <>
+                <Card>
+                  <CardContent>
+                    <ScrollArea className="h-64">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                        {rawText}
+                      </p>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+
+                {/* Semantic search */}
+                <Card>
+                  <CardContent>
+                    <form
+                      className="flex gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleSearch();
+                      }}
+                    >
+                      <div className="relative flex-1">
+                        <Input
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder={t("detail.searchPlaceholder")}
+                          disabled={isSearching}
+                        />
+                      </div>
+                      <Button
+                        type="submit"
+                        disabled={!searchQuery.trim() || isSearching}
+                        variant="outline"
+                      >
+                        {isSearching ? (
+                          <HugeiconsIcon
+                            icon={Loading03Icon}
+                            size={16}
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <HugeiconsIcon icon={Search01Icon} size={16} />
+                        )}
+                        {t("detail.search")}
+                      </Button>
+                    </form>
+
+                    {searchResults.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        {searchResults.map((match) => (
+                          <div
+                            key={match.id}
+                            className="rounded-lg border p-3 text-sm"
+                          >
+                            <div className="mb-1 flex items-center justify-between">
+                              <span className="font-medium text-muted-foreground">
+                                {tPoc("chunk")} #{match.chunk_index + 1}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {tPoc("similarity")}:{" "}
+                                {(match.similarity * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                            <p className="leading-relaxed">{match.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  {t("detail.noTranscript")}
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
+
+        {/* Generate button */}
+        <Button
+          onClick={handleGenerate}
+          disabled={isGenerating || !canGenerate || !visitId}
+          className="w-full"
+        >
+          {isGenerating ? (
+            <>
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                size={16}
+                className="animate-spin"
+              />
+              {t("detail.generating")}
+            </>
+          ) : (
+            <>
+              <HugeiconsIcon icon={MagicWand01Icon} size={16} />
+              {t("detail.generate")}
+            </>
+          )}
+        </Button>
+
+        {/* Generation skeleton */}
+        {isGenerating && (
+          <Card>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-4/5" />
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Generated Note */}
+        {generatedNoteHtml && !isGenerating && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <HugeiconsIcon icon={Note01Icon} size={18} />
+                  {t("detail.soapNote")}
+                </CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSaveNote}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <>
+                      <HugeiconsIcon
+                        icon={Loading03Icon}
+                        size={14}
+                        className="animate-spin"
+                      />
+                      {t("detail.saving")}
+                    </>
+                  ) : saveStatus === "saved" ? (
+                    <>
+                      <HugeiconsIcon icon={Tick02Icon} size={14} />
+                      {t("detail.saved")}
+                    </>
+                  ) : (
+                    <>
+                      <HugeiconsIcon icon={FloppyDiskIcon} size={14} />
+                      {t("detail.saveNote")}
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isHtmlContent(generatedNoteHtml) ? (
+                <TiptapEditor
+                  content={generatedNoteHtml}
+                  onChange={setGeneratedNoteHtml}
+                  className="min-h-64"
+                />
+              ) : (
+                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {generatedNoteHtml}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
       </div>
-    </AppShell>
+    </div>
   );
 }

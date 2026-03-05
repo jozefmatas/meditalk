@@ -8,6 +8,7 @@ import {
   Search01Icon,
   Home01Icon,
   Add01Icon,
+  NoteIcon,
 } from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import {
@@ -59,6 +60,18 @@ export function NavMain({ onSearchClick }: NavMainProps) {
               <Link href={getHref("/visits/new")}>
                 <HugeiconsIcon icon={Add01Icon} size={16} />
                 <span>{t("newVisit")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={pathname.includes("/templates")}
+              tooltip={t("templates")}
+            >
+              <Link href={getHref("/templates")}>
+                <HugeiconsIcon icon={NoteIcon} size={16} />
+                <span>{t("templates")}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

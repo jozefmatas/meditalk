@@ -61,6 +61,7 @@ export interface CreateVisitRequest {
   visit_type?: VisitType;
   visit_date?: string;
   language?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateVisitRequest {
@@ -91,9 +92,12 @@ export interface SearchResponse {
 }
 
 export interface GenerateResponse {
-  soap: string;
+  generatedNote: string;
   letter: string;
   usedChunks: string[];
+  templateId: string;
+  /** @deprecated Use generatedNote instead */
+  soap?: string;
 }
 
 export interface VisitListResponse {

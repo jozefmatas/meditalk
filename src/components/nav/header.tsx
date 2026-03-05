@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -23,6 +24,7 @@ interface BreadcrumbData {
 export function Header() {
   const t = useTranslations("nav");
   const tVisits = useTranslations("visits");
+  const tTemplates = useTranslations("templates");
   const pathname = usePathname();
   const getHref = useLocalizedHref();
 
@@ -42,6 +44,14 @@ export function Header() {
         const visitId = segments[1];
         crumbs.push({ label: `${visitId.slice(0, 8)}...` });
       }
+    } else if (segments[0] === "templates") {
+      crumbs.push({ label: t("templates"), href: getHref("/templates") });
+
+      if (segments[1]) {
+        const templateId = segments[1];
+        const nameKey = `${templateId}.name`;
+        crumbs.push({ label: tTemplates(nameKey) });
+      }
     } else if (segments[0] === "settings") {
       crumbs.push({ label: t("settings") });
     }
@@ -60,16 +70,18 @@ export function Header() {
           {breadcrumbs.map((crumb, index) => {
             const isLast = index === breadcrumbs.length - 1;
             return (
-              <BreadcrumbItem key={index}>
+              <React.Fragment key={index}>
                 {index > 0 && <BreadcrumbSeparator />}
-                {!isLast && crumb.href ? (
-                  <BreadcrumbLink asChild>
-                    <Link href={crumb.href}>{crumb.label}</Link>
-                  </BreadcrumbLink>
-                ) : (
-                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                )}
-              </BreadcrumbItem>
+                <BreadcrumbItem>
+                  {!isLast && crumb.href ? (
+                    <BreadcrumbLink asChild>
+                      <Link href={crumb.href}>{crumb.label}</Link>
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+              </React.Fragment>
             );
           })}
         </BreadcrumbList>

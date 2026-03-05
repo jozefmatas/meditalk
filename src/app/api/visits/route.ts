@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         visit_date: body.visit_date || new Date().toISOString(),
         language: body.language || 'sk',
         status: 'draft',
-        metadata: {},
+        metadata: body.metadata || {},
       })
       .select()
       .single();
