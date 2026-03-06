@@ -4,7 +4,7 @@ import { useLocale } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { routing, type Locale } from '@/i18n/routing';
 import { useTransition } from 'react';
-import { Button } from '@/components/ui/button';
+import { Button } from '@/components/shared/button';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -13,7 +13,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
+} from '@/components/shared/dropdown-menu';
 
 const localeNames: Record<Locale, string> = {
   sk: 'Slovenčina',

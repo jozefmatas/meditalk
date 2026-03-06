@@ -13,12 +13,12 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { routing, type Locale } from "@/i18n/routing";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useSidebar } from "@/components/shared/sidebar";
 import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-} from "@/components/ui/sidebar";
+} from "@/components/shared/sidebar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -28,7 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/shared/dropdown-menu";
 
 const localeNames: Record<Locale, string> = {
   sk: "Slovenčina",

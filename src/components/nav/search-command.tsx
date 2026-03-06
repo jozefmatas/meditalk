@@ -16,7 +16,7 @@ import {
   CommandGroup,
   CommandItem,
   CommandSeparator,
-} from "@/components/ui/command";
+} from "@/components/shared/command";
 
 interface SearchCommandProps {
   open: boolean;

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/shared/card";
+import { Button } from "@/components/shared/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Calendar01Icon,

@@ -4,7 +4,7 @@ import { use } from "react";
 import { useTranslations } from "next-intl";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NoteIcon } from "@hugeicons/core-free-icons";
 import { getTemplateById } from "@/lib/templates";

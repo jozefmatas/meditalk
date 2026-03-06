@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { VisitCard } from "./visit-card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/shared/input";
+import { Button } from "@/components/shared/button";
+import { Skeleton } from "@/components/shared/skeleton";
+import { Alert, AlertDescription } from "@/components/shared/alert";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Search01Icon,

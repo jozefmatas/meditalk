@@ -5,13 +5,13 @@ import { useTranslations, useLocale } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/shared/button";
+import { Input } from "@/components/shared/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
+import { ScrollArea } from "@/components/shared/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shared/tabs";
+import { Alert, AlertDescription } from "@/components/shared/alert";
+import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Search01Icon,

@@ -17,7 +17,7 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
-} from "@/components/ui/sidebar";
+} from "@/components/shared/sidebar";
 
 interface NavMainProps {
   onSearchClick: () => void;

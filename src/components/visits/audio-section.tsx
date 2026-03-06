@@ -2,17 +2,17 @@
 
 import { useState, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/shared/button";
+import { Input } from "@/components/shared/input";
+import { Card, CardContent } from "@/components/shared/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/shared/tabs";
+import { Alert, AlertDescription } from "@/components/shared/alert";
+import { Skeleton } from "@/components/shared/skeleton";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+} from "@/components/shared/collapsible";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Mic01Icon,

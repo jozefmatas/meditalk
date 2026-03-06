@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
+import { Button } from "@/components/shared/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, NoteIcon } from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";

@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
 import { LanguageSwitcher } from "@/components/language-switcher";
 
 export default function SettingsPage() {

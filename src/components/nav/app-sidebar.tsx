@@ -6,7 +6,7 @@ import {
   SidebarContent,
   SidebarHeader,
   SidebarRail,
-} from "@/components/ui/sidebar";
+} from "@/components/shared/sidebar";
 import { ClinicSwitcher } from "./clinic-switcher";
 import { NavMain } from "./nav-main";
 import { NavVisits } from "./nav-visits";

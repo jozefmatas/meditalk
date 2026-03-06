@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
+import { SidebarTrigger } from "@/components/shared/sidebar";
+import { Separator } from "@/components/shared/separator";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -14,7 +14,7 @@ import {
   BreadcrumbLink,
   BreadcrumbPage,
   BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
+} from "@/components/shared/breadcrumb";
 
 interface BreadcrumbData {
   label: string;

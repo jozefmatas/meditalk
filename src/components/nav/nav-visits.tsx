@@ -15,14 +15,14 @@ import {
   SidebarMenuButton,
   SidebarMenuAction,
   SidebarMenuSkeleton,
-} from "@/components/ui/sidebar";
+} from "@/components/shared/sidebar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/shared/dropdown-menu";
 
 const statusColors: Record<string, string> = {
   draft: "bg-amber-500",
