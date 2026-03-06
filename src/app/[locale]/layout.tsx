@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Figtree } from "next/font/google";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import "../globals.css";
 
-const inter = Inter({
+const figtree = Figtree({
   subsets: ["latin", "latin-ext"],
 });
 
@@ -51,7 +51,7 @@ export default async function LocaleLayout({
         />
       </head>
       <body
-        className={`${inter.className} antialiased`}
+        className={`${figtree.className} antialiased`}
       >
         <NextIntlClientProvider messages={messages}>
           {children}

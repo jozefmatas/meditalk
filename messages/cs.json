@@ -34,7 +34,10 @@
     "openVisit": "Otevřít návštěvu",
     "markComplete": "Označit jako dokončenou",
     "deleteVisit": "Smazat návštěvu",
-    "templates": "Šablony"
+    "templates": "Šablony",
+    "encounters": "Návštěvy",
+    "newEncounter": "Nová návštěva",
+    "latestEncounters": "Poslední"
   },
   "visits": {
     "title": "Návštěvy",

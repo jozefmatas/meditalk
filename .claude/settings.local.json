@@ -62,7 +62,17 @@
       "Bash(/Users/jozefmatas/Documents/meditalk/meditalk/src/components/shared/tabs/index.ts << 'EOF'\nexport { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants } from \"./Tabs\";\nEOF)",
       "Bash(/Users/jozefmatas/Documents/meditalk/meditalk/src/components/shared/textarea/index.ts << 'EOF'\nexport { Textarea } from \"./Textarea\";\nEOF)",
       "Bash(/Users/jozefmatas/Documents/meditalk/meditalk/src/components/shared/tooltip/index.ts << 'EOF'\nexport { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from \"./Tooltip\";\nEOF)",
-      "Bash(__NEW_LINE_78598d8d5e8f2bee__ echo \"All 19 index.ts files updated\")"
+      "Bash(__NEW_LINE_78598d8d5e8f2bee__ echo \"All 19 index.ts files updated\")",
+      "Bash(timeout 30 npx storybook dev:*)",
+      "Bash(# Check what CSS storybook actually serves - look for tailwind classes curl -s http://localhost:8004/iframe.html)",
+      "Bash(# Check what shadcn/tailwind.css contains - specifically button-related styles cat node_modules/shadcn/tailwind.css)",
+      "Bash(# Kill any running storybook instances lsof -ti:8001,8002,8003,8004)",
+      "Bash(xargs kill:*)",
+      "Bash(lsof:*)",
+      "Bash(npm uninstall:*)",
+      "mcp__figma__get_design_context",
+      "Bash(git checkout:*)",
+      "Bash(npx vitest:*)"
     ],
     "deny": [],
     "ask": []

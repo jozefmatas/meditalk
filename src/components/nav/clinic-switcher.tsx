@@ -1,11 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  StethoscopeIcon,
   ArrowDown01Icon,
   Settings01Icon,
   Logout01Icon,
@@ -49,6 +49,22 @@ export function ClinicSwitcher() {
   const router = useRouter();
   const getHref = useLocalizedHref();
   const { isMobile } = useSidebar();
+  const [userName, setUserName] = useState<string>("...");
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data.user;
+      const name =
+        user?.user_metadata?.full_name ||
+        user?.user_metadata?.name ||
+        user?.email?.split("@")[0] ||
+        "User";
+      setUserName(name);
+    });
+  }, []);
+
+  const initial = userName !== "..." ? userName[0].toUpperCase() : "?";
 
   const handleSignOut = async () => {
     const supabase = createClient();
@@ -69,23 +85,34 @@ export function ClinicSwitcher() {
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
+            {/* Figma footer: flex gap-2 (8px), items-center, no internal padding.
+                size="lg" keeps collapsed-icon behavior; h-auto + p-0 matches Figma sizing.
+                Avatar 32px centers at 24px from edge, matching nav icon centers. */}
             <SidebarMenuButton
               size="lg"
-              className="data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+              className="h-auto gap-2 rounded-none p-2 [&_svg]:size-5 data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
             >
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <HugeiconsIcon icon={StethoscopeIcon} size={18} />
+              {/* Figma: size-8 (32px), rounded-lg, border border-sidebar-border, bg-background */}
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-sidebar-border bg-background text-sm text-sidebar-foreground">
+                {initial}
               </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">MediTalk</span>
+              {/* Figma: flex-col, flex-1, h-[30px], justify-between, leading-tight */}
+              <div className="flex flex-1 flex-col justify-between overflow-hidden leading-tight">
+                <span className="truncate text-sm text-sidebar-foreground">
+                  {userName}
+                </span>
+                <span className="truncate text-xs text-sidebar-foreground/65">
+                  MediTalk
+                </span>
               </div>
-              <HugeiconsIcon icon={ArrowDown01Icon} size={16} className="ml-auto" />
+              {/* Figma: 20×20 arrow icon */}
+              <HugeiconsIcon icon={ArrowDown01Icon} size={20} className="shrink-0 text-sidebar-foreground" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
-            align="start"
-            side={isMobile ? "bottom" : "right"}
+            align="end"
+            side={isMobile ? "top" : "right"}
             sideOffset={4}
           >
             <DropdownMenuItem asChild>

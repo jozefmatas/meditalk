@@ -8,8 +8,6 @@ import { MoreHorizontalIcon, Delete01Icon, Tick02Icon, LinkSquare01Icon } from "
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useSidebarVisits } from "@/hooks/use-sidebar-visits";
 import {
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -30,6 +28,9 @@ const statusColors: Record<string, string> = {
   archived: "bg-gray-400",
 };
 
+/** Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px). */
+const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg";
+
 export function NavVisits() {
   const t = useTranslations("visits");
   const tNav = useTranslations("nav");
@@ -39,8 +40,12 @@ export function NavVisits() {
     useSidebarVisits();
 
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>{t("title")}</SidebarGroupLabel>
+    // Scroll only happens here; "Latest" label sticks at the top
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden">
+      {/* Sticky label — stays visible while scrolling the list */}
+      <span className="sticky top-0 z-10 bg-sidebar px-2 pb-1 text-xs text-sidebar-foreground/65">
+        {tNav("latestEncounters")}
+      </span>
       <SidebarMenu>
         {isLoading && visits.length === 0 ? (
           Array.from({ length: 5 }).map((_, i) => (
@@ -49,7 +54,7 @@ export function NavVisits() {
             </SidebarMenuItem>
           ))
         ) : visits.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+          <div className="px-2 py-4 text-center text-xs text-sidebar-foreground/65">
             {t("empty.title")}
           </div>
         ) : (
@@ -60,11 +65,13 @@ export function NavVisits() {
 
               return (
                 <SidebarMenuItem key={visit.id}>
-                  <SidebarMenuButton asChild isActive={isActive}>
+                  <SidebarMenuButton asChild isActive={isActive} className={itemClass}>
                     <Link href={visitHref} title={visit.title || t("untitled")}>
-                      <span
-                        className={`size-2 shrink-0 rounded-full ${statusColors[visit.status] || statusColors.draft}`}
-                      />
+                      <span className="flex size-5 shrink-0 items-center justify-center">
+                        <span
+                          className={`size-1.5 rounded-full ${statusColors[visit.status] || statusColors.draft}`}
+                        />
+                      </span>
                       <span>{visit.title || t("untitled")}</span>
                     </Link>
                   </SidebarMenuButton>
@@ -107,7 +114,7 @@ export function NavVisits() {
               <SidebarMenuItem>
                 <SidebarMenuButton
                   onClick={loadMore}
-                  className="text-sidebar-foreground/70"
+                  className={`${itemClass} text-sidebar-foreground/70`}
                 >
                   <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
                   <span>{tNav("moreVisits")}</span>
@@ -117,6 +124,6 @@ export function NavVisits() {
           </>
         )}
       </SidebarMenu>
-    </SidebarGroup>
+    </div>
   );
 }

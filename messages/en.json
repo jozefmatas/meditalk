@@ -34,7 +34,10 @@
     "openVisit": "Open Visit",
     "markComplete": "Mark Complete",
     "deleteVisit": "Delete Visit",
-    "templates": "Templates"
+    "templates": "Templates",
+    "encounters": "Encounters",
+    "newEncounter": "New encounter",
+    "latestEncounters": "Latest"
   },
   "visits": {
     "title": "Visits",
