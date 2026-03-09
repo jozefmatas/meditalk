@@ -72,7 +72,8 @@
       "Bash(npm uninstall:*)",
       "mcp__figma__get_design_context",
       "Bash(git checkout:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(npx storybook:*)"
     ],
     "deny": [],
     "ask": []

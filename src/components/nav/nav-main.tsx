@@ -45,11 +45,11 @@ export function NavMain({ onSearchClick }: NavMainProps) {
         <SidebarMenuItem>
           <SidebarMenuButton
             asChild
-            isActive={pathname.includes("/visits/new")}
+            isActive={pathname.includes("/encounters/new")}
             tooltip={t("newEncounter")}
             className={itemClass}
           >
-            <Link href={getHref("/visits/new")}>
+            <Link href={getHref("/encounters/new")}>
               <HugeiconsIcon icon={AddSquareIcon} size={20} className="text-primary" />
               <span>{t("newEncounter")}</span>
             </Link>

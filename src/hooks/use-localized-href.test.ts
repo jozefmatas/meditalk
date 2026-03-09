@@ -12,7 +12,7 @@ describe("useLocalizedHref", () => {
     mockLocale.mockReturnValue("sk");
     const { result } = renderHook(() => useLocalizedHref());
 
-    expect(result.current("/visits/new")).toBe("/visits/new");
+    expect(result.current("/encounters/new")).toBe("/encounters/new");
     expect(result.current("/settings")).toBe("/settings");
   });
 
@@ -20,7 +20,7 @@ describe("useLocalizedHref", () => {
     mockLocale.mockReturnValue("cs");
     const { result } = renderHook(() => useLocalizedHref());
 
-    expect(result.current("/visits/new")).toBe("/cs/visits/new");
+    expect(result.current("/encounters/new")).toBe("/cs/encounters/new");
     expect(result.current("/settings")).toBe("/cs/settings");
   });
 
@@ -28,7 +28,7 @@ describe("useLocalizedHref", () => {
     mockLocale.mockReturnValue("en");
     const { result } = renderHook(() => useLocalizedHref());
 
-    expect(result.current("/visits/new")).toBe("/en/visits/new");
+    expect(result.current("/encounters/new")).toBe("/en/encounters/new");
   });
 
   it("returns / for empty href on default locale", () => {

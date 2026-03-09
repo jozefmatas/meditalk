@@ -59,7 +59,7 @@ export function VisitCard({ visit, onDelete }: VisitCardProps) {
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <Link
-            href={getLocalizedHref(`/visits/${visit.id}`)}
+            href={getLocalizedHref(`/encounters/${visit.id}`)}
             className="flex-1 min-w-0"
           >
             <div className="space-y-2">

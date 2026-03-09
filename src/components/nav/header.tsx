@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
+import { usePageTitle } from "./page-title-context";
 import { SidebarTrigger } from "@/components/shared/sidebar";
 import { Separator } from "@/components/shared/separator";
 import {
@@ -27,36 +28,44 @@ export function Header() {
   const tTemplates = useTranslations("templates");
   const pathname = usePathname();
   const getHref = useLocalizedHref();
+  const { pageTitle } = usePageTitle();
 
   const buildBreadcrumbs = (): BreadcrumbData[] => {
-    const crumbs: BreadcrumbData[] = [{ label: t("dashboard"), href: getHref("") }];
-
-    // Remove locale prefix for analysis
-    const cleanPath = pathname.replace(/^\/(sk|cs|en)/, "").replace(/^\//, "");
+    const cleanPath = pathname.replace(/^\/(sk|cs|en)(?=\/|$)/, "").replace(/^\//, "");
     const segments = cleanPath.split("/").filter(Boolean);
 
-    if (segments[0] === "visits") {
-      crumbs.push({ label: tVisits("title"), href: getHref("") });
+    if (segments[0] === "encounters") {
+      const crumbs: BreadcrumbData[] = [
+        { label: t("encounters"), href: getHref("") },
+      ];
 
       if (segments[1] === "new") {
-        crumbs.push({ label: tVisits("newVisit") });
+        crumbs.push({ label: tVisits("untitled") });
       } else if (segments[1]) {
-        const visitId = segments[1];
-        crumbs.push({ label: `${visitId.slice(0, 8)}...` });
+        crumbs.push({ label: pageTitle || tVisits("untitled") });
       }
-    } else if (segments[0] === "templates") {
-      crumbs.push({ label: t("templates"), href: getHref("/templates") });
 
-      if (segments[1]) {
-        const templateId = segments[1];
-        const nameKey = `${templateId}.name`;
-        crumbs.push({ label: tTemplates(nameKey) });
-      }
-    } else if (segments[0] === "settings") {
-      crumbs.push({ label: t("settings") });
+      return crumbs;
     }
 
-    return crumbs;
+    if (segments[0] === "templates") {
+      const crumbs: BreadcrumbData[] = [
+        { label: t("templates"), href: getHref("/templates") },
+      ];
+
+      if (segments[1]) {
+        crumbs.push({ label: tTemplates(`${segments[1]}.name`) });
+      }
+
+      return crumbs;
+    }
+
+    if (segments[0] === "settings") {
+      return [{ label: t("settings") }];
+    }
+
+    // Root — this is the encounters page
+    return [{ label: t("encounters") }];
   };
 
   const breadcrumbs = buildBreadcrumbs();

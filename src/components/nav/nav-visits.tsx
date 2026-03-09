@@ -60,7 +60,7 @@ export function NavVisits() {
         ) : (
           <>
             {visits.map((visit) => {
-              const visitHref = getHref(`/visits/${visit.id}`);
+              const visitHref = getHref(`/encounters/${visit.id}`);
               const isActive = pathname === visitHref;
 
               return (

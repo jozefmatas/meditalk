@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
+import { usePageTitle } from "@/components/nav/page-title-context";
 import { Button } from "@/components/shared/button";
 import { Input } from "@/components/shared/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
@@ -50,6 +51,7 @@ export default function VisitDetailPage({ params }: PageProps) {
   const tPoc = useTranslations("poc");
   const locale = useLocale();
   const router = useRouter();
+  const { setPageTitle } = usePageTitle();
 
   // Visit state
   const [visit, setVisit] = useState<Visit | null>(null);
@@ -125,6 +127,12 @@ export default function VisitDetailPage({ params }: PageProps) {
 
     fetchVisit();
   }, [visitId]);
+
+  // Sync visit title to header breadcrumb
+  useEffect(() => {
+    setPageTitle(title || null);
+    return () => setPageTitle(null);
+  }, [title, setPageTitle]);
 
   // Auto-save doctor notes (2s debounce)
   useEffect(() => {

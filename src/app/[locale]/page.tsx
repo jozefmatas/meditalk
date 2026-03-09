@@ -120,7 +120,7 @@ export default function DashboardPage() {
               <p className="text-sm text-muted-foreground">{tVisits("empty.description")}</p>
             </div>
             <Button asChild>
-              <Link href={getHref("/visits/new")}>
+              <Link href={getHref("/encounters/new")}>
                 <HugeiconsIcon icon={Add01Icon} size={16} />
                 {tNav("newVisit")}
               </Link>

@@ -109,7 +109,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
               {results.map((visit) => (
                 <CommandItem
                   key={visit.id}
-                  onSelect={() => navigate(getHref(`/visits/${visit.id}`))}
+                  onSelect={() => navigate(getHref(`/encounters/${visit.id}`))}
                 >
                   <span className="flex-1 truncate">
                     {visit.title || t("untitled")}
@@ -130,7 +130,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
               <HugeiconsIcon icon={Home01Icon} size={16} />
               <span>{tNav("dashboard")}</span>
             </CommandItem>
-            <CommandItem onSelect={() => navigate(getHref("/visits/new"))}>
+            <CommandItem onSelect={() => navigate(getHref("/encounters/new"))}>
               <HugeiconsIcon icon={Add01Icon} size={16} />
               <span>{tNav("newVisit")}</span>
             </CommandItem>
