@@ -23,12 +23,20 @@ const variantFixes: Partial<Record<string, string>> = {
     "hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent/50",
 };
 
-function Button({ variant = "default", className, ...props }: ButtonProps) {
+/** default & lg → size-5 icons; all others → size-4 (overrides generated xs/sm smaller defaults) */
+const iconSize5 = "[&_svg:not([class*='size-'])]:size-5";
+const iconSize4 = "[&_svg:not([class*='size-'])]:size-4";
+
+function Button({ variant = "default", size = "default", className, ...props }: ButtonProps) {
   const fix = variant ? variantFixes[variant] : undefined;
+  const iconFix = size === "default" || size === "lg" || size === "icon" || size === "icon-lg"
+    ? iconSize5
+    : iconSize4;
   return (
     <GeneratedButton
       variant={variant}
-      className={cn(fix, className)}
+      size={size}
+      className={cn(fix, iconFix, className)}
       {...props}
     />
   );

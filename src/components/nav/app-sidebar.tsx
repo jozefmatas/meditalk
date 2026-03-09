@@ -7,7 +7,6 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarRail,
 } from "@/components/shared/sidebar";
 import { ClinicSwitcher } from "./clinic-switcher";
 import { NavMain } from "./nav-main";
@@ -20,11 +19,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <>
-      <Sidebar collapsible="icon" {...props}>
+      <Sidebar collapsible="icon" className="group-data-[side=left]:border-r-0" {...props}>
         {/* Figma node 100:1619 — entire content area has p-2, sidebar root has 0 padding */}
         <SidebarContent className="gap-0 overflow-hidden p-2">
           {/* Brand + nav — sticky top, never scrolls */}
-          <div className="flex shrink-0 flex-col gap-3 pb-5">
+          <div className="flex shrink-0 flex-col gap-3 pb-6">
             <div className="flex h-9 items-center">
               <div className="flex size-8 shrink-0 items-center justify-center">
                 <MeditalkLogo className="text-primary" />
@@ -43,7 +42,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarFooter className="p-0">
           <ClinicSwitcher />
         </SidebarFooter>
-        <SidebarRail />
+
       </Sidebar>
       <SearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
     </>

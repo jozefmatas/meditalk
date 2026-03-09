@@ -25,7 +25,7 @@ interface NavMainProps {
  * Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px), icons 20px.
  * Overrides SidebarMenuButton defaults: h-8, gap-2, p-2, rounded-md, [&_svg]:size-4.
  */
-const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg [&_svg]:size-5";
+const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg [&_svg]:size-5 group-data-[collapsible=icon]:p-1.5!";
 
 export function NavMain({ onSearchClick }: NavMainProps) {
   const t = useTranslations("nav");

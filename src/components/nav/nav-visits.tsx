@@ -29,7 +29,7 @@ const statusColors: Record<string, string> = {
 };
 
 /** Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px). */
-const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg";
+const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5!";
 
 export function NavVisits() {
   const t = useTranslations("visits");
@@ -77,11 +77,11 @@ export function NavVisits() {
                   </SidebarMenuButton>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <SidebarMenuAction showOnHover>
+                      <SidebarMenuAction showOnHover className="top-2!">
                         <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
                       </SidebarMenuAction>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent side="right" align="start">
+                    <DropdownMenuContent side="right" align="start" className="min-w-44">
                       <DropdownMenuItem asChild>
                         <Link href={visitHref} className="gap-2">
                           <HugeiconsIcon icon={LinkSquare01Icon} size={16} />
@@ -99,8 +99,9 @@ export function NavVisits() {
                       )}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
+                        variant="destructive"
                         onClick={() => deleteVisit(visit.id)}
-                        className="gap-2 text-destructive focus:text-destructive"
+                        className="gap-2"
                       >
                         <HugeiconsIcon icon={Delete01Icon} size={16} />
                         {tNav("deleteVisit")}

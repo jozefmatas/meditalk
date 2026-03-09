@@ -90,27 +90,31 @@ export function ClinicSwitcher() {
                 Avatar 32px centers at 24px from edge, matching nav icon centers. */}
             <SidebarMenuButton
               size="lg"
-              className="h-auto gap-2 rounded-none p-2 [&_svg]:size-5 data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground"
+              className="h-auto gap-2 rounded-none p-2 [&_svg]:size-5 data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground group-data-[collapsible=icon]:w-full! group-data-[collapsible=icon]:h-auto! group-data-[collapsible=icon]:px-2! group-data-[collapsible=icon]:py-2!"
             >
               {/* Figma: size-8 (32px), rounded-lg, border border-sidebar-border, bg-background */}
               <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-sidebar-border bg-background text-sm text-sidebar-foreground">
                 {initial}
               </div>
               {/* Figma: flex-col, flex-1, h-[30px], justify-between, leading-tight */}
-              <div className="flex flex-1 flex-col justify-between overflow-hidden leading-tight">
-                <span className="truncate text-sm text-sidebar-foreground">
+              <div className="flex flex-1 flex-col gap-1 overflow-hidden">
+                <span className="truncate text-sm leading-none text-sidebar-foreground">
                   {userName}
                 </span>
-                <span className="truncate text-xs text-sidebar-foreground/65">
+                <span className="truncate text-xs leading-none text-sidebar-foreground/65">
                   MediTalk
                 </span>
               </div>
               {/* Figma: 20×20 arrow icon */}
-              <HugeiconsIcon icon={ArrowDown01Icon} size={20} className="shrink-0 text-sidebar-foreground" />
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={20}
+                className="shrink-0 text-sidebar-foreground"
+              />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+            className="mb-2 w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
             align="end"
             side={isMobile ? "top" : "right"}
             sideOffset={4}
@@ -123,7 +127,10 @@ export function ClinicSwitcher() {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Language</DropdownMenuLabel>
-            <DropdownMenuRadioGroup value={locale} onValueChange={handleLocaleChange}>
+            <DropdownMenuRadioGroup
+              value={locale}
+              onValueChange={handleLocaleChange}
+            >
               {routing.locales.map((loc) => (
                 <DropdownMenuRadioItem key={loc} value={loc}>
                   {localeFlags[loc]} {localeNames[loc]}
@@ -131,7 +138,11 @@ export function ClinicSwitcher() {
               ))}
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleSignOut} className="gap-2">
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={handleSignOut}
+              className="gap-2"
+            >
               <HugeiconsIcon icon={Logout01Icon} size={16} />
               {tAuth("signOut")}
             </DropdownMenuItem>

@@ -1,4 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Settings01Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { Button } from "./index";
 
 const meta = {
@@ -15,7 +17,7 @@ const meta = {
     },
     size: {
       control: "select",
-      options: ["default", "xs", "sm", "lg", "icon"],
+      options: ["default", "xs", "sm", "lg", "icon", "icon-xs", "icon-sm", "icon-lg"],
     },
     disabled: { control: "boolean" },
   },
@@ -64,6 +66,67 @@ export const AllSizes: Story = {
       <Button size="sm">Small</Button>
       <Button size="default">Default</Button>
       <Button size="lg">Large</Button>
+    </div>
+  ),
+};
+
+export const WithIconAllSizes: Story = {
+  render: () => (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="xs">
+          <HugeiconsIcon icon={PlusSignIcon} />
+          xs
+        </Button>
+        <Button size="sm">
+          <HugeiconsIcon icon={PlusSignIcon} />
+          sm
+        </Button>
+        <Button size="default">
+          <HugeiconsIcon icon={PlusSignIcon} />
+          default
+        </Button>
+        <Button size="lg">
+          <HugeiconsIcon icon={PlusSignIcon} />
+          lg
+        </Button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="icon-xs" variant="ghost">
+          <HugeiconsIcon icon={Settings01Icon} />
+        </Button>
+        <Button size="icon-sm" variant="ghost">
+          <HugeiconsIcon icon={Settings01Icon} />
+        </Button>
+        <Button size="icon" variant="ghost">
+          <HugeiconsIcon icon={Settings01Icon} />
+        </Button>
+        <Button size="icon-lg" variant="ghost">
+          <HugeiconsIcon icon={Settings01Icon} />
+        </Button>
+      </div>
+    </div>
+  ),
+};
+
+export const IconButtonAllVariants: Story = {
+  render: () => (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size="icon" variant="default">
+        <HugeiconsIcon icon={PlusSignIcon} />
+      </Button>
+      <Button size="icon" variant="outline">
+        <HugeiconsIcon icon={PlusSignIcon} />
+      </Button>
+      <Button size="icon" variant="secondary">
+        <HugeiconsIcon icon={PlusSignIcon} />
+      </Button>
+      <Button size="icon" variant="ghost">
+        <HugeiconsIcon icon={PlusSignIcon} />
+      </Button>
+      <Button size="icon" variant="destructive">
+        <HugeiconsIcon icon={PlusSignIcon} />
+      </Button>
     </div>
   ),
 };

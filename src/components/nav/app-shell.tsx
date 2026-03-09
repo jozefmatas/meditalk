@@ -12,9 +12,9 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   return (
     <TooltipProvider>
-      <SidebarProvider>
+      <SidebarProvider className="bg-sidebar">
         <AppSidebar />
-        <SidebarInset>
+        <SidebarInset className="rounded-l-3xl">
           <Header />
           <div className="flex-1 overflow-y-auto p-6">{children}</div>
         </SidebarInset>
