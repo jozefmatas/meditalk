@@ -27,8 +27,14 @@ const variantFixes: Partial<Record<string, string>> = {
 const iconSize5 = "[&_svg:not([class*='size-'])]:size-5";
 const iconSize4 = "[&_svg:not([class*='size-'])]:size-4";
 
+/** Size-level class overrides applied on top of the generated button. */
+const sizeFixes: Partial<Record<string, string>> = {
+  lg: "px-4",
+};
+
 function Button({ variant = "default", size = "default", className, ...props }: ButtonProps) {
   const fix = variant ? variantFixes[variant] : undefined;
+  const sFix = size ? sizeFixes[size] : undefined;
   const iconFix = size === "default" || size === "lg" || size === "icon" || size === "icon-lg"
     ? iconSize5
     : iconSize4;
@@ -36,7 +42,7 @@ function Button({ variant = "default", size = "default", className, ...props }: 
     <GeneratedButton
       variant={variant}
       size={size}
-      className={cn("disabled:pointer-events-auto disabled:cursor-not-allowed", fix, iconFix, className)}
+      className={cn("disabled:pointer-events-auto disabled:cursor-not-allowed", fix, sFix, iconFix, className)}
       {...props}
     />
   );

@@ -28,7 +28,11 @@ export function useAudioRecorder() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const start = useCallback(async () => {
+  /**
+   * Start recording from a given MediaStream (e.g. from LiveWaveform's onStreamReady).
+   * If no stream is provided, requests the microphone directly.
+   */
+  const start = useCallback(async (externalStream?: MediaStream) => {
     try {
       setError(null);
       setAudioBlob(null);
@@ -39,8 +43,8 @@ export function useAudioRecorder() {
         setAudioUrl(null);
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      const stream = externalStream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = externalStream ? null : stream; // only own streams we created
 
       const mimeType = getSupportedMimeType();
       const recorder = new MediaRecorder(stream, { mimeType });
@@ -59,12 +63,14 @@ export function useAudioRecorder() {
         setAudioBlob(blob);
         setAudioUrl(url);
 
-        // Stop all tracks
-        stream.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
+        // Only stop tracks we own (not external streams)
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
       };
 
-      recorder.start(1000); // collect data every second
+      recorder.start(1000);
       setIsRecording(true);
 
       // Duration timer

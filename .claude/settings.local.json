@@ -81,7 +81,9 @@
       "Bash(supabase:*)",
       "Bash(npx supabase:*)",
       "Bash(npm run db:status:*)",
-      "Bash(npm run db:reset:*)"
+      "Bash(npm run db:reset:*)",
+      "WebFetch(domain:ui.elevenlabs.io)",
+      "Bash(npx @elevenlabs/cli@latest components add:*)"
     ],
     "deny": [],
     "ask": []

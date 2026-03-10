@@ -1,48 +1,63 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, use } from "react";
+import { useState, useEffect, useCallback, useRef, use, useMemo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import { usePageTitle } from "@/components/nav/page-title-context";
 import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
+import { TemplateSidebar } from "@/components/encounters/template-sidebar";
+import {
+  FilesPanel,
+  type EncounterFile,
+} from "@/components/encounters/files-panel";
+import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
+import { ReviewTabs, type ReviewTab } from "@/components/encounters/review-tabs";
+import { NoteSectionCard } from "@/components/encounters/note-section-card";
+import { PatientPanel } from "@/components/encounters/patient-panel";
+import {
+  RecordingBar,
+  type RecordingBarRef,
+} from "@/components/encounters/recording-bar";
+import { Badge } from "@/components/shared/badge";
 import { Button } from "@/components/shared/button";
 import { Input } from "@/components/shared/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
-import { ScrollArea } from "@/components/shared/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/shared/tabs";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Search01Icon,
-  Loading03Icon,
-  AlertCircleIcon,
-  Note01Icon,
-  FloppyDiskIcon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
+import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
-import { TemplateSelector } from "@/components/templates/template-selector";
-import { AudioSection } from "@/components/visits/audio-section";
-import { getDefaultTemplate } from "@/lib/templates";
-import type { Encounter, ChunkMatch, EncounterType, SupportedLanguage } from "@/lib/types";
-
-const VISIT_TYPES: EncounterType[] = [
-  "consultation",
-  "follow_up",
-  "preventive",
-  "acute",
-  "specialist_referral",
-  "telemedicine",
-  "home_visit",
-];
+import { getDefaultTemplate, getTemplateById } from "@/lib/templates";
+import {
+  parseSoapSections,
+  allSectionsToPlainText,
+} from "@/lib/parse-soap-sections";
+import type {
+  Encounter,
+  EncounterType,
+  EncounterStatus,
+  SupportedLanguage,
+} from "@/lib/types";
 
 interface PageProps {
   params: Promise<{ visitId: string }>;
 }
 
-export default function VisitDetailPage({ params }: PageProps) {
+function formatVisitDate(dateString: string, locale: string) {
+  return new Date(dateString).toLocaleDateString(locale, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Statuses that show the draft-mode editor layout */
+const DRAFT_STATUSES: EncounterStatus[] = ["draft", "recording", "processing"];
+
+export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
   const t = useTranslations("encounters");
   const tTemplates = useTranslations("templates");
@@ -56,30 +71,35 @@ export default function VisitDetailPage({ params }: PageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Metadata form state
+  // Metadata
   const [title, setTitle] = useState("");
   const [patientName, setPatientName] = useState("");
+  const [patientId, setPatientId] = useState("");
   const [visitType, setEncounterType] = useState<EncounterType>("consultation");
 
-  // Generation language (separate from UI locale)
-  const [generationLanguage, setGenerationLanguage] = useState<SupportedLanguage>("sk");
+  // Generation language
+  const [generationLanguage, setGenerationLanguage] =
+    useState<SupportedLanguage>("sk");
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<ChunkMatch[]>([]);
-
-  // Template + generation state
+  // Template + generation
   const [selectedTemplateId, setSelectedTemplateId] = useState(
     getDefaultTemplate().id
   );
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saved">("idle");
 
-  // Track initial doctor notes for debounced save
+  // Files
+  const [files, setFiles] = useState<EncounterFile[]>([]);
+
+  // Audio recording — blob kept in memory until Generate
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const recordingBarRef = useRef<RecordingBarRef>(null);
+
+  // Review state
+  const [activeTab, setActiveTab] = useState<ReviewTab>("note");
+  const [noteCopied, setNoteCopied] = useState(false);
+
   const initialDoctorNotesRef = useRef("");
 
   const getLocalizedHref = (href: string) => {
@@ -87,7 +107,6 @@ export default function VisitDetailPage({ params }: PageProps) {
     return `${base}${href}`;
   };
 
-  // Update header breadcrumb + sidebar title synchronously
   const updateTitle = useCallback(
     (newTitle: string) => {
       setTitle(newTitle);
@@ -101,7 +120,6 @@ export default function VisitDetailPage({ params }: PageProps) {
     [visitId, setPageTitle]
   );
 
-  // Clear page title on unmount
   useEffect(() => {
     return () => setPageTitle(null);
   }, [setPageTitle]);
@@ -119,13 +137,11 @@ export default function VisitDetailPage({ params }: PageProps) {
         const data: Encounter = await res.json();
         setVisit(data);
 
-        // Populate form fields + sync title to header/sidebar
         updateTitle(data.title || "");
         setPatientName(data.patient_name || "");
         setEncounterType(data.visit_type || "consultation");
         setGenerationLanguage((data.language as SupportedLanguage) || "sk");
 
-        // Restore previous state from metadata
         const meta = data.metadata as Record<string, unknown>;
         if (meta?.template_id) {
           setSelectedTemplateId(meta.template_id as string);
@@ -134,8 +150,13 @@ export default function VisitDetailPage({ params }: PageProps) {
           setDoctorNotes(meta.doctor_notes as string);
           initialDoctorNotesRef.current = meta.doctor_notes as string;
         }
+        if (meta?.files) {
+          setFiles(meta.files as EncounterFile[]);
+        }
+        if (meta?.patient_personal_id) {
+          setPatientId(meta.patient_personal_id as string);
+        }
 
-        // Load existing generated note
         if (data.soap_note) {
           setGeneratedNoteHtml(data.soap_note);
         }
@@ -164,14 +185,13 @@ export default function VisitDetailPage({ params }: PageProps) {
         });
         initialDoctorNotesRef.current = doctorNotes;
       } catch {
-        // Silent fail for auto-save
+        // Silent fail
       }
     }, 2000);
 
     return () => clearTimeout(timeout);
   }, [doctorNotes, visit, visitId]);
 
-  // Save metadata on blur
   const handleMetadataBlur = async () => {
     if (!visit) return;
 
@@ -189,48 +209,116 @@ export default function VisitDetailPage({ params }: PageProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      setVisit((prev) => (prev ? { ...prev, ...updates } as Encounter : prev));
+      setVisit((prev) =>
+        prev ? ({ ...prev, ...updates } as Encounter) : prev
+      );
     } catch {
       // Silent fail
     }
   };
 
-  const handleTranscriptReady = (rawText: string) => {
-    setVisit((prev) => (prev ? { ...prev, raw_text: rawText } : prev));
-  };
+  const handlePatientBlur = async () => {
+    if (!visit) return;
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim() || !visitId) return;
-    setIsSearching(true);
-    setError(null);
+    const updates: Record<string, unknown> = {};
+    if (patientName !== (visit.patient_name || ""))
+      updates.patient_name = patientName.trim() || null;
+
+    const meta = (visit.metadata || {}) as Record<string, unknown>;
+    const storedPersonalId = (meta.patient_personal_id as string) || "";
+    if (patientId !== storedPersonalId) {
+      updates.metadata = {
+        ...meta,
+        patient_personal_id: patientId.trim() || null,
+      };
+    }
+
+    if (Object.keys(updates).length === 0) return;
 
     try {
-      const res = await fetch("/api/search", {
-        method: "POST",
+      await fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: searchQuery.trim(), visitId, k: 10 }),
+        body: JSON.stringify(updates),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || tPoc("errorSearch"));
-      }
-
-      const data = await res.json();
-      setSearchResults(data.matches);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : tPoc("errorSearch"));
-    } finally {
-      setIsSearching(false);
+      setVisit((prev) =>
+        prev ? ({ ...prev, ...updates } as Encounter) : prev
+      );
+    } catch {
+      // Silent fail
     }
   };
+
+  const handleRecordingComplete = useCallback((blob: Blob) => {
+    setAudioBlob(blob);
+  }, []);
+
+  const handleRecordingStateChange = useCallback(
+    (recordingState: "idle" | "recording" | "paused") => {
+      const status = recordingState === "recording" ? "recording" : "draft";
+      setVisit((prev) => (prev ? { ...prev, status } : prev));
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status },
+        })
+      );
+      // Persist to DB (fire-and-forget)
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }).catch(() => {});
+    },
+    [visitId]
+  );
 
   const handleGenerate = async () => {
     if (!visitId) return;
     setIsGenerating(true);
     setError(null);
 
+    // Reflect processing state in sidebar
+    window.dispatchEvent(
+      new CustomEvent("encounter-update", {
+        detail: { id: visitId, status: "processing" },
+      })
+    );
+
     try {
+      // Finalize any in-progress recording first
+      const finalizedBlob = recordingBarRef.current?.finalize();
+      const blobToProcess = finalizedBlob ?? audioBlob;
+
+      // Step 1: If there's a recorded audio blob, transcribe it first
+      if (blobToProcess) {
+        const audioFile = new File([blobToProcess], "recording.webm", {
+          type: blobToProcess.type,
+        });
+        const formData = new FormData();
+        formData.append("file", audioFile);
+        formData.append("language", generationLanguage);
+        formData.append("visitId", visitId);
+
+        const transcribeRes = await fetch("/api/process-audio", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!transcribeRes.ok) {
+          const data = await transcribeRes.json();
+          throw new Error(data.error || tPoc("errorUpload"));
+        }
+
+        const transcribeData = await transcribeRes.json();
+        setVisit((prev) =>
+          prev
+            ? { ...prev, raw_text: transcribeData.transcriptText }
+            : prev
+        );
+        setAudioBlob(null); // consumed
+      }
+
+      // Step 2: Generate note from transcript + doctor notes
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -250,8 +338,27 @@ export default function VisitDetailPage({ params }: PageProps) {
       setGeneratedNoteHtml(data.generatedNote);
       setVisit((prev) =>
         prev
-          ? { ...prev, soap_note: data.generatedNote, patient_letter: data.letter }
+          ? {
+              ...prev,
+              soap_note: data.generatedNote,
+              patient_letter: data.letter,
+            }
           : prev
+      );
+
+      // Auto-transition to review
+      await fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "review" }),
+      });
+      setVisit((prev) =>
+        prev ? { ...prev, status: "review" } : prev
+      );
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status: "review" },
+        })
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : tPoc("errorGenerate"));
@@ -259,32 +366,6 @@ export default function VisitDetailPage({ params }: PageProps) {
       setIsGenerating(false);
     }
   };
-
-  const handleSaveNote = useCallback(async () => {
-    if (!visitId || !generatedNoteHtml) return;
-    setIsSaving(true);
-    setSaveStatus("idle");
-
-    try {
-      const res = await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ soap_note: generatedNoteHtml }),
-      });
-
-      if (!res.ok) throw new Error("Failed to save note");
-
-      setVisit((prev) =>
-        prev ? { ...prev, soap_note: generatedNoteHtml } : prev
-      );
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save note");
-    } finally {
-      setIsSaving(false);
-    }
-  }, [visitId, generatedNoteHtml]);
 
   const handleMarkComplete = async () => {
     if (!visitId) return;
@@ -298,6 +379,11 @@ export default function VisitDetailPage({ params }: PageProps) {
 
       if (!res.ok) throw new Error("Failed to update status");
       setVisit((prev) => (prev ? { ...prev, status: "closed" } : prev));
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status: "closed" },
+        })
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update status");
     }
@@ -308,7 +394,9 @@ export default function VisitDetailPage({ params }: PageProps) {
     if (!confirm(t("delete.message"))) return;
 
     try {
-      const res = await fetch(`/api/encounters/${visitId}`, { method: "DELETE" });
+      const res = await fetch(`/api/encounters/${visitId}`, {
+        method: "DELETE",
+      });
       if (!res.ok) throw new Error("Failed to delete visit");
       router.push(getLocalizedHref(""));
     } catch (err) {
@@ -316,50 +404,92 @@ export default function VisitDetailPage({ params }: PageProps) {
     }
   };
 
-  const handleLanguageChange = useCallback(async (lang: SupportedLanguage) => {
-    setGenerationLanguage(lang);
-    try {
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language: lang }),
-      });
-      setVisit((prev) => (prev ? { ...prev, language: lang } : prev));
-    } catch {
-      // Silent fail
-    }
-  }, [visitId]);
+  const handleLanguageChange = useCallback(
+    async (lang: SupportedLanguage) => {
+      setGenerationLanguage(lang);
+      try {
+        await fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language: lang }),
+        });
+        setVisit((prev) => (prev ? { ...prev, language: lang } : prev));
+      } catch {
+        // Silent fail
+      }
+    },
+    [visitId]
+  );
 
-  const isHtmlContent = (content: string) => content.trimStart().startsWith("<");
+  const handleCopyNote = useCallback(async () => {
+    const parsed = parseSoapSections(generatedNoteHtml);
+    const text = allSectionsToPlainText(parsed);
+    await navigator.clipboard.writeText(text);
+    setNoteCopied(true);
+    setTimeout(() => setNoteCopied(false), 2000);
+  }, [generatedNoteHtml]);
 
-  const canGenerate = !!(visit?.raw_text || doctorNotes.trim());
+  // Derived state
+  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim());
+  const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
+
+  const parsedSections = useMemo(
+    () => parseSoapSections(generatedNoteHtml),
+    [generatedNoteHtml]
+  );
+
+  const template = getTemplateById(selectedTemplateId);
+
+  /** Match parsed sections to template sections by index (buildTemplateHtml iterates in order) */
+  const documentedSectionIds = useMemo(() => {
+    if (!template || !generatedNoteHtml) return new Set<string>();
+    const documented = new Set<string>();
+    template.sections.forEach((section, i) => {
+      if (parsedSections[i] && parsedSections[i].content.trim()) {
+        documented.add(section.id);
+      }
+    });
+    return documented;
+  }, [template, generatedNoteHtml, parsedSections]);
 
   // Loading state
   if (isLoading) {
     return (
       <AppShell>
-        <div className="max-w-4xl space-y-6">
-          <Skeleton className="h-8 w-64" />
-          <Card>
-            <CardContent className="space-y-3">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-4/5" />
-            </CardContent>
-          </Card>
+        <div className="flex flex-1">
+          <div className="flex flex-1 justify-center p-6">
+            <div className="w-full max-w-[800px] space-y-6">
+              <Skeleton className="h-8 w-64" />
+              <Skeleton className="h-9 w-48" />
+              <div className="h-px bg-border" />
+              <div className="flex gap-6">
+                <div className="w-60 space-y-2">
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                  <Skeleton className="h-8 w-full" />
+                </div>
+                <Skeleton className="h-96 flex-1 rounded-2xl" />
+              </div>
+            </div>
+          </div>
+          <div className="w-[280px] shrink-0 border-l bg-sidebar p-6">
+            <Skeleton className="mb-4 h-6 w-16" />
+            <Skeleton className="h-[72px] w-full rounded-xl" />
+          </div>
         </div>
       </AppShell>
     );
   }
 
-  // Error state (no visit loaded)
   if (error && !visit) {
     return (
       <AppShell>
-        <Alert variant="destructive">
-          <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
+        <div className="p-6">
+          <Alert variant="destructive">
+            <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </div>
       </AppShell>
     );
   }
@@ -367,274 +497,197 @@ export default function VisitDetailPage({ params }: PageProps) {
   if (!visit) return null;
 
   return (
-    <AppShell>
-      <div className="max-w-4xl space-y-6">
-        {/* Header actions (rendered in app header via context) */}
-        <EncounterHeaderActions
-          status={visit.status}
-          generationLanguage={generationLanguage}
-          onLanguageChange={handleLanguageChange}
-          onGenerate={handleGenerate}
-          onMarkComplete={handleMarkComplete}
-          onDelete={handleDelete}
-          canGenerate={canGenerate}
-          isGenerating={isGenerating}
-        />
+    <AppShell contentClassName="flex flex-1 overflow-hidden">
+      {/* Header actions (portaled into app header) */}
+      <EncounterHeaderActions
+        status={visit.status}
+        generationLanguage={generationLanguage}
+        onLanguageChange={handleLanguageChange}
+        onGenerate={handleGenerate}
+        onMarkComplete={handleMarkComplete}
+        onDelete={handleDelete}
+        canGenerate={canGenerate}
+        isGenerating={isGenerating}
+      />
 
-        {/* Title + Metadata */}
-        <div className="space-y-2">
-          <Input
-            value={title}
-            onChange={(e) => updateTitle(e.target.value)}
-            onBlur={handleMetadataBlur}
-            placeholder={t("form.titlePlaceholder")}
-            className="text-lg font-semibold border-none shadow-none px-0 h-auto focus-visible:ring-0"
-          />
-          <div className="flex items-center gap-3">
-            <Input
-              value={patientName}
-              onChange={(e) => setPatientName(e.target.value)}
-              onBlur={handleMetadataBlur}
-              placeholder={t("form.patientNamePlaceholder")}
-              className="h-8 max-w-48 text-sm"
-            />
-            <select
-              value={visitType}
-              onChange={(e) => {
-                setEncounterType(e.target.value as EncounterType);
-                // Trigger save on change
-                setTimeout(handleMetadataBlur, 0);
-              }}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            >
-              {VISIT_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {t(`type.${type}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+      {/* Processing overlay — takes over full content area */}
+      {isGenerating && <ProcessingOverlay />}
 
-        {/* Error alert */}
-        {error && (
-          <Alert variant="destructive">
-            <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
+      {/* Main content area — hidden during generation */}
+      {!isGenerating && (
+        <div className="flex flex-1 justify-center overflow-y-auto px-6 pt-4 pb-6">
+          <div className="flex h-full w-full max-w-[800px] flex-col gap-6">
+            {/* Title row */}
+            <div className="flex items-center justify-between">
+              {isDraft ? (
+                <Input
+                  value={title}
+                  onChange={(e) => updateTitle(e.target.value)}
+                  onBlur={handleMetadataBlur}
+                  placeholder={t("untitled")}
+                  className="h-auto border-none bg-transparent px-0 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                />
+              ) : (
+                <h1 className="text-2xl text-muted-foreground">
+                  {title || t("untitled")}
+                </h1>
+              )}
+              <div className="flex shrink-0 items-center gap-3">
+                {visit.status === "review" && (
+                  <Button variant="outline" onClick={handleMarkComplete}>
+                    {t("detail.markComplete")}
+                  </Button>
+                )}
+                <Badge variant={`status-${visit.status}` as "status-draft"}>
+                  {t(`status.${visit.status}`)}
+                </Badge>
+                <span className="text-sm text-muted-foreground">
+                  {formatVisitDate(visit.visit_date, locale)}
+                </span>
+              </div>
+            </div>
 
-        {/* Audio Section */}
-        <AudioSection
-          visitId={visitId}
-          locale={generationLanguage}
-          hasTranscript={!!visit.raw_text}
-          disabled={isGenerating}
-          onTranscriptReady={handleTranscriptReady}
-          onError={(msg) => setError(msg || null)}
-        />
+            {/* Draft: recording bar */}
+            {isDraft && (
+              <RecordingBar
+                ref={recordingBarRef}
+                hasRecording={!!audioBlob}
+                hasTranscript={!!visit.raw_text}
+                disabled={isGenerating}
+                onRecordingComplete={handleRecordingComplete}
+                onRecordingStateChange={handleRecordingStateChange}
+              />
+            )}
 
-        {/* Template Selector */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">
-            {tTemplates("selectTemplate")}
-          </label>
-          <TemplateSelector
-            value={selectedTemplateId}
-            onChange={setSelectedTemplateId}
-            disabled={isGenerating}
-          />
-        </div>
+            {/* Draft: separator */}
+            {isDraft && <div className="h-px bg-border" />}
 
-        {/* Doctor's Notes + AI Transcript tabs */}
-        <Tabs defaultValue="notes">
-          <TabsList className="w-full">
-            <TabsTrigger value="notes" className="flex-1">
-              {tTemplates("doctorNotes")}
-            </TabsTrigger>
-            <TabsTrigger value="transcript" className="flex-1">
-              {t("detail.transcript")}
-            </TabsTrigger>
-          </TabsList>
+            {/* Error alert */}
+            {error && (
+              <Alert variant="destructive">
+                <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
 
-          {/* Doctor's Notes tab */}
-          <TabsContent value="notes">
-            <TiptapEditor
-              content={doctorNotes}
-              onChange={setDoctorNotes}
-              placeholder={tTemplates("doctorNotesPlaceholder")}
-              className="min-h-48"
-            />
-          </TabsContent>
+            {/* Draft: template sidebar + editor */}
+            {isDraft && (
+              <div className="flex flex-1 gap-6">
+                <TemplateSidebar
+                  templateId={selectedTemplateId}
+                  onTemplateChange={setSelectedTemplateId}
+                  disabled={isGenerating}
+                />
+                <TiptapEditor
+                  content={doctorNotes}
+                  onChange={setDoctorNotes}
+                  placeholder={tTemplates("doctorNotesPlaceholder")}
+                  className="flex-1 rounded-2xl"
+                />
+              </div>
+            )}
 
-          {/* AI Transcript tab */}
-          <TabsContent value="transcript" className="space-y-4">
-            {visit.raw_text ? (
+            {/* Review/closed: tabs + content */}
+            {!isDraft && (
               <>
-                <Card>
-                  <CardContent>
-                    <ScrollArea className="h-64">
+                <ReviewTabs
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                />
+
+                {/* Note tab */}
+                {activeTab === "note" && (
+                  <div className="flex flex-1 gap-6">
+                    <TemplateSidebar
+                      templateId={selectedTemplateId}
+                      onTemplateChange={setSelectedTemplateId}
+                      disabled
+                      documentedSections={documentedSectionIds}
+                    />
+                    <div className="flex flex-1 flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-medium">
+                          {t("detail.note")}
+                        </h2>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCopyNote}
+                          disabled={!generatedNoteHtml}
+                        >
+                          {noteCopied
+                            ? t("detail.noteCopied")
+                            : t("detail.copyNote")}
+                        </Button>
+                      </div>
+                      {parsedSections.length > 0 ? (
+                        parsedSections.map((section) => (
+                          <NoteSectionCard
+                            key={section.id}
+                            title={section.title}
+                            content={section.content}
+                          />
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          {t("detail.noNote")}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Transcript tab */}
+                {activeTab === "transcript" && (
+                  <div className="flex-1">
+                    {visit.raw_text ? (
                       <p className="whitespace-pre-wrap text-sm leading-relaxed">
                         {visit.raw_text}
                       </p>
-                    </ScrollArea>
-                  </CardContent>
-                </Card>
-
-                {/* Semantic search */}
-                <Card>
-                  <CardContent>
-                    <form
-                      className="flex gap-2"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        handleSearch();
-                      }}
-                    >
-                      <div className="relative flex-1">
-                        <Input
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          placeholder={t("detail.searchPlaceholder")}
-                          disabled={isSearching}
-                        />
-                      </div>
-                      <Button
-                        type="submit"
-                        disabled={!searchQuery.trim() || isSearching}
-                        variant="outline"
-                      >
-                        {isSearching ? (
-                          <HugeiconsIcon
-                            icon={Loading03Icon}
-                            size={16}
-                            className="animate-spin"
-                          />
-                        ) : (
-                          <HugeiconsIcon icon={Search01Icon} size={16} />
-                        )}
-                        {t("detail.search")}
-                      </Button>
-                    </form>
-
-                    {searchResults.length > 0 && (
-                      <div className="mt-4 space-y-2">
-                        {searchResults.map((match) => (
-                          <div
-                            key={match.id}
-                            className="rounded-lg border p-3 text-sm"
-                          >
-                            <div className="mb-1 flex items-center justify-between">
-                              <span className="font-medium text-muted-foreground">
-                                {tPoc("chunk")} #{match.chunk_index + 1}
-                              </span>
-                              <span className="text-xs text-muted-foreground">
-                                {tPoc("similarity")}:{" "}
-                                {(match.similarity * 100).toFixed(1)}%
-                              </span>
-                            </div>
-                            <p className="leading-relaxed">{match.content}</p>
-                          </div>
-                        ))}
-                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        {t("detail.noTranscript")}
+                      </p>
                     )}
-                  </CardContent>
-                </Card>
+                  </div>
+                )}
+
+                {/* Add document tab */}
+                {activeTab === "add-document" && (
+                  <div className="flex-1">
+                    <TiptapEditor
+                      content=""
+                      onChange={() => {}}
+                      placeholder={t("detail.addDocument")}
+                      className="flex-1 rounded-2xl"
+                    />
+                  </div>
+                )}
               </>
-            ) : (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  {t("detail.noTranscript")}
-                </CardContent>
-              </Card>
             )}
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
+      )}
 
-        {/* Generation skeleton */}
-        {isGenerating && (
-          <Card>
-            <CardContent className="space-y-3">
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-4/5" />
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-full" />
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Generated Note */}
-        {generatedNoteHtml && !isGenerating && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <HugeiconsIcon icon={Note01Icon} size={18} />
-                  {t("detail.soapNote")}
-                </CardTitle>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSaveNote}
-                  disabled={isSaving}
-                >
-                  {isSaving ? (
-                    <>
-                      <HugeiconsIcon
-                        icon={Loading03Icon}
-                        size={14}
-                        className="animate-spin"
-                      />
-                      {t("detail.saving")}
-                    </>
-                  ) : saveStatus === "saved" ? (
-                    <>
-                      <HugeiconsIcon icon={Tick02Icon} size={14} />
-                      {t("detail.saved")}
-                    </>
-                  ) : (
-                    <>
-                      <HugeiconsIcon icon={FloppyDiskIcon} size={14} />
-                      {t("detail.saveNote")}
-                    </>
-                  )}
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {isHtmlContent(generatedNoteHtml) ? (
-                <TiptapEditor
-                  content={generatedNoteHtml}
-                  onChange={setGeneratedNoteHtml}
-                  className="min-h-64"
-                />
-              ) : (
-                <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                  {generatedNoteHtml}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Patient Letter */}
-        {visit.patient_letter && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <HugeiconsIcon icon={Note01Icon} size={18} />
-                {t("detail.patientLetter")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                {visit.patient_letter}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      {/* Right panel — hidden during generation */}
+      {!isGenerating &&
+        (isDraft ? (
+          <FilesPanel
+            visitId={visitId}
+            files={files}
+            onFilesChange={setFiles}
+            onAudioFileAdded={(blob) => setAudioBlob(blob)}
+            hasAudioFile={!!audioBlob}
+          />
+        ) : (
+          <PatientPanel
+            patientName={patientName}
+            patientId={patientId}
+            onPatientNameChange={setPatientName}
+            onPatientIdChange={setPatientId}
+            onBlur={handlePatientBlur}
+          />
+        ))}
     </AppShell>
   );
 }

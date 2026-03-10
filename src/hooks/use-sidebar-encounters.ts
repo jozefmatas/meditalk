@@ -60,12 +60,22 @@ export function useSidebarEncounters() {
     fetchVisits(1);
   }, [pathname, fetchVisits]);
 
-  // Live-update a visit when the detail page changes its title
+  // Live-update a visit when the detail page changes title or status
   useEffect(() => {
     const handler = (e: Event) => {
-      const { id, title } = (e as CustomEvent<{ id: string; title: string }>).detail;
+      const detail = (e as CustomEvent<{
+        id: string;
+        title?: string | null;
+        status?: EncounterStatus;
+      }>).detail;
       setVisits((prev) =>
-        prev.map((v) => (v.id === id ? { ...v, title } : v))
+        prev.map((v) => {
+          if (v.id !== detail.id) return v;
+          const updated = { ...v };
+          if (detail.title !== undefined) updated.title = detail.title;
+          if (detail.status !== undefined) updated.status = detail.status;
+          return updated;
+        })
       );
     };
     window.addEventListener("encounter-update", handler);

@@ -7,16 +7,18 @@ import { Header } from "./header";
 
 interface AppShellProps {
   children: React.ReactNode;
+  /** Override the default content wrapper classes (default: "flex-1 overflow-y-auto p-6") */
+  contentClassName?: string;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, contentClassName }: AppShellProps) {
   return (
     <TooltipProvider>
       <SidebarProvider className="bg-sidebar">
         <AppSidebar />
         <SidebarInset className="rounded-l-3xl">
           <Header />
-          <div className="flex-1 overflow-y-auto p-6">{children}</div>
+          <div className={contentClassName ?? "flex-1 overflow-y-auto p-6"}>{children}</div>
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

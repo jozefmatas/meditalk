@@ -63,7 +63,7 @@ export function NavEncounters() {
       ([entry]) => {
         if (entry.isIntersecting) loadMore();
       },
-      { root, rootMargin: "100px" }
+      { root, rootMargin: "100px" },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
@@ -71,12 +71,15 @@ export function NavEncounters() {
 
   return (
     // Scroll only happens here; "Latest" label sticks at the top
-    <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden">
+    <div
+      ref={scrollRef}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden"
+    >
       {/* Sticky label — stays visible while scrolling the list */}
-      <span className="sticky top-0 z-10 bg-sidebar px-2 pb-1 text-xs text-sidebar-foreground/65">
+      <span className="sticky top-0 z-10 bg-sidebar px-2 pb-2 text-xs text-sidebar-foreground/65">
         {tNav("latestEncounters")}
       </span>
-      <SidebarMenu className="gap-0.5">
+      <SidebarMenu className="gap-1">
         {isLoading && visits.length === 0 ? (
           Array.from({ length: 5 }).map((_, i) => (
             <SidebarMenuItem key={i}>
@@ -99,7 +102,9 @@ export function NavEncounters() {
                     isActive={isActive}
                     className={cn(
                       itemClass,
-                      visit.status === "processing" && !isActive && "bg-sidebar-accent"
+                      visit.status === "processing" &&
+                        !isActive &&
+                        "bg-sidebar-accent",
                     )}
                   >
                     <Link href={visitHref} title={visit.title || t("untitled")}>
@@ -111,14 +116,20 @@ export function NavEncounters() {
                         />
                       ) : (
                         <span className="flex size-5 shrink-0 items-center justify-center">
-                          <span className={cn("size-1.5 rounded-full", dotColor[visit.status] || dotColor.draft)} />
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full",
+                              dotColor[visit.status] || dotColor.draft,
+                              visit.status === "recording" && "animate-pulse",
+                            )}
+                          />
                         </span>
                       )}
                       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span
                           className={cn(
                             "truncate text-sm leading-none",
-                            visit.status === "closed" && "line-through"
+                            visit.status === "closed" && "line-through",
                           )}
                         >
                           {visit.title || t("untitled")}
@@ -135,7 +146,11 @@ export function NavEncounters() {
                         <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
                       </SidebarMenuAction>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent side="right" align="start" className="min-w-44">
+                    <DropdownMenuContent
+                      side="right"
+                      align="start"
+                      className="min-w-44"
+                    >
                       <DropdownMenuItem asChild>
                         <Link href={visitHref} className="gap-2">
                           <HugeiconsIcon icon={LinkSquare01Icon} size={16} />

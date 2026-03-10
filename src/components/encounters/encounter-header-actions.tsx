@@ -8,7 +8,6 @@ import {
   SparklesIcon,
   Loading03Icon,
   Delete01Icon,
-  Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { useHeaderActions } from "@/components/nav/header-actions-context";
 import { Button } from "@/components/shared/button";
@@ -44,6 +43,8 @@ interface EncounterHeaderActionsProps {
   isGenerating: boolean;
 }
 
+const DRAFT_STATUSES: EncounterStatus[] = ["draft", "recording", "processing"];
+
 export function EncounterHeaderActions({
   status,
   generationLanguage,
@@ -57,6 +58,7 @@ export function EncounterHeaderActions({
   const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
   const { setHeaderActions } = useHeaderActions();
+  const isDraft = DRAFT_STATUSES.includes(status);
 
   useEffect(() => {
     setHeaderActions(
@@ -69,12 +71,6 @@ export function EncounterHeaderActions({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {status === "review" && (
-              <DropdownMenuItem onSelect={onMarkComplete}>
-                <HugeiconsIcon icon={Tick01Icon} size={14} />
-                {tNav("markComplete")}
-              </DropdownMenuItem>
-            )}
             <DropdownMenuItem
               variant="destructive"
               onSelect={onDelete}
@@ -85,36 +81,40 @@ export function EncounterHeaderActions({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Generation language selector */}
-        <Select
-          value={generationLanguage}
-          onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
-        >
-          <SelectTrigger className="w-auto">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent align="end">
-            {GENERATION_LANGUAGES.map((lang) => (
-              <SelectItem key={lang.value} value={lang.value}>
-                {lang.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Generation language selector — draft only */}
+        {isDraft && (
+          <Select
+            value={generationLanguage}
+            onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
+          >
+            <SelectTrigger className="w-auto">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {GENERATION_LANGUAGES.map((lang) => (
+                <SelectItem key={lang.value} value={lang.value}>
+                  {lang.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        {/* Generate button */}
-        <Button
-          size="lg"
-          onClick={onGenerate}
-          disabled={isGenerating || !canGenerate}
-        >
-          <HugeiconsIcon
-            icon={isGenerating ? Loading03Icon : SparklesIcon}
-            size={16}
-            className={isGenerating ? "animate-spin" : ""}
-          />
-          {t("detail.generate")}
-        </Button>
+        {/* Generate button — draft only */}
+        {isDraft && (
+          <Button
+            size="lg"
+            onClick={onGenerate}
+            disabled={isGenerating || !canGenerate}
+          >
+            <HugeiconsIcon
+              icon={isGenerating ? Loading03Icon : SparklesIcon}
+              size={16}
+              className={isGenerating ? "animate-spin" : ""}
+            />
+            {t("detail.generate")}
+          </Button>
+        )}
       </>
     );
 
