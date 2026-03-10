@@ -24,7 +24,7 @@ interface BreadcrumbData {
 
 export function Header() {
   const t = useTranslations("nav");
-  const tVisits = useTranslations("visits");
+  const tEncounters = useTranslations("encounters");
   const tTemplates = useTranslations("templates");
   const pathname = usePathname();
   const getHref = useLocalizedHref();
@@ -40,9 +40,9 @@ export function Header() {
       ];
 
       if (segments[1] === "new") {
-        crumbs.push({ label: tVisits("untitled") });
+        crumbs.push({ label: tEncounters("untitled") });
       } else if (segments[1]) {
-        crumbs.push({ label: pageTitle || tVisits("untitled") });
+        crumbs.push({ label: pageTitle || tEncounters("untitled") });
       }
 
       return crumbs;

@@ -46,7 +46,7 @@ interface PageProps {
 
 export default function VisitDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
-  const t = useTranslations("visits");
+  const t = useTranslations("encounters");
   const tTemplates = useTranslations("templates");
   const tPoc = useTranslations("poc");
   const locale = useLocale();

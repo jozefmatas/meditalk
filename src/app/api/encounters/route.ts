@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
 import type { Visit, VisitListParams, VisitStatus, CreateVisitRequest } from '@/lib/types';
 
+/** Normalize legacy DB statuses (e.g. "completed" → "closed") */
+function normalizeStatus(status: string): VisitStatus {
+  if (status === 'completed') return 'closed';
+  return status as VisitStatus;
+}
+
 /**
  * GET /api/encounters
  * List user's encounters with pagination
@@ -53,8 +59,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch visits' }, { status: 500 });
     }
 
+    const normalized = (visits as Visit[]).map((v) => ({
+      ...v,
+      status: normalizeStatus(v.status),
+    }));
+
     return NextResponse.json({
-      visits: visits as Visit[],
+      visits: normalized,
       total: count || 0,
       page: params.page,
       limit: params.limit,

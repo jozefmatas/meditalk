@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
-import type { Visit, UpdateVisitRequest } from '@/lib/types';
+import type { Visit, VisitStatus, UpdateVisitRequest } from '@/lib/types';
+
+/** Normalize legacy DB statuses (e.g. "completed" → "closed") */
+function normalizeStatus(status: string): VisitStatus {
+  if (status === 'completed') return 'closed';
+  return status as VisitStatus;
+}
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -35,6 +41,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     return NextResponse.json({
       ...visit,
+      status: normalizeStatus(visit.status),
       chunkCount: chunkCount || 0,
     } as Visit & { chunkCount: number });
   } catch (err) {

@@ -10,7 +10,7 @@ import {
 } from "@/components/shared/sidebar";
 import { ClinicSwitcher } from "./clinic-switcher";
 import { NavMain } from "./nav-main";
-import { NavVisits } from "./nav-visits";
+import { NavEncounters } from "./nav-encounters";
 import { SearchCommand } from "./search-command";
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
@@ -35,7 +35,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <NavMain onSearchClick={() => setSearchOpen(true)} />
           </div>
           {/* Latest visits — scrolls independently */}
-          <NavVisits />
+          <NavEncounters />
         </SidebarContent>
 
         {/* Figma node 100:1690 — footer has p-2 */}

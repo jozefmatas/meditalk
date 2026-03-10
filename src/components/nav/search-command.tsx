@@ -25,7 +25,7 @@ interface SearchCommandProps {
 }
 
 export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
-  const t = useTranslations("visits");
+  const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
   const tCommon = useTranslations("common");
   const router = useRouter();

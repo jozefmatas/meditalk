@@ -40,6 +40,12 @@
   --sidebar-accent-foreground: #232334;
   --sidebar-border: #e6e3db;
   --sidebar-ring: #ece8df;
+  --status-draft: #a39e93;
+  --status-recording: #dc2626;
+  --status-processing: #4444ff;
+  --status-review: #9333ea;
+  --status-closed: #16a34a;
+  --status-archived: #9ca3af;
 }
 
 .dark {
@@ -111,6 +117,12 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-draft: var(--status-draft);
+  --color-status-recording: var(--status-recording);
+  --color-status-processing: var(--status-processing);
+  --color-status-review: var(--status-review);
+  --color-status-closed: var(--status-closed);
+  --color-status-archived: var(--status-archived);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

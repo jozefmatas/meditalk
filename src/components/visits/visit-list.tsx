@@ -34,7 +34,7 @@ export function VisitList({
   onLoadMore,
   hasMore,
 }: VisitListProps) {
-  const t = useTranslations("visits");
+  const t = useTranslations("encounters");
   const [searchQuery, setSearchQuery] = useState("");
 
   const handleSearch = (e: React.FormEvent) => {

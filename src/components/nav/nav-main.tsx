@@ -44,7 +44,7 @@ export function NavMain({ onSearchClick }: NavMainProps) {
     // Figma: gap-3 (12px) between [Actions] and [Nav]; padding handled by parent
     <div className="flex flex-col gap-3">
       {/* Action items */}
-      <SidebarMenu>
+      <SidebarMenu className="gap-0.5">
         <SidebarMenuItem>
           <SidebarMenuButton
             onClick={() => createEncounter()}
@@ -73,7 +73,7 @@ export function NavMain({ onSearchClick }: NavMainProps) {
       </SidebarMenu>
 
       {/* Main navigation */}
-      <SidebarMenu>
+      <SidebarMenu className="gap-0.5">
         <SidebarMenuItem>
           <SidebarMenuButton
             asChild

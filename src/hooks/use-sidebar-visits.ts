@@ -1,19 +1,32 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePathname } from "next/navigation";
-import type { Visit, VisitListResponse } from "@/lib/types";
+import type { Visit, VisitListResponse, VisitStatus } from "@/lib/types";
 
 const SIDEBAR_LIMIT = 20;
+
+/** Normalize legacy DB statuses (e.g. "completed" → "closed") */
+function normalizeStatus(status: string): VisitStatus {
+  if (status === "completed") return "closed";
+  return status as VisitStatus;
+}
+
+function normalizeVisits(visits: Visit[]): Visit[] {
+  return visits.map((v) => ({ ...v, status: normalizeStatus(v.status) }));
+}
 
 export function useSidebarVisits() {
   const pathname = usePathname();
   const [visits, setVisits] = useState<Visit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const pageRef = useRef(1);
+  const loadingRef = useRef(false);
 
   const fetchVisits = useCallback(async (pageNum: number) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setIsLoading(true);
     try {
       const params = new URLSearchParams({
@@ -25,22 +38,25 @@ export function useSidebarVisits() {
 
       const data: VisitListResponse = await res.json();
 
+      const normalized = normalizeVisits(data.visits);
       if (pageNum === 1) {
-        setVisits(data.visits);
+        setVisits(normalized);
       } else {
-        setVisits((prev) => [...prev, ...data.visits]);
+        setVisits((prev) => [...prev, ...normalized]);
       }
       setTotal(data.total);
+      pageRef.current = pageNum;
     } catch {
       // Silently fail in sidebar — visits are still accessible via search
     } finally {
+      loadingRef.current = false;
       setIsLoading(false);
     }
   }, []);
 
   // Refetch on pathname change (catches new visit creation, navigation)
   useEffect(() => {
-    setPage(1);
+    pageRef.current = 1;
     fetchVisits(1);
   }, [pathname, fetchVisits]);
 
@@ -56,11 +72,10 @@ export function useSidebarVisits() {
     return () => window.removeEventListener("encounter-update", handler);
   }, []);
 
-  const loadMore = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchVisits(nextPage);
-  };
+  const loadMore = useCallback(() => {
+    if (loadingRef.current) return;
+    fetchVisits(pageRef.current + 1);
+  }, [fetchVisits]);
 
   const deleteVisit = async (visitId: string) => {
     // Optimistic update

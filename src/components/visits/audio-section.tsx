@@ -43,7 +43,7 @@ export function AudioSection({
   onError,
 }: AudioSectionProps) {
   const tPoc = useTranslations("poc");
-  const t = useTranslations("visits");
+  const t = useTranslations("encounters");
 
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);

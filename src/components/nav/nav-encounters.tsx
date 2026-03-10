@@ -1,10 +1,18 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { MoreHorizontalIcon, Delete01Icon, Tick02Icon, LinkSquare01Icon } from "@hugeicons/core-free-icons";
+import {
+  MoreHorizontalIcon,
+  Delete01Icon,
+  Tick02Icon,
+  LinkSquare01Icon,
+  Loading03Icon,
+} from "@hugeicons/core-free-icons";
+import { cn } from "@/lib/utils";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useSidebarVisits } from "@/hooks/use-sidebar-visits";
 import {
@@ -22,34 +30,52 @@ import {
   DropdownMenuSeparator,
 } from "@/components/shared/dropdown-menu";
 
-const statusColors: Record<string, string> = {
-  draft: "bg-amber-500",
-  recording: "bg-red-500",
-  processing: "bg-blue-500",
-  review: "bg-purple-500",
-  closed: "bg-green-500",
-  archived: "bg-gray-400",
+const dotColor: Record<string, string> = {
+  draft: "bg-status-draft",
+  recording: "bg-status-recording",
+  processing: "bg-status-processing",
+  review: "bg-status-review",
+  closed: "bg-status-closed",
+  archived: "bg-status-archived",
 };
 
 /** Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px). */
 const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5!";
 
-export function NavVisits() {
-  const t = useTranslations("visits");
+export function NavEncounters() {
+  const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
   const pathname = usePathname();
   const getHref = useLocalizedHref();
   const { visits, isLoading, hasMore, loadMore, deleteVisit, markComplete } =
     useSidebarVisits();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Infinite scroll — observe the sentinel at the bottom of the list
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) loadMore();
+      },
+      { root, rootMargin: "100px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   return (
     // Scroll only happens here; "Latest" label sticks at the top
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden">
+    <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden">
       {/* Sticky label — stays visible while scrolling the list */}
       <span className="sticky top-0 z-10 bg-sidebar px-2 pb-1 text-xs text-sidebar-foreground/65">
         {tNav("latestEncounters")}
       </span>
-      <SidebarMenu>
+      <SidebarMenu className="gap-0.5">
         {isLoading && visits.length === 0 ? (
           Array.from({ length: 5 }).map((_, i) => (
             <SidebarMenuItem key={i}>
@@ -65,17 +91,41 @@ export function NavVisits() {
             {visits.map((visit) => {
               const visitHref = getHref(`/encounters/${visit.id}`);
               const isActive = pathname === visitHref;
-
               return (
                 <SidebarMenuItem key={visit.id}>
-                  <SidebarMenuButton asChild isActive={isActive} className={itemClass}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive}
+                    className={cn(
+                      itemClass,
+                      visit.status === "processing" && !isActive && "bg-sidebar-accent"
+                    )}
+                  >
                     <Link href={visitHref} title={visit.title || t("untitled")}>
-                      <span className="flex size-5 shrink-0 items-center justify-center">
-                        <span
-                          className={`size-1.5 rounded-full ${statusColors[visit.status] || statusColors.draft}`}
+                      {visit.status === "processing" ? (
+                        <HugeiconsIcon
+                          icon={Loading03Icon}
+                          size={20}
+                          className="shrink-0 animate-spin text-status-processing"
                         />
-                      </span>
-                      <span>{visit.title || t("untitled")}</span>
+                      ) : (
+                        <span className="flex size-5 shrink-0 items-center justify-center">
+                          <span className={cn("size-1.5 rounded-full", dotColor[visit.status] || dotColor.draft)} />
+                        </span>
+                      )}
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span
+                          className={cn(
+                            "truncate text-sm leading-none",
+                            visit.status === "closed" && "line-through"
+                          )}
+                        >
+                          {visit.title || t("untitled")}
+                        </span>
+                        <span className="truncate text-xs leading-none text-sidebar-foreground/65">
+                          {t(`status.${visit.status}`)}
+                        </span>
+                      </div>
                     </Link>
                   </SidebarMenuButton>
                   <DropdownMenu>
@@ -114,17 +164,7 @@ export function NavVisits() {
                 </SidebarMenuItem>
               );
             })}
-            {hasMore && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  onClick={loadMore}
-                  className={`${itemClass} text-sidebar-foreground/70`}
-                >
-                  <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
-                  <span>{tNav("moreVisits")}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )}
+            {hasMore && <div ref={sentinelRef} className="h-1 shrink-0" />}
           </>
         )}
       </SidebarMenu>

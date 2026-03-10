@@ -19,7 +19,7 @@ interface Stats {
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
-  const tVisits = useTranslations("visits");
+  const tEncounters = useTranslations("encounters");
   const tNav = useTranslations("nav");
   const { createEncounter, isCreating } = useCreateEncounter();
 
@@ -65,7 +65,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tVisits("title")}
+                {tEncounters("title")}
               </CardTitle>
               <HugeiconsIcon icon={Folder01Icon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -81,7 +81,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tVisits("status.draft")}
+                {tEncounters("status.draft")}
               </CardTitle>
               <HugeiconsIcon icon={FileEditIcon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -97,7 +97,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tVisits("status.closed")}
+                {tEncounters("status.closed")}
               </CardTitle>
               <HugeiconsIcon icon={Tick02Icon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -116,7 +116,7 @@ export default function DashboardPage() {
           <CardContent className="flex items-center justify-between py-6">
             <div>
               <h3 className="font-medium">{tNav("newEncounter")}</h3>
-              <p className="text-sm text-muted-foreground">{tVisits("empty.description")}</p>
+              <p className="text-sm text-muted-foreground">{tEncounters("empty.description")}</p>
             </div>
             <Button onClick={() => createEncounter()} disabled={isCreating}>
               {isCreating ? (

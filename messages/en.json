@@ -39,7 +39,7 @@
     "newEncounter": "New encounter",
     "latestEncounters": "Latest"
   },
-  "visits": {
+  "encounters": {
     "title": "Encounters",
     "newVisit": "New Encounter",
     "untitled": "Untitled",

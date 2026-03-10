@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import { NavVisits } from "./nav-visits";
+import { NavEncounters } from "./nav-encounters";
 import {
   SidebarProvider,
   Sidebar,
@@ -7,8 +7,8 @@ import {
 } from "@/components/shared/sidebar";
 
 const meta = {
-  title: "Nav/NavVisits",
-  component: NavVisits,
+  title: "Nav/NavEncounters",
+  component: NavEncounters,
   parameters: {
     layout: "centered",
   },
@@ -24,7 +24,7 @@ const meta = {
       </SidebarProvider>
     ),
   ],
-} satisfies Meta<typeof NavVisits>;
+} satisfies Meta<typeof NavEncounters>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
