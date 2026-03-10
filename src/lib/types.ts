@@ -1,7 +1,7 @@
 // DB row types (matching supabase/migrations)
 
 // Visit types
-export type VisitStatus = 'draft' | 'completed' | 'archived';
+export type VisitStatus = 'draft' | 'recording' | 'processing' | 'review' | 'closed' | 'archived';
 export type VisitType =
   | 'consultation'
   | 'follow_up'

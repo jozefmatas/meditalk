@@ -24,7 +24,10 @@ import {
 
 const statusColors: Record<string, string> = {
   draft: "bg-amber-500",
-  completed: "bg-green-500",
+  recording: "bg-red-500",
+  processing: "bg-blue-500",
+  review: "bg-purple-500",
+  closed: "bg-green-500",
   archived: "bg-gray-400",
 };
 
@@ -88,7 +91,7 @@ export function NavVisits() {
                           {tNav("openVisit")}
                         </Link>
                       </DropdownMenuItem>
-                      {visit.status === "draft" && (
+                      {visit.status === "review" && (
                         <DropdownMenuItem
                           onClick={() => markComplete(visit.id)}
                           className="gap-2"

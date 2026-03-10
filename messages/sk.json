@@ -49,7 +49,10 @@
     "loadMore": "Načítať viac",
     "status": {
       "draft": "Koncept",
-      "completed": "Dokončené",
+      "recording": "Nahrávanie",
+      "processing": "Spracovanie",
+      "review": "Kontrola",
+      "closed": "Uzavreté",
       "archived": "Archivované"
     },
     "type": {

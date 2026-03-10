@@ -291,11 +291,11 @@ export default function VisitDetailPage({ params }: PageProps) {
       const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
+        body: JSON.stringify({ status: "closed" }),
       });
 
       if (!res.ok) throw new Error("Failed to update status");
-      setVisit((prev) => (prev ? { ...prev, status: "completed" } : prev));
+      setVisit((prev) => (prev ? { ...prev, status: "closed" } : prev));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update status");
     }
@@ -389,10 +389,10 @@ export default function VisitDetailPage({ params }: PageProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {visit.status === "draft" && (
+            {visit.status === "review" && (
               <Button variant="outline" size="sm" onClick={handleMarkComplete}>
                 <HugeiconsIcon icon={Tick01Icon} size={16} />
-                {t("status.completed")}
+                {t("status.closed")}
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={handleDelete}>

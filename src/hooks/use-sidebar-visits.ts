@@ -78,14 +78,14 @@ export function useSidebarVisits() {
 
   const markComplete = async (visitId: string) => {
     setVisits((prev) =>
-      prev.map((v) => (v.id === visitId ? { ...v, status: "completed" as const } : v))
+      prev.map((v) => (v.id === visitId ? { ...v, status: "closed" as const } : v))
     );
 
     try {
       const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
+        body: JSON.stringify({ status: "closed" }),
       });
       if (!res.ok) throw new Error("Failed to update");
     } catch {

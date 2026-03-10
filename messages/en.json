@@ -49,7 +49,10 @@
     "loadMore": "Load More",
     "status": {
       "draft": "Draft",
-      "completed": "Completed",
+      "recording": "Recording",
+      "processing": "Processing",
+      "review": "Review",
+      "closed": "Closed",
       "archived": "Archived"
     },
     "type": {

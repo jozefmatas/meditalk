@@ -156,7 +156,7 @@ describe("useSidebarVisits", () => {
       result.current.markComplete(visit.id);
     });
 
-    expect(result.current.visits[0].status).toBe("completed");
+    expect(result.current.visits[0].status).toBe("closed");
   });
 
   it("reverts markComplete on API failure", async () => {
@@ -177,7 +177,7 @@ describe("useSidebarVisits", () => {
     });
 
     // Optimistic
-    expect(result.current.visits[0].status).toBe("completed");
+    expect(result.current.visits[0].status).toBe("closed");
 
     // After refetch, status reverts
     await waitFor(() => {

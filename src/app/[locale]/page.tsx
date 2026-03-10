@@ -14,7 +14,7 @@ import type { VisitListResponse } from "@/lib/types";
 interface Stats {
   total: number;
   drafts: number;
-  completed: number;
+  closed: number;
 }
 
 export default function DashboardPage() {
@@ -29,20 +29,20 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const [allRes, draftRes, completedRes] = await Promise.all([
+        const [allRes, draftRes, closedRes] = await Promise.all([
           fetch("/api/encounters?limit=1"),
           fetch("/api/encounters?limit=1&status=draft"),
-          fetch("/api/encounters?limit=1&status=completed"),
+          fetch("/api/encounters?limit=1&status=closed"),
         ]);
 
         const all: VisitListResponse = await allRes.json();
         const drafts: VisitListResponse = await draftRes.json();
-        const completed: VisitListResponse = await completedRes.json();
+        const closed: VisitListResponse = await closedRes.json();
 
         setStats({
           total: all.total,
           drafts: drafts.total,
-          completed: completed.total,
+          closed: closed.total,
         });
       } catch {
         // Silently fail — stats are non-critical
@@ -97,7 +97,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tVisits("status.completed")}
+                {tVisits("status.closed")}
               </CardTitle>
               <HugeiconsIcon icon={Tick02Icon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -105,7 +105,7 @@ export default function DashboardPage() {
               {isLoading ? (
                 <Skeleton className="h-8 w-16" />
               ) : (
-                <div className="text-2xl font-bold">{stats?.completed ?? 0}</div>
+                <div className="text-2xl font-bold">{stats?.closed ?? 0}</div>
               )}
             </CardContent>
           </Card>
