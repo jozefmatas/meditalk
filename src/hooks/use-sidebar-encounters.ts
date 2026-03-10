@@ -2,23 +2,23 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePathname } from "next/navigation";
-import type { Visit, VisitListResponse, VisitStatus } from "@/lib/types";
+import type { Encounter, EncounterListResponse, EncounterStatus } from "@/lib/types";
 
 const SIDEBAR_LIMIT = 20;
 
 /** Normalize legacy DB statuses (e.g. "completed" → "closed") */
-function normalizeStatus(status: string): VisitStatus {
+function normalizeStatus(status: string): EncounterStatus {
   if (status === "completed") return "closed";
-  return status as VisitStatus;
+  return status as EncounterStatus;
 }
 
-function normalizeVisits(visits: Visit[]): Visit[] {
-  return visits.map((v) => ({ ...v, status: normalizeStatus(v.status) }));
+function normalizeEncounters(encounters: Encounter[]): Encounter[] {
+  return encounters.map((v) => ({ ...v, status: normalizeStatus(v.status) }));
 }
 
-export function useSidebarVisits() {
+export function useSidebarEncounters() {
   const pathname = usePathname();
-  const [visits, setVisits] = useState<Visit[]>([]);
+  const [visits, setVisits] = useState<Encounter[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const pageRef = useRef(1);
@@ -36,9 +36,9 @@ export function useSidebarVisits() {
       const res = await fetch(`/api/encounters?${params}`);
       if (!res.ok) throw new Error("Failed to fetch visits");
 
-      const data: VisitListResponse = await res.json();
+      const data: EncounterListResponse = await res.json();
 
-      const normalized = normalizeVisits(data.visits);
+      const normalized = normalizeEncounters(data.encounters);
       if (pageNum === 1) {
         setVisits(normalized);
       } else {

@@ -28,9 +28,9 @@ import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { AudioSection } from "@/components/visits/audio-section";
 import { getDefaultTemplate } from "@/lib/templates";
-import type { Visit, ChunkMatch, VisitType } from "@/lib/types";
+import type { Encounter, ChunkMatch, EncounterType } from "@/lib/types";
 
-const VISIT_TYPES: VisitType[] = [
+const VISIT_TYPES: EncounterType[] = [
   "consultation",
   "follow_up",
   "preventive",
@@ -54,14 +54,14 @@ export default function VisitDetailPage({ params }: PageProps) {
   const { setPageTitle } = usePageTitle();
 
   // Visit state
-  const [visit, setVisit] = useState<Visit | null>(null);
+  const [visit, setVisit] = useState<Encounter | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Metadata form state
   const [title, setTitle] = useState("");
   const [patientName, setPatientName] = useState("");
-  const [visitType, setVisitType] = useState<VisitType>("consultation");
+  const [visitType, setEncounterType] = useState<EncounterType>("consultation");
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -115,13 +115,13 @@ export default function VisitDetailPage({ params }: PageProps) {
         const res = await fetch(`/api/encounters/${visitId}`);
         if (!res.ok) throw new Error("Visit not found");
 
-        const data: Visit = await res.json();
+        const data: Encounter = await res.json();
         setVisit(data);
 
         // Populate form fields + sync title to header/sidebar
         updateTitle(data.title || "");
         setPatientName(data.patient_name || "");
-        setVisitType(data.visit_type || "consultation");
+        setEncounterType(data.visit_type || "consultation");
 
         // Restore previous state from metadata
         const meta = data.metadata as Record<string, unknown>;
@@ -187,7 +187,7 @@ export default function VisitDetailPage({ params }: PageProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      setVisit((prev) => (prev ? { ...prev, ...updates } as Visit : prev));
+      setVisit((prev) => (prev ? { ...prev, ...updates } as Encounter : prev));
     } catch {
       // Silent fail
     }
@@ -374,7 +374,7 @@ export default function VisitDetailPage({ params }: PageProps) {
               <select
                 value={visitType}
                 onChange={(e) => {
-                  setVisitType(e.target.value as VisitType);
+                  setEncounterType(e.target.value as EncounterType);
                   // Trigger save on change
                   setTimeout(handleMetadataBlur, 0);
                 }}

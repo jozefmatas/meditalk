@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
-import type { Visit, VisitListParams, VisitStatus, CreateVisitRequest } from '@/lib/types';
+import type { Encounter, EncounterListParams, EncounterStatus, CreateEncounterRequest } from '@/lib/types';
 
 /** Normalize legacy DB statuses (e.g. "completed" → "closed") */
-function normalizeStatus(status: string): VisitStatus {
+function normalizeStatus(status: string): EncounterStatus {
   if (status === 'completed') return 'closed';
-  return status as VisitStatus;
+  return status as EncounterStatus;
 }
 
 /**
@@ -17,12 +17,12 @@ export async function GET(request: NextRequest) {
     const { userId, supabase } = await requireAuth();
 
     const searchParams = request.nextUrl.searchParams;
-    const params: VisitListParams = {
+    const params: EncounterListParams = {
       page: parseInt(searchParams.get('page') || '1'),
       limit: Math.min(parseInt(searchParams.get('limit') || '10'), 50),
-      status: (searchParams.get('status') as VisitStatus) || undefined,
+      status: (searchParams.get('status') as EncounterStatus) || undefined,
       search: searchParams.get('search') || undefined,
-      sortBy: (searchParams.get('sortBy') as VisitListParams['sortBy']) || 'visit_date',
+      sortBy: (searchParams.get('sortBy') as EncounterListParams['sortBy']) || 'visit_date',
       sortOrder: (searchParams.get('sortOrder') as 'asc' | 'desc') || 'desc',
     };
 
@@ -59,13 +59,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch visits' }, { status: 500 });
     }
 
-    const normalized = (visits as Visit[]).map((v) => ({
+    const normalized = (visits as Encounter[]).map((v) => ({
       ...v,
       status: normalizeStatus(v.status),
     }));
 
     return NextResponse.json({
-      visits: normalized,
+      encounters: normalized,
       total: count || 0,
       page: params.page,
       limit: params.limit,
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   try {
     const { userId, supabase } = await requireAuth();
 
-    const body: CreateVisitRequest = await request.json();
+    const body: CreateEncounterRequest = await request.json();
 
     const { data: visit, error } = await supabase
       .from('visits')

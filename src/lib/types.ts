@@ -1,8 +1,8 @@
 // DB row types (matching supabase/migrations)
 
-// Visit types
-export type VisitStatus = 'draft' | 'recording' | 'processing' | 'review' | 'closed' | 'archived';
-export type VisitType =
+// Encounter types
+export type EncounterStatus = 'draft' | 'recording' | 'processing' | 'review' | 'closed' | 'archived';
+export type EncounterType =
   | 'consultation'
   | 'follow_up'
   | 'preventive'
@@ -11,7 +11,7 @@ export type VisitType =
   | 'telemedicine'
   | 'home_visit';
 
-export interface Visit {
+export interface Encounter {
   id: string;
   user_id: string;
   title: string | null;
@@ -21,18 +21,15 @@ export interface Visit {
   visit_date: string;
   patient_name: string | null;
   patient_id: string | null;
-  visit_type: VisitType;
-  status: VisitStatus;
+  visit_type: EncounterType;
+  status: EncounterStatus;
   soap_note: string | null;
   patient_letter: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
 
-// Legacy alias for backward compatibility with existing code
-export type Transcript = Visit;
-
-export interface VisitChunk {
+export interface EncounterChunk {
   id: string;
   visit_id: string;
   chunk_index: number;
@@ -40,9 +37,6 @@ export interface VisitChunk {
   embedding: number[] | null;
   created_at: string;
 }
-
-// Legacy alias
-export type TranscriptChunk = VisitChunk;
 
 // Semantic search result (from match_chunks() RPC)
 export interface ChunkMatch {
@@ -54,23 +48,23 @@ export interface ChunkMatch {
 }
 
 // API request types
-export interface CreateVisitRequest {
+export interface CreateEncounterRequest {
   title?: string;
   patient_name?: string;
   patient_id?: string;
-  visit_type?: VisitType;
+  visit_type?: EncounterType;
   visit_date?: string;
   language?: string;
   metadata?: Record<string, unknown>;
 }
 
-export interface UpdateVisitRequest {
+export interface UpdateEncounterRequest {
   title?: string;
   patient_name?: string;
   patient_id?: string;
-  visit_type?: VisitType;
+  visit_type?: EncounterType;
   visit_date?: string;
-  status?: VisitStatus;
+  status?: EncounterStatus;
   soap_note?: string;
   patient_letter?: string;
   metadata?: Record<string, unknown>;
@@ -83,9 +77,6 @@ export interface ProcessAudioResponse {
   chunkCount: number;
   transcriptText: string;
 }
-
-// Legacy alias
-export type { ProcessAudioResponse as TranscriptResponse };
 
 export interface SearchResponse {
   matches: ChunkMatch[];
@@ -100,8 +91,8 @@ export interface GenerateResponse {
   soap?: string;
 }
 
-export interface VisitListResponse {
-  visits: Visit[];
+export interface EncounterListResponse {
+  encounters: Encounter[];
   total: number;
   page: number;
   limit: number;
@@ -110,11 +101,11 @@ export interface VisitListResponse {
 // Utility types
 export type SupportedLanguage = 'en' | 'sk' | 'cs';
 
-// Visit list query params
-export interface VisitListParams {
+// Encounter list query params
+export interface EncounterListParams {
   page?: number;
   limit?: number;
-  status?: VisitStatus;
+  status?: EncounterStatus;
   search?: string;
   sortBy?: 'visit_date' | 'created_at' | 'patient_name';
   sortOrder?: 'asc' | 'desc';

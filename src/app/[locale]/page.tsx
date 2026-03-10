@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, Folder01Icon, Tick02Icon, FileEditIcon, Loading03Icon } from "@hugeicons/core-free-icons";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
-import type { VisitListResponse } from "@/lib/types";
+import type { EncounterListResponse } from "@/lib/types";
 
 interface Stats {
   total: number;
@@ -35,9 +35,9 @@ export default function DashboardPage() {
           fetch("/api/encounters?limit=1&status=closed"),
         ]);
 
-        const all: VisitListResponse = await allRes.json();
-        const drafts: VisitListResponse = await draftRes.json();
-        const closed: VisitListResponse = await closedRes.json();
+        const all: EncounterListResponse = await allRes.json();
+        const drafts: EncounterListResponse = await draftRes.json();
+        const closed: EncounterListResponse = await closedRes.json();
 
         setStats({
           total: all.total,

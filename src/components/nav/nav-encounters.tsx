@@ -14,7 +14,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { useSidebarVisits } from "@/hooks/use-sidebar-visits";
+import { useSidebarEncounters } from "@/hooks/use-sidebar-encounters";
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -48,7 +48,7 @@ export function NavEncounters() {
   const pathname = usePathname();
   const getHref = useLocalizedHref();
   const { visits, isLoading, hasMore, loadMore, deleteVisit, markComplete } =
-    useSidebarVisits();
+    useSidebarEncounters();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 

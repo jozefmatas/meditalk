@@ -7,7 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Home01Icon, Add01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
-import type { Visit, VisitListResponse } from "@/lib/types";
+import type { Encounter, EncounterListResponse } from "@/lib/types";
 import {
   CommandDialog,
   Command,
@@ -33,7 +33,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
 
   const { createEncounter } = useCreateEncounter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Visit[]>([]);
+  const [results, setResults] = useState<Encounter[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
@@ -64,8 +64,8 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
         });
         const res = await fetch(`/api/encounters?${params}`);
         if (res.ok) {
-          const data: VisitListResponse = await res.json();
-          setResults(data.visits);
+          const data: EncounterListResponse = await res.json();
+          setResults(data.encounters);
         }
       } catch {
         // Silently fail

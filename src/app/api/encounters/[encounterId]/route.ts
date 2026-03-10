@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
-import type { Visit, VisitStatus, UpdateVisitRequest } from '@/lib/types';
+import type { Encounter, EncounterStatus, UpdateEncounterRequest } from '@/lib/types';
 
 /** Normalize legacy DB statuses (e.g. "completed" → "closed") */
-function normalizeStatus(status: string): VisitStatus {
+function normalizeStatus(status: string): EncounterStatus {
   if (status === 'completed') return 'closed';
-  return status as VisitStatus;
+  return status as EncounterStatus;
 }
 
 interface RouteParams {
@@ -43,7 +43,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...visit,
       status: normalizeStatus(visit.status),
       chunkCount: chunkCount || 0,
-    } as Visit & { chunkCount: number });
+    } as Encounter & { chunkCount: number });
   } catch (err) {
     if (err instanceof Response) return err;
     console.error('Visit fetch error:', err);
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     const { userId, supabase } = await requireAuth();
     const { encounterId: visitId } = await params;
 
-    const body: UpdateVisitRequest = await request.json();
+    const body: UpdateEncounterRequest = await request.json();
 
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
@@ -95,7 +95,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
     }
 
-    return NextResponse.json(visit as Visit);
+    return NextResponse.json(visit as Encounter);
   } catch (err) {
     if (err instanceof Response) return err;
     console.error('Visit update error:', err);

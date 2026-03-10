@@ -13,10 +13,10 @@ import {
   AlertCircleIcon,
   Folder01Icon,
 } from "@hugeicons/core-free-icons";
-import type { Visit } from "@/lib/types";
+import type { Encounter } from "@/lib/types";
 
 interface VisitListProps {
-  visits: Visit[];
+  visits: Encounter[];
   isLoading?: boolean;
   error?: string | null;
   onDelete?: (visitId: string) => void;

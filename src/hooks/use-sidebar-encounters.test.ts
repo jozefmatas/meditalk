@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useSidebarVisits } from "./use-sidebar-visits";
-import type { Visit, VisitListResponse } from "@/lib/types";
+import { useSidebarEncounters } from "./use-sidebar-encounters";
+import type { Encounter, EncounterListResponse } from "@/lib/types";
 
 // Mock next/navigation
 const mockPathname = vi.fn(() => "/");
@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => mockPathname(),
 }));
 
-const makeVisit = (overrides: Partial<Visit> = {}): Visit => ({
+const makeVisit = (overrides: Partial<Encounter> = {}): Encounter => ({
   id: crypto.randomUUID(),
   user_id: "user-1",
   title: "Test visit",
@@ -28,7 +28,7 @@ const makeVisit = (overrides: Partial<Visit> = {}): Visit => ({
   ...overrides,
 });
 
-function mockFetchResponse(data: VisitListResponse) {
+function mockFetchResponse(data: EncounterListResponse) {
   (global.fetch as Mock).mockResolvedValueOnce({
     ok: true,
     json: async () => data,
@@ -43,7 +43,7 @@ function mockFetchError() {
   (global.fetch as Mock).mockResolvedValueOnce({ ok: false });
 }
 
-describe("useSidebarVisits", () => {
+describe("useSidebarEncounters", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
@@ -52,9 +52,9 @@ describe("useSidebarVisits", () => {
 
   it("fetches visits on mount", async () => {
     const visits = [makeVisit({ title: "Visit 1" }), makeVisit({ title: "Visit 2" })];
-    mockFetchResponse({ visits, total: 2 });
+    mockFetchResponse({ encounters: visits, total: 2 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     expect(result.current.isLoading).toBe(true);
 
@@ -73,9 +73,9 @@ describe("useSidebarVisits", () => {
   it("loads more visits on loadMore", async () => {
     const page1 = [makeVisit({ title: "Visit 1" })];
     const page2 = [makeVisit({ title: "Visit 2" })];
-    mockFetchResponse({ visits: page1, total: 2 });
+    mockFetchResponse({ encounters: page1, total: 2 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -83,7 +83,7 @@ describe("useSidebarVisits", () => {
 
     expect(result.current.hasMore).toBe(true);
 
-    mockFetchResponse({ visits: page2, total: 2 });
+    mockFetchResponse({ encounters: page2, total: 2 });
     act(() => {
       result.current.loadMore();
     });
@@ -97,9 +97,9 @@ describe("useSidebarVisits", () => {
 
   it("optimistically deletes a visit", async () => {
     const visit = makeVisit({ title: "To delete" });
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.visits).toHaveLength(1);
@@ -116,9 +116,9 @@ describe("useSidebarVisits", () => {
 
   it("reverts delete on API failure", async () => {
     const visit = makeVisit({ title: "Keep me" });
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.visits).toHaveLength(1);
@@ -126,7 +126,7 @@ describe("useSidebarVisits", () => {
 
     // API fails → triggers refetch
     mockFetchError();
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
     act(() => {
       result.current.deleteVisit(visit.id);
@@ -143,9 +143,9 @@ describe("useSidebarVisits", () => {
 
   it("optimistically marks a visit complete", async () => {
     const visit = makeVisit({ status: "draft" });
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.visits[0].status).toBe("draft");
@@ -161,16 +161,16 @@ describe("useSidebarVisits", () => {
 
   it("reverts markComplete on API failure", async () => {
     const visit = makeVisit({ status: "draft" });
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.visits[0].status).toBe("draft");
     });
 
     mockFetchError();
-    mockFetchResponse({ visits: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1 });
 
     act(() => {
       result.current.markComplete(visit.id);
@@ -188,7 +188,7 @@ describe("useSidebarVisits", () => {
   it("handles fetch failure gracefully", async () => {
     (global.fetch as Mock).mockRejectedValueOnce(new Error("Network error"));
 
-    const { result } = renderHook(() => useSidebarVisits());
+    const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

@@ -12,15 +12,15 @@ import {
   Clock01Icon,
   Delete01Icon,
 } from "@hugeicons/core-free-icons";
-import type { Visit, VisitStatus } from "@/lib/types";
+import type { Encounter, EncounterStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface VisitCardProps {
-  visit: Visit;
+  visit: Encounter;
   onDelete?: (visitId: string) => void;
 }
 
-const statusColors: Record<VisitStatus, string> = {
+const statusColors: Record<EncounterStatus, string> = {
   draft: "bg-status-draft/10 text-status-draft",
   recording: "bg-status-recording/10 text-status-recording",
   processing: "bg-status-processing/10 text-status-processing",
@@ -29,7 +29,7 @@ const statusColors: Record<VisitStatus, string> = {
   archived: "bg-status-archived/10 text-status-archived",
 };
 
-const statusIcons: Record<VisitStatus, typeof Clock01Icon> = {
+const statusIcons: Record<EncounterStatus, typeof Clock01Icon> = {
   draft: Clock01Icon,
   recording: Clock01Icon,
   processing: Clock01Icon,

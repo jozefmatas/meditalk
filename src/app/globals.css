@@ -40,12 +40,12 @@
   --sidebar-accent-foreground: #232334;
   --sidebar-border: #e6e3db;
   --sidebar-ring: #ece8df;
-  --status-draft: #a39e93;
+  --status-draft: #ccc1a8;
   --status-recording: #dc2626;
   --status-processing: #4444ff;
-  --status-review: #9333ea;
+  --status-review: #cc8100;
   --status-closed: #16a34a;
-  --status-archived: #9ca3af;
+  --status-archived: #ccc1a8;
 }
 
 .dark {
