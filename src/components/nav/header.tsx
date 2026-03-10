@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { usePageTitle } from "./page-title-context";
+import { useHeaderActions } from "./header-actions-context";
 import { SidebarTrigger } from "@/components/shared/sidebar";
 import { Separator } from "@/components/shared/separator";
 import {
@@ -29,6 +30,7 @@ export function Header() {
   const pathname = usePathname();
   const getHref = useLocalizedHref();
   const { pageTitle } = usePageTitle();
+  const { headerActions } = useHeaderActions();
 
   const buildBreadcrumbs = (): BreadcrumbData[] => {
     const cleanPath = pathname.replace(/^\/(sk|cs|en)(?=\/|$)/, "").replace(/^\//, "");
@@ -95,6 +97,11 @@ export function Header() {
           })}
         </BreadcrumbList>
       </Breadcrumb>
+      {headerActions && (
+        <div className="ml-auto flex items-center gap-2">
+          {headerActions}
+        </div>
+      )}
     </header>
   );
 }

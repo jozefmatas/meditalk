@@ -40,7 +40,8 @@ const dotColor: Record<string, string> = {
 };
 
 /** Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px). */
-const itemClass = "h-9 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5!";
+const itemClass =
+  "h-9 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5! group-has-[[data-sidebar=menu-action]:hover]/menu-item:!bg-transparent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:!bg-transparent";
 
 export function NavEncounters() {
   const t = useTranslations("encounters");

@@ -5,6 +5,7 @@ import { routing } from "@/i18n/routing";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages } from "next-intl/server";
 import { PageTitleProvider } from "@/components/nav/page-title-context";
+import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import "../globals.css";
 
 const figtree = Figtree({
@@ -56,7 +57,9 @@ export default async function LocaleLayout({
       >
         <NextIntlClientProvider messages={messages}>
           <PageTitleProvider>
-            {children}
+            <HeaderActionsProvider>
+              {children}
+            </HeaderActionsProvider>
           </PageTitleProvider>
         </NextIntlClientProvider>
       </body>

@@ -65,6 +65,7 @@ export interface UpdateEncounterRequest {
   visit_type?: EncounterType;
   visit_date?: string;
   status?: EncounterStatus;
+  language?: SupportedLanguage;
   soap_note?: string;
   patient_letter?: string;
   metadata?: Record<string, unknown>;

@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import { usePageTitle } from "@/components/nav/page-title-context";
+import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
 import { Button } from "@/components/shared/button";
 import { Input } from "@/components/shared/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
@@ -17,10 +18,7 @@ import {
   Search01Icon,
   Loading03Icon,
   AlertCircleIcon,
-  MagicWand01Icon,
   Note01Icon,
-  Delete01Icon,
-  Tick01Icon,
   FloppyDiskIcon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -28,7 +26,7 @@ import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { AudioSection } from "@/components/visits/audio-section";
 import { getDefaultTemplate } from "@/lib/templates";
-import type { Encounter, ChunkMatch, EncounterType } from "@/lib/types";
+import type { Encounter, ChunkMatch, EncounterType, SupportedLanguage } from "@/lib/types";
 
 const VISIT_TYPES: EncounterType[] = [
   "consultation",
@@ -62,6 +60,9 @@ export default function VisitDetailPage({ params }: PageProps) {
   const [title, setTitle] = useState("");
   const [patientName, setPatientName] = useState("");
   const [visitType, setEncounterType] = useState<EncounterType>("consultation");
+
+  // Generation language (separate from UI locale)
+  const [generationLanguage, setGenerationLanguage] = useState<SupportedLanguage>("sk");
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -122,6 +123,7 @@ export default function VisitDetailPage({ params }: PageProps) {
         updateTitle(data.title || "");
         setPatientName(data.patient_name || "");
         setEncounterType(data.visit_type || "consultation");
+        setGenerationLanguage((data.language as SupportedLanguage) || "sk");
 
         // Restore previous state from metadata
         const meta = data.metadata as Record<string, unknown>;
@@ -314,6 +316,20 @@ export default function VisitDetailPage({ params }: PageProps) {
     }
   };
 
+  const handleLanguageChange = useCallback(async (lang: SupportedLanguage) => {
+    setGenerationLanguage(lang);
+    try {
+      await fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: lang }),
+      });
+      setVisit((prev) => (prev ? { ...prev, language: lang } : prev));
+    } catch {
+      // Silent fail
+    }
+  }, [visitId]);
+
   const isHtmlContent = (content: string) => content.trimStart().startsWith("<");
 
   const canGenerate = !!(visit?.raw_text || doctorNotes.trim());
@@ -353,55 +369,50 @@ export default function VisitDetailPage({ params }: PageProps) {
   return (
     <AppShell>
       <div className="max-w-4xl space-y-6">
-        {/* Header: Title + Actions */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 space-y-2">
+        {/* Header actions (rendered in app header via context) */}
+        <EncounterHeaderActions
+          status={visit.status}
+          generationLanguage={generationLanguage}
+          onLanguageChange={handleLanguageChange}
+          onGenerate={handleGenerate}
+          onMarkComplete={handleMarkComplete}
+          onDelete={handleDelete}
+          canGenerate={canGenerate}
+          isGenerating={isGenerating}
+        />
+
+        {/* Title + Metadata */}
+        <div className="space-y-2">
+          <Input
+            value={title}
+            onChange={(e) => updateTitle(e.target.value)}
+            onBlur={handleMetadataBlur}
+            placeholder={t("form.titlePlaceholder")}
+            className="text-lg font-semibold border-none shadow-none px-0 h-auto focus-visible:ring-0"
+          />
+          <div className="flex items-center gap-3">
             <Input
-              value={title}
-              onChange={(e) => updateTitle(e.target.value)}
+              value={patientName}
+              onChange={(e) => setPatientName(e.target.value)}
               onBlur={handleMetadataBlur}
-              placeholder={t("form.titlePlaceholder")}
-              className="text-lg font-semibold border-none shadow-none px-0 h-auto focus-visible:ring-0"
+              placeholder={t("form.patientNamePlaceholder")}
+              className="h-8 max-w-48 text-sm"
             />
-            <div className="flex items-center gap-3">
-              <Input
-                value={patientName}
-                onChange={(e) => setPatientName(e.target.value)}
-                onBlur={handleMetadataBlur}
-                placeholder={t("form.patientNamePlaceholder")}
-                className="h-8 max-w-48 text-sm"
-              />
-              <select
-                value={visitType}
-                onChange={(e) => {
-                  setEncounterType(e.target.value as EncounterType);
-                  // Trigger save on change
-                  setTimeout(handleMetadataBlur, 0);
-                }}
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-              >
-                {VISIT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {t(`type.${type}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {visit.status === "review" && (
-              <Button variant="outline" size="sm" onClick={handleMarkComplete}>
-                <HugeiconsIcon icon={Tick01Icon} size={16} />
-                {t("status.closed")}
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={handleDelete}>
-              <HugeiconsIcon
-                icon={Delete01Icon}
-                size={16}
-                className="text-destructive"
-              />
-            </Button>
+            <select
+              value={visitType}
+              onChange={(e) => {
+                setEncounterType(e.target.value as EncounterType);
+                // Trigger save on change
+                setTimeout(handleMetadataBlur, 0);
+              }}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {VISIT_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {t(`type.${type}`)}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -416,7 +427,7 @@ export default function VisitDetailPage({ params }: PageProps) {
         {/* Audio Section */}
         <AudioSection
           visitId={visitId}
-          locale={locale}
+          locale={generationLanguage}
           hasTranscript={!!visit.raw_text}
           disabled={isGenerating}
           onTranscriptReady={handleTranscriptReady}
@@ -539,29 +550,6 @@ export default function VisitDetailPage({ params }: PageProps) {
             )}
           </TabsContent>
         </Tabs>
-
-        {/* Generate button */}
-        <Button
-          onClick={handleGenerate}
-          disabled={isGenerating || !canGenerate}
-          className="w-full"
-        >
-          {isGenerating ? (
-            <>
-              <HugeiconsIcon
-                icon={Loading03Icon}
-                size={16}
-                className="animate-spin"
-              />
-              {t("detail.generating")}
-            </>
-          ) : (
-            <>
-              <HugeiconsIcon icon={MagicWand01Icon} size={16} />
-              {t("detail.generate")}
-            </>
-          )}
-        </Button>
 
         {/* Generation skeleton */}
         {isGenerating && (
