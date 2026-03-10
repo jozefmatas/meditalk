@@ -84,6 +84,7 @@ CREATE POLICY "Users can delete own visit chunks"
   );
 
 -- 7) Update match_chunks function to use visit_id
+DROP FUNCTION IF EXISTS public.match_chunks;
 CREATE OR REPLACE FUNCTION public.match_chunks(
   query_embedding vector(1536),
   match_count int DEFAULT 10,

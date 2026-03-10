@@ -10,7 +10,12 @@
     "test": "vitest",
     "test:unit": "vitest --project unit",
     "storybook": "storybook dev -p 8001",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset --linked --yes",
+    "db:types": "supabase gen types typescript --linked > src/lib/supabase/database.types.ts",
+    "db:migration:new": "supabase migration new",
+    "db:status": "supabase migration list --linked"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -64,6 +69,7 @@
     "jsdom": "^28.1.0",
     "playwright": "^1.58.2",
     "storybook": "^10.2.15",
+    "supabase": "^2.78.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^7.3.1",

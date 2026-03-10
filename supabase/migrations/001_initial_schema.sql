@@ -122,9 +122,14 @@ create policy "Users can delete own transcript chunks"
 -- 7) Storage bucket "audio"
 
 insert into storage.buckets (id, name, public)
-values ('audio', 'audio', false);
+values ('audio', 'audio', false)
+on conflict (id) do nothing;
 
 -- Storage RLS policies (users upload/read within their own folder):
+
+drop policy if exists "Users can upload audio" on storage.objects;
+drop policy if exists "Users can read own audio" on storage.objects;
+drop policy if exists "Users can delete own audio" on storage.objects;
 
 create policy "Users can upload audio"
   on storage.objects for insert
