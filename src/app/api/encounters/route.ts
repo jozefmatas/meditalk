@@ -3,8 +3,8 @@ import { requireAuth } from '@/lib/supabase/auth';
 import type { Visit, VisitListParams, VisitStatus, CreateVisitRequest } from '@/lib/types';
 
 /**
- * GET /api/visits
- * List user's visits with pagination
+ * GET /api/encounters
+ * List user's encounters with pagination
  */
 export async function GET(request: NextRequest) {
   try {
@@ -67,8 +67,8 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST /api/visits
- * Create a new visit
+ * POST /api/encounters
+ * Create a new encounter
  */
 export async function POST(request: NextRequest) {
   try {

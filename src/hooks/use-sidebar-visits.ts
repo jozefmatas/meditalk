@@ -20,7 +20,7 @@ export function useSidebarVisits() {
         page: pageNum.toString(),
         limit: SIDEBAR_LIMIT.toString(),
       });
-      const res = await fetch(`/api/visits?${params}`);
+      const res = await fetch(`/api/encounters?${params}`);
       if (!res.ok) throw new Error("Failed to fetch visits");
 
       const data: VisitListResponse = await res.json();
@@ -44,6 +44,18 @@ export function useSidebarVisits() {
     fetchVisits(1);
   }, [pathname, fetchVisits]);
 
+  // Live-update a visit when the detail page changes its title
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { id, title } = (e as CustomEvent<{ id: string; title: string }>).detail;
+      setVisits((prev) =>
+        prev.map((v) => (v.id === id ? { ...v, title } : v))
+      );
+    };
+    window.addEventListener("encounter-update", handler);
+    return () => window.removeEventListener("encounter-update", handler);
+  }, []);
+
   const loadMore = () => {
     const nextPage = page + 1;
     setPage(nextPage);
@@ -56,7 +68,7 @@ export function useSidebarVisits() {
     setTotal((prev) => prev - 1);
 
     try {
-      const res = await fetch(`/api/visits/${visitId}`, { method: "DELETE" });
+      const res = await fetch(`/api/encounters/${visitId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
     } catch {
       // Revert on failure
@@ -70,7 +82,7 @@ export function useSidebarVisits() {
     );
 
     try {
-      const res = await fetch(`/api/visits/${visitId}`, {
+      const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "completed" }),

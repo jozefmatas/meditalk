@@ -86,6 +86,25 @@ export default function VisitDetailPage({ params }: PageProps) {
     return `${base}${href}`;
   };
 
+  // Update header breadcrumb + sidebar title synchronously
+  const updateTitle = useCallback(
+    (newTitle: string) => {
+      setTitle(newTitle);
+      setPageTitle(newTitle || null);
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, title: newTitle || null },
+        })
+      );
+    },
+    [visitId, setPageTitle]
+  );
+
+  // Clear page title on unmount
+  useEffect(() => {
+    return () => setPageTitle(null);
+  }, [setPageTitle]);
+
   // Fetch visit data
   useEffect(() => {
     const fetchVisit = async () => {
@@ -93,14 +112,14 @@ export default function VisitDetailPage({ params }: PageProps) {
       setError(null);
 
       try {
-        const res = await fetch(`/api/visits/${visitId}`);
+        const res = await fetch(`/api/encounters/${visitId}`);
         if (!res.ok) throw new Error("Visit not found");
 
         const data: Visit = await res.json();
         setVisit(data);
 
-        // Populate form fields
-        setTitle(data.title || "");
+        // Populate form fields + sync title to header/sidebar
+        updateTitle(data.title || "");
         setPatientName(data.patient_name || "");
         setVisitType(data.visit_type || "consultation");
 
@@ -126,13 +145,7 @@ export default function VisitDetailPage({ params }: PageProps) {
     };
 
     fetchVisit();
-  }, [visitId]);
-
-  // Sync visit title to header breadcrumb
-  useEffect(() => {
-    setPageTitle(title || null);
-    return () => setPageTitle(null);
-  }, [title, setPageTitle]);
+  }, [visitId, updateTitle]);
 
   // Auto-save doctor notes (2s debounce)
   useEffect(() => {
@@ -140,7 +153,7 @@ export default function VisitDetailPage({ params }: PageProps) {
 
     const timeout = setTimeout(async () => {
       try {
-        await fetch(`/api/visits/${visitId}`, {
+        await fetch(`/api/encounters/${visitId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -169,7 +182,7 @@ export default function VisitDetailPage({ params }: PageProps) {
     if (Object.keys(updates).length === 0) return;
 
     try {
-      await fetch(`/api/visits/${visitId}`, {
+      await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
@@ -251,7 +264,7 @@ export default function VisitDetailPage({ params }: PageProps) {
     setSaveStatus("idle");
 
     try {
-      const res = await fetch(`/api/visits/${visitId}`, {
+      const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ soap_note: generatedNoteHtml }),
@@ -275,7 +288,7 @@ export default function VisitDetailPage({ params }: PageProps) {
     if (!visitId) return;
 
     try {
-      const res = await fetch(`/api/visits/${visitId}`, {
+      const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "completed" }),
@@ -293,7 +306,7 @@ export default function VisitDetailPage({ params }: PageProps) {
     if (!confirm(t("delete.message"))) return;
 
     try {
-      const res = await fetch(`/api/visits/${visitId}`, { method: "DELETE" });
+      const res = await fetch(`/api/encounters/${visitId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete visit");
       router.push(getLocalizedHref(""));
     } catch (err) {
@@ -345,7 +358,7 @@ export default function VisitDetailPage({ params }: PageProps) {
           <div className="flex-1 space-y-2">
             <Input
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => updateTitle(e.target.value)}
               onBlur={handleMetadataBlur}
               placeholder={t("form.titlePlaceholder")}
               className="text-lg font-semibold border-none shadow-none px-0 h-auto focus-visible:ring-0"

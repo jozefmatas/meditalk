@@ -66,7 +66,7 @@ describe("useSidebarVisits", () => {
     expect(result.current.visits[0].title).toBe("Visit 1");
     expect(result.current.hasMore).toBe(false);
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/visits?")
+      expect.stringContaining("/api/encounters?")
     );
   });
 

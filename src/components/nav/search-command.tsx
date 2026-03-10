@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Home01Icon, Add01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
+import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import type { Visit, VisitListResponse } from "@/lib/types";
 import {
   CommandDialog,
@@ -30,6 +31,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
   const router = useRouter();
   const getHref = useLocalizedHref();
 
+  const { createEncounter } = useCreateEncounter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Visit[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -60,7 +62,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
           search: query,
           limit: "10",
         });
-        const res = await fetch(`/api/visits?${params}`);
+        const res = await fetch(`/api/encounters?${params}`);
         if (res.ok) {
           const data: VisitListResponse = await res.json();
           setResults(data.visits);
@@ -130,9 +132,9 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
               <HugeiconsIcon icon={Home01Icon} size={16} />
               <span>{tNav("dashboard")}</span>
             </CommandItem>
-            <CommandItem onSelect={() => navigate(getHref("/encounters/new"))}>
+            <CommandItem onSelect={() => { onOpenChange(false); createEncounter(); }}>
               <HugeiconsIcon icon={Add01Icon} size={16} />
-              <span>{tNav("newVisit")}</span>
+              <span>{tNav("newEncounter")}</span>
             </CommandItem>
             <CommandItem onSelect={() => navigate(getHref("/settings"))}>
               <HugeiconsIcon icon={Settings01Icon} size={16} />

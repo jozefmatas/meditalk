@@ -3,17 +3,17 @@ import { requireAuth } from '@/lib/supabase/auth';
 import type { Visit, UpdateVisitRequest } from '@/lib/types';
 
 interface RouteParams {
-  params: Promise<{ visitId: string }>;
+  params: Promise<{ encounterId: string }>;
 }
 
 /**
- * GET /api/visits/[visitId]
+ * GET /api/encounters/[encounterId]
  * Get a single visit with its chunks
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { userId, supabase } = await requireAuth();
-    const { visitId } = await params;
+    const { encounterId: visitId } = await params;
 
     // Get visit
     const { data: visit, error } = await supabase
@@ -45,13 +45,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 }
 
 /**
- * PATCH /api/visits/[visitId]
+ * PATCH /api/encounters/[encounterId]
  * Update a visit
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { userId, supabase } = await requireAuth();
-    const { visitId } = await params;
+    const { encounterId: visitId } = await params;
 
     const body: UpdateVisitRequest = await request.json();
 
@@ -97,13 +97,13 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 }
 
 /**
- * DELETE /api/visits/[visitId]
+ * DELETE /api/encounters/[encounterId]
  * Delete a visit (soft delete by default, hard delete with ?hard=true)
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { userId, supabase } = await requireAuth();
-    const { visitId } = await params;
+    const { encounterId: visitId } = await params;
 
     const searchParams = request.nextUrl.searchParams;
     const hardDelete = searchParams.get('hard') === 'true';

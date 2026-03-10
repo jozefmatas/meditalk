@@ -9,8 +9,10 @@ import {
   Home02Icon,
   AddSquareIcon,
   DocumentValidationIcon,
+  Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
+import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -32,6 +34,7 @@ export function NavMain({ onSearchClick }: NavMainProps) {
   const tCommon = useTranslations("common");
   const pathname = usePathname();
   const getHref = useLocalizedHref();
+  const { createEncounter, isCreating } = useCreateEncounter();
 
   const dashboardHref = getHref("");
   const isDashboard =
@@ -44,15 +47,17 @@ export function NavMain({ onSearchClick }: NavMainProps) {
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
-            asChild
-            isActive={pathname.includes("/encounters/new")}
+            onClick={() => createEncounter()}
+            disabled={isCreating}
             tooltip={t("newEncounter")}
             className={itemClass}
           >
-            <Link href={getHref("/encounters/new")}>
+            {isCreating ? (
+              <HugeiconsIcon icon={Loading03Icon} size={20} className="animate-spin text-primary" />
+            ) : (
               <HugeiconsIcon icon={AddSquareIcon} size={20} className="text-primary" />
-              <span>{t("newEncounter")}</span>
-            </Link>
+            )}
+            <span>{t("newEncounter")}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
         <SidebarMenuItem>

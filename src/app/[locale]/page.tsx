@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
 import { Button } from "@/components/shared/button";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, Folder01Icon, Tick02Icon, FileEditIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Folder01Icon, Tick02Icon, FileEditIcon, Loading03Icon } from "@hugeicons/core-free-icons";
+import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import type { VisitListResponse } from "@/lib/types";
 
 interface Stats {
@@ -22,7 +21,7 @@ export default function DashboardPage() {
   const t = useTranslations("dashboard");
   const tVisits = useTranslations("visits");
   const tNav = useTranslations("nav");
-  const getHref = useLocalizedHref();
+  const { createEncounter, isCreating } = useCreateEncounter();
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,9 +30,9 @@ export default function DashboardPage() {
     async function fetchStats() {
       try {
         const [allRes, draftRes, completedRes] = await Promise.all([
-          fetch("/api/visits?limit=1"),
-          fetch("/api/visits?limit=1&status=draft"),
-          fetch("/api/visits?limit=1&status=completed"),
+          fetch("/api/encounters?limit=1"),
+          fetch("/api/encounters?limit=1&status=draft"),
+          fetch("/api/encounters?limit=1&status=completed"),
         ]);
 
         const all: VisitListResponse = await allRes.json();
@@ -112,18 +111,20 @@ export default function DashboardPage() {
           </Card>
         </div>
 
-        {/* New Visit CTA */}
+        {/* New Encounter CTA */}
         <Card>
           <CardContent className="flex items-center justify-between py-6">
             <div>
-              <h3 className="font-medium">{tNav("newVisit")}</h3>
+              <h3 className="font-medium">{tNav("newEncounter")}</h3>
               <p className="text-sm text-muted-foreground">{tVisits("empty.description")}</p>
             </div>
-            <Button asChild>
-              <Link href={getHref("/encounters/new")}>
+            <Button onClick={() => createEncounter()} disabled={isCreating}>
+              {isCreating ? (
+                <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin" />
+              ) : (
                 <HugeiconsIcon icon={Add01Icon} size={16} />
-                {tNav("newVisit")}
-              </Link>
+              )}
+              {tNav("newEncounter")}
             </Button>
           </CardContent>
         </Card>
