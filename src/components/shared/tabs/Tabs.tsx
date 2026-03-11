@@ -15,6 +15,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/shared/dropdown-menu";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 
 /* ── Re-export base components with style overrides ── */
@@ -30,7 +32,7 @@ function TabsList({
     <TabsListBase
       variant={variant}
       className={cn(
-        variant === "line" && "h-9",
+        variant === "line" && "group-data-horizontal/tabs:h-10 h-10",
         className,
       )}
       {...props}
@@ -45,7 +47,7 @@ function TabsTrigger({
   return (
     <TabsTriggerBase
       className={cn(
-        "text-foreground/65 hover:text-foreground",
+        "font-normal text-foreground/65 hover:text-foreground data-active:font-medium",
         "group-data-[variant=line]/tabs-list:data-active:text-primary group-data-[variant=line]/tabs-list:after:bg-primary",
         className,
       )}
@@ -73,6 +75,10 @@ interface TabsLineWithActionProps {
   onValueChange: (value: string) => void;
   /** Called when user picks a tab from the dropdown */
   onAddTab: (value: string) => void;
+  /** Called when user removes a tab via the x button */
+  onRemoveTab?: (value: string) => void;
+  /** Tab values that can be removed (show x icon) */
+  removableTabs?: string[];
   /** Label for the action button (e.g. "Add document") */
   actionLabel?: string;
   children?: React.ReactNode;
@@ -85,6 +91,8 @@ function TabsLineWithAction({
   value,
   onValueChange,
   onAddTab,
+  onRemoveTab,
+  removableTabs = [],
   actionLabel = "Add document",
   children,
   className,
@@ -95,12 +103,24 @@ function TabsLineWithAction({
   );
 
   return (
-    <Tabs value={value} onValueChange={onValueChange} className={className}>
-      <div className="flex items-center gap-2">
-        <TabsList variant="line" className="h-9">
+    <Tabs value={value} onValueChange={onValueChange} className={cn("gap-6", className)}>
+      <div className="flex items-center gap-1 border-b border-border">
+        <TabsList variant="line">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value}>
               {tab.label}
+              {removableTabs.includes(tab.value) && onRemoveTab && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveTab(tab.value);
+                  }}
+                  className="ml-1 rounded-sm opacity-50 hover:opacity-100"
+                >
+                  <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                </button>
+              )}
             </TabsTrigger>
           ))}
         </TabsList>

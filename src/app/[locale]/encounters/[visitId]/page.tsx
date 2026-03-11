@@ -451,8 +451,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
   // Review tabs configuration
   const allTabs: TabOption[] = useMemo(
     () => [
-      { value: "note", label: t("detail.note") },
       { value: "transcript", label: t("detail.transcript") },
+      { value: "note", label: t("detail.note") },
       { value: "add-document", label: t("detail.addDocument") },
     ],
     [t],
@@ -479,6 +479,28 @@ export default function EncounterDetailPage({ params }: PageProps) {
       }
     },
     [allTabs, defaultVisibleTabs],
+  );
+
+  const handleRemoveTab = useCallback(
+    (value: string) => {
+      setVisibleTabs((prev) => {
+        const next = prev.filter((t) => t.value !== value);
+        return next.length > 0 ? next : [];
+      });
+      if (activeTab === value) {
+        setActiveTab(defaultVisibleTabs[0]?.value ?? "transcript");
+      }
+    },
+    [activeTab, defaultVisibleTabs],
+  );
+
+  // Tabs added via dropdown (not in default set) are removable
+  const removableTabValues = useMemo(
+    () =>
+      currentVisibleTabs
+        .filter((t) => !defaultVisibleTabs.some((d) => d.value === t.value))
+        .map((t) => t.value),
+    [currentVisibleTabs, defaultVisibleTabs],
   );
 
   const parsedSections = useMemo(
@@ -568,13 +590,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
             {/* Title + metadata + recording bar */}
             <div className="flex flex-col gap-5">
               {isDraft ? (
-                <div className="flex min-h-9 items-center justify-between gap-4">
+                <div className="flex flex-col gap-1">
                   <Textarea
                     value={title}
                     onChange={(e) => updateTitle(e.target.value)}
                     onBlur={handleMetadataBlur}
                     placeholder={t("untitled")}
                     rows={1}
+                    autoFocus
                     className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
                     onInput={(e) => {
                       const target = e.currentTarget;
@@ -588,15 +611,15 @@ export default function EncounterDetailPage({ params }: PageProps) {
                       }
                     }}
                   />
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className="text-sm text-foreground/65">
-                      {formatVisitDate(visit.visit_date, locale)}
-                    </span>
+                  <div className="flex items-center gap-3">
                     <Badge
                       variant={`status-${visit.status}` as "status-started"}
                     >
                       {t(`status.${visit.status}`)}
                     </Badge>
+                    <span className="text-sm text-foreground/65">
+                      {formatVisitDate(visit.visit_date, locale)}
+                    </span>
                   </div>
                 </div>
               ) : (
@@ -663,6 +686,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
                   value={activeTab}
                   onValueChange={setActiveTab}
                   onAddTab={handleAddTab}
+                  onRemoveTab={handleRemoveTab}
+                  removableTabs={removableTabValues}
                   actionLabel={t("detail.addDocument")}
                 >
                   {/* Note tab */}
