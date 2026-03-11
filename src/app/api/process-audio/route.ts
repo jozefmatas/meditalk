@@ -6,16 +6,10 @@ import type { ProcessAudioResponse, SupportedLanguage } from '@/lib/types';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
-const ALLOWED_AUDIO_TYPES = new Set([
-  'audio/mpeg',
-  'audio/wav',
-  'audio/webm',
-  'audio/ogg',
-  'audio/flac',
-  'audio/mp4',
-  'audio/x-m4a',
-  'audio/aac',
-]);
+/** Accept any audio/* MIME type — Whisper handles all major formats */
+function isAudioMime(type: string): boolean {
+  return type.split(';')[0].trim().startsWith('audio/');
+}
 
 const VALID_LANGUAGES: SupportedLanguage[] = ['en', 'sk', 'cs'];
 
@@ -33,9 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
     }
 
-    // Browser may send "audio/webm;codecs=opus" — match base MIME type
-    const baseMime = file.type.split(';')[0].trim();
-    if (!ALLOWED_AUDIO_TYPES.has(baseMime)) {
+    if (!isAudioMime(file.type)) {
       return NextResponse.json(
         { error: `Unsupported file type: ${file.type}` },
         { status: 400 }
