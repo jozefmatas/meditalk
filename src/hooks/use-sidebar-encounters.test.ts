@@ -52,7 +52,7 @@ describe("useSidebarEncounters", () => {
 
   it("fetches visits on mount", async () => {
     const visits = [makeVisit({ title: "Visit 1" }), makeVisit({ title: "Visit 2" })];
-    mockFetchResponse({ encounters: visits, total: 2 });
+    mockFetchResponse({ encounters: visits, total: 2, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -73,7 +73,7 @@ describe("useSidebarEncounters", () => {
   it("loads more visits on loadMore", async () => {
     const page1 = [makeVisit({ title: "Visit 1" })];
     const page2 = [makeVisit({ title: "Visit 2" })];
-    mockFetchResponse({ encounters: page1, total: 2 });
+    mockFetchResponse({ encounters: page1, total: 2, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -83,7 +83,7 @@ describe("useSidebarEncounters", () => {
 
     expect(result.current.hasMore).toBe(true);
 
-    mockFetchResponse({ encounters: page2, total: 2 });
+    mockFetchResponse({ encounters: page2, total: 2, page: 2, limit: 20 });
     act(() => {
       result.current.loadMore();
     });
@@ -97,7 +97,7 @@ describe("useSidebarEncounters", () => {
 
   it("optimistically deletes a visit", async () => {
     const visit = makeVisit({ title: "To delete" });
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -116,7 +116,7 @@ describe("useSidebarEncounters", () => {
 
   it("reverts delete on API failure", async () => {
     const visit = makeVisit({ title: "Keep me" });
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -126,7 +126,7 @@ describe("useSidebarEncounters", () => {
 
     // API fails → triggers refetch
     mockFetchError();
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     act(() => {
       result.current.deleteVisit(visit.id);
@@ -143,7 +143,7 @@ describe("useSidebarEncounters", () => {
 
   it("optimistically marks a visit complete", async () => {
     const visit = makeVisit({ status: "started" });
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -161,7 +161,7 @@ describe("useSidebarEncounters", () => {
 
   it("reverts markComplete on API failure", async () => {
     const visit = makeVisit({ status: "started" });
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
@@ -170,7 +170,7 @@ describe("useSidebarEncounters", () => {
     });
 
     mockFetchError();
-    mockFetchResponse({ encounters: [visit], total: 1 });
+    mockFetchResponse({ encounters: [visit], total: 1, page: 1, limit: 20 });
 
     act(() => {
       result.current.markComplete(visit.id);

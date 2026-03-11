@@ -198,6 +198,7 @@
     "saving": "Saving...",
     "saved": "Saved",
     "sectionCount": "{count} sections",
+    "noResults": "No templates found",
     "comprehensive-medical-exam": {
       "name": "Comprehensive Medical Exam",
       "description": "Complete examination template with ~50 sections"

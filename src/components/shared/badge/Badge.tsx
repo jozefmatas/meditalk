@@ -49,7 +49,7 @@ function Badge({
   return (
     <GeneratedBadge
       variant={baseVariant}
-      className={cn("rounded-md", variantFix, statusFix, className)}
+      className={cn("rounded-sm", variantFix, statusFix, className)}
       {...props}
     />
   );

@@ -134,7 +134,7 @@ export function NavEncounters() {
                         >
                           {visit.title || t("untitled")}
                         </span>
-                        <span className="truncate text-xs leading-none text-sidebar-foreground/65">
+                        <span className="truncate text-xs font-normal leading-none text-sidebar-foreground/65">
                           {t(`status.${visit.status}`)}
                         </span>
                       </div>

@@ -198,6 +198,7 @@
     "saving": "Ukladá sa...",
     "saved": "Uložené",
     "sectionCount": "{count} sekcií",
+    "noResults": "Žiadne šablóny",
     "comprehensive-medical-exam": {
       "name": "Komplexné lekárske vyšetrenie",
       "description": "Kompletná šablóna vyšetrenia s ~50 sekciami"

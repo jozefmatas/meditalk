@@ -83,7 +83,8 @@
       "Bash(npm run db:status:*)",
       "Bash(npm run db:reset:*)",
       "WebFetch(domain:ui.elevenlabs.io)",
-      "Bash(npx @elevenlabs/cli@latest components add:*)"
+      "Bash(npx @elevenlabs/cli@latest components add:*)",
+      "Bash(/Users/jozefmatas/Documents/meditalk/meditalk/src/components/shared/input-group/InputGroup.tsx << 'EOF'\nexport {\n  InputGroup,\n  InputGroupAddon,\n  InputGroupButton,\n  InputGroupText,\n  InputGroupInput,\n  InputGroupTextarea,\n} from \"@/components/generated/ui/input-group\";\nEOF)"
     ],
     "deny": [],
     "ask": []

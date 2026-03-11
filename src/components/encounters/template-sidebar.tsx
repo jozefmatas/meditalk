@@ -27,16 +27,16 @@ export function TemplateSidebar({
   const isReview = !!documentedSections;
 
   const documented = template?.sections.filter((s) =>
-    documentedSections?.has(s.id)
+    documentedSections?.has(s.id),
   );
   const remaining = template?.sections.filter(
-    (s) => !documentedSections?.has(s.id)
+    (s) => !documentedSections?.has(s.id),
   );
 
   return (
     <div className="flex w-60 shrink-0 flex-col gap-3">
       <div className="flex flex-col gap-2">
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-foreground/65">
           {tTemplates("selectTemplate")}
         </span>
         <TemplateSelector
@@ -54,7 +54,7 @@ export function TemplateSidebar({
               type="button"
               className={cn(
                 "flex h-8 items-center gap-1.5 rounded-lg px-1.5 text-sm text-muted-foreground",
-                "hover:bg-accent hover:text-foreground transition-colors"
+                "hover:bg-accent hover:text-foreground transition-colors",
               )}
             >
               <span className="flex size-5 shrink-0 items-center justify-center">
@@ -98,9 +98,10 @@ export function TemplateSidebar({
           )}
 
           {/* Separator */}
-          {documented && documented.length > 0 && remaining && remaining.length > 0 && (
-            <div className="h-px bg-border" />
-          )}
+          {documented &&
+            documented.length > 0 &&
+            remaining &&
+            remaining.length > 0 && <div className="h-px bg-border" />}
 
           {/* Remaining sections */}
           {remaining && remaining.length > 0 && (

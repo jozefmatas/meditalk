@@ -1,15 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { TEMPLATES } from "@/lib/templates";
-import { flattenSectionIds } from "@/lib/templates/html";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/shared/select";
+import { Combobox } from "@/components/shared/combobox";
 
 interface TemplateSelectorProps {
   value: string;
@@ -24,26 +18,25 @@ export function TemplateSelector({
 }: TemplateSelectorProps) {
   const t = useTranslations("templates");
 
+  const options = useMemo(
+    () =>
+      TEMPLATES.map((template) => ({
+        value: template.id,
+        label: t(template.nameKey),
+      })),
+    [t],
+  );
+
   return (
-    <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger className="w-full">
-        <SelectValue placeholder={t("selectTemplate")} />
-      </SelectTrigger>
-      <SelectContent>
-        {TEMPLATES.map((template) => {
-          const sectionCount = flattenSectionIds(template).length;
-          return (
-            <SelectItem key={template.id} value={template.id}>
-              <div className="flex items-center justify-between gap-4">
-                <span>{t(template.nameKey)}</span>
-                <span className="text-xs text-muted-foreground">
-                  {t("sectionCount", { count: sectionCount })}
-                </span>
-              </div>
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
-    </Select>
+    <Combobox
+      value={value}
+      onValueChange={onChange}
+      options={options}
+      placeholder={t("selectTemplate")}
+      searchPlaceholder={t("selectTemplate")}
+      emptyText={t("noResults")}
+      disabled={disabled}
+      className="w-full"
+    />
   );
 }

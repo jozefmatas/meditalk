@@ -198,6 +198,7 @@
     "saving": "Ukládá se...",
     "saved": "Uloženo",
     "sectionCount": "{count} sekcí",
+    "noResults": "Žádné šablony",
     "comprehensive-medical-exam": {
       "name": "Komplexní lékařské vyšetření",
       "description": "Kompletní šablona vyšetření s ~50 sekcemi"
