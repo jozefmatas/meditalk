@@ -19,11 +19,11 @@ const variantFixes: Partial<Record<string, string>> = {
  * Uses CSS variable colors from globals.css: --color-status-*.
  */
 const statusClasses: Record<string, string> = {
-  "status-draft": "bg-muted text-foreground/65",
+  "status-started": "bg-muted text-foreground/65",
   "status-recording": "bg-status-recording/10 text-status-recording",
   "status-processing": "bg-status-processing/10 text-status-processing",
-  "status-review": "bg-status-review/10 text-status-review",
-  "status-closed": "bg-status-closed/10 text-status-closed",
+  "status-to_review": "bg-status-to_review/10 text-status-to_review",
+  "status-completed": "bg-status-completed/10 text-status-completed",
   "status-archived": "bg-status-archived/10 text-status-archived",
 };
 

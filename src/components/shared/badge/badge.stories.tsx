@@ -20,11 +20,11 @@ const meta = {
         "outline",
         "ghost",
         "link",
-        "status-draft",
+        "status-started",
         "status-recording",
         "status-processing",
-        "status-review",
-        "status-closed",
+        "status-to_review",
+        "status-completed",
         "status-archived",
       ],
     },
@@ -76,8 +76,8 @@ export const AllBaseVariants: Story = {
   ),
 };
 
-export const StatusDraft: Story = {
-  args: { children: "Draft", variant: "status-draft" },
+export const StatusStarted: Story = {
+  args: { children: "Started", variant: "status-started" },
 };
 
 export const StatusRecording: Story = {
@@ -88,12 +88,12 @@ export const StatusProcessing: Story = {
   args: { children: "Processing", variant: "status-processing" },
 };
 
-export const StatusReview: Story = {
-  args: { children: "Review", variant: "status-review" },
+export const StatusToReview: Story = {
+  args: { children: "To Review", variant: "status-to_review" },
 };
 
-export const StatusClosed: Story = {
-  args: { children: "Closed", variant: "status-closed" },
+export const StatusCompleted: Story = {
+  args: { children: "Completed", variant: "status-completed" },
 };
 
 export const StatusArchived: Story = {
@@ -103,11 +103,11 @@ export const StatusArchived: Story = {
 export const AllStatusVariants: Story = {
   render: () => (
     <div className="flex flex-wrap gap-2">
-      <Badge variant="status-draft">Draft</Badge>
+      <Badge variant="status-started">Started</Badge>
       <Badge variant="status-recording">Recording</Badge>
       <Badge variant="status-processing">Processing</Badge>
-      <Badge variant="status-review">Review</Badge>
-      <Badge variant="status-closed">Closed</Badge>
+      <Badge variant="status-to_review">To Review</Badge>
+      <Badge variant="status-completed">Completed</Badge>
       <Badge variant="status-archived">Archived</Badge>
     </div>
   ),
@@ -130,11 +130,11 @@ export const AllVariants: Story = {
       <div>
         <p className="mb-2 text-sm font-medium text-muted-foreground">Status</p>
         <div className="flex flex-wrap gap-2">
-          <Badge variant="status-draft">Draft</Badge>
+          <Badge variant="status-started">Started</Badge>
           <Badge variant="status-recording">Recording</Badge>
           <Badge variant="status-processing">Processing</Badge>
-          <Badge variant="status-review">Review</Badge>
-          <Badge variant="status-closed">Closed</Badge>
+          <Badge variant="status-to_review">To Review</Badge>
+          <Badge variant="status-completed">Completed</Badge>
           <Badge variant="status-archived">Archived</Badge>
         </div>
       </div>

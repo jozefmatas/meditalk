@@ -6,9 +6,11 @@ import type { Encounter, EncounterListResponse, EncounterStatus } from "@/lib/ty
 
 const SIDEBAR_LIMIT = 20;
 
-/** Normalize legacy DB statuses (e.g. "completed" → "closed") */
+/** Normalize legacy DB statuses to current values */
 function normalizeStatus(status: string): EncounterStatus {
-  if (status === "completed") return "closed";
+  if (status === "draft") return "started";
+  if (status === "review") return "to_review";
+  if (status === "closed" || status === "completed") return "completed";
   return status as EncounterStatus;
 }
 
@@ -103,14 +105,14 @@ export function useSidebarEncounters() {
 
   const markComplete = async (visitId: string) => {
     setVisits((prev) =>
-      prev.map((v) => (v.id === visitId ? { ...v, status: "closed" as const } : v))
+      prev.map((v) => (v.id === visitId ? { ...v, status: "completed" as const } : v))
     );
 
     try {
       const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "closed" }),
+        body: JSON.stringify({ status: "completed" }),
       });
       if (!res.ok) throw new Error("Failed to update");
     } catch {

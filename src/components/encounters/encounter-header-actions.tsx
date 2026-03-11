@@ -43,7 +43,7 @@ interface EncounterHeaderActionsProps {
   isGenerating: boolean;
 }
 
-const DRAFT_STATUSES: EncounterStatus[] = ["draft", "recording", "processing"];
+const DRAFT_STATUSES: EncounterStatus[] = ["started", "recording", "processing"];
 
 export function EncounterHeaderActions({
   status,

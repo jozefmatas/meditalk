@@ -55,7 +55,7 @@ function formatVisitDate(dateString: string, locale: string) {
 }
 
 /** Statuses that show the draft-mode editor layout */
-const DRAFT_STATUSES: EncounterStatus[] = ["draft", "recording", "processing"];
+const DRAFT_STATUSES: EncounterStatus[] = ["started", "recording", "processing"];
 
 export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
@@ -255,7 +255,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
-      const status = recordingState === "recording" ? "recording" : "draft";
+      const status = recordingState === "recording" ? "recording" : "started";
       setVisit((prev) => (prev ? { ...prev, status } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
@@ -350,14 +350,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
       await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "review" }),
+        body: JSON.stringify({ status: "to_review" }),
       });
       setVisit((prev) =>
-        prev ? { ...prev, status: "review" } : prev
+        prev ? { ...prev, status: "to_review" } : prev
       );
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "review" },
+          detail: { id: visitId, status: "to_review" },
         })
       );
     } catch (err) {
@@ -374,14 +374,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
       const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "closed" }),
+        body: JSON.stringify({ status: "completed" }),
       });
 
       if (!res.ok) throw new Error("Failed to update status");
-      setVisit((prev) => (prev ? { ...prev, status: "closed" } : prev));
+      setVisit((prev) => (prev ? { ...prev, status: "completed" } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "closed" },
+          detail: { id: visitId, status: "completed" },
         })
       );
     } catch (err) {
@@ -533,12 +533,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 </h1>
               )}
               <div className="flex shrink-0 items-center gap-3">
-                {visit.status === "review" && (
+                {visit.status === "to_review" && (
                   <Button variant="outline" onClick={handleMarkComplete}>
                     {t("detail.markComplete")}
                   </Button>
                 )}
-                <Badge variant={`status-${visit.status}` as "status-draft"}>
+                <Badge variant={`status-${visit.status}` as "status-started"}>
                   {t(`status.${visit.status}`)}
                 </Badge>
                 <span className="text-sm text-muted-foreground">

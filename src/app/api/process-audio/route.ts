@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
           raw_text: rawText,
           language,
           visit_date: new Date().toISOString(),
-          status: 'draft',
+          status: 'started',
         })
         .select('id')
         .single();

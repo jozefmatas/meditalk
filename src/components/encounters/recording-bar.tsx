@@ -307,8 +307,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           )}
 
           {state === "paused" && (
-            <span className="flex items-center gap-2 text-sm font-medium text-status-review">
-              <span className="inline-block size-1.5 rounded-full bg-status-review" />
+            <span className="flex items-center gap-2 text-sm font-medium text-status-to_review">
+              <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
               {t("pausedStatus")} {formatDuration(duration)}
             </span>
           )}
@@ -318,8 +318,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               className={cn(
                 "text-sm font-medium",
                 hasTranscript || hasRecording
-                  ? "text-status-closed"
-                  : "text-status-closed"
+                  ? "text-status-completed"
+                  : "text-status-completed"
               )}
             >
               {hasTranscript

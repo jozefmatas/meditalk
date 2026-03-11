@@ -166,7 +166,7 @@ export function FilesPanel({
 
       {/* Audio file indicator */}
       {hasAudioFile && (
-        <div className="flex items-center gap-1.5 text-sm text-status-closed">
+        <div className="flex items-center gap-1.5 text-sm text-status-completed">
           <HugeiconsIcon icon={Mic01Icon} size={14} className="shrink-0" />
           <span>{t("recorded")}</span>
         </div>

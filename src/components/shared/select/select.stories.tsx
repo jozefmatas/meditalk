@@ -70,7 +70,7 @@ export const Small: Story = {
         <SelectValue placeholder="Status" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="draft">Draft</SelectItem>
+        <SelectItem value="started">Started</SelectItem>
         <SelectItem value="completed">Completed</SelectItem>
         <SelectItem value="archived">Archived</SelectItem>
       </SelectContent>

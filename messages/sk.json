@@ -48,11 +48,11 @@
     "loading": "Načítava sa...",
     "loadMore": "Načítať viac",
     "status": {
-      "draft": "Koncept",
+      "started": "Začaté",
       "recording": "Nahrávanie",
       "processing": "Spracovanie",
-      "review": "Kontrola",
-      "closed": "Uzavreté",
+      "to_review": "Na posúdenie",
+      "completed": "Dokončené",
       "archived": "Archivované"
     },
     "type": {

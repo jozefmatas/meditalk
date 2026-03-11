@@ -1,7 +1,7 @@
 // DB row types (matching supabase/migrations)
 
 // Encounter types
-export type EncounterStatus = 'draft' | 'recording' | 'processing' | 'review' | 'closed' | 'archived';
+export type EncounterStatus = 'started' | 'recording' | 'processing' | 'to_review' | 'completed' | 'archived';
 export type EncounterType =
   | 'consultation'
   | 'follow_up'

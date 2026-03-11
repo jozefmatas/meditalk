@@ -31,11 +31,11 @@ import {
 } from "@/components/shared/dropdown-menu";
 
 const dotColor: Record<string, string> = {
-  draft: "bg-status-draft",
+  started: "bg-status-started",
   recording: "bg-status-recording",
   processing: "bg-status-processing",
-  review: "bg-status-review",
-  closed: "bg-status-closed",
+  to_review: "bg-status-to_review",
+  completed: "bg-status-completed",
   archived: "bg-status-archived",
 };
 
@@ -119,7 +119,7 @@ export function NavEncounters() {
                           <span
                             className={cn(
                               "size-1.5 rounded-full",
-                              dotColor[visit.status] || dotColor.draft,
+                              dotColor[visit.status] || dotColor.started,
                               visit.status === "recording" && "animate-pulse",
                             )}
                           />
@@ -129,7 +129,7 @@ export function NavEncounters() {
                         <span
                           className={cn(
                             "truncate text-sm leading-none",
-                            visit.status === "closed" && "line-through",
+                            visit.status === "completed" && "line-through",
                           )}
                         >
                           {visit.title || t("untitled")}
@@ -157,7 +157,7 @@ export function NavEncounters() {
                           {tNav("openVisit")}
                         </Link>
                       </DropdownMenuItem>
-                      {visit.status === "review" && (
+                      {visit.status === "to_review" && (
                         <DropdownMenuItem
                           onClick={() => markComplete(visit.id)}
                           className="gap-2"

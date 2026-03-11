@@ -13,8 +13,8 @@ import type { EncounterListResponse } from "@/lib/types";
 
 interface Stats {
   total: number;
-  drafts: number;
-  closed: number;
+  started: number;
+  completed: number;
 }
 
 export default function DashboardPage() {
@@ -29,20 +29,20 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchStats() {
       try {
-        const [allRes, draftRes, closedRes] = await Promise.all([
+        const [allRes, startedRes, completedRes] = await Promise.all([
           fetch("/api/encounters?limit=1"),
-          fetch("/api/encounters?limit=1&status=draft"),
-          fetch("/api/encounters?limit=1&status=closed"),
+          fetch("/api/encounters?limit=1&status=started"),
+          fetch("/api/encounters?limit=1&status=completed"),
         ]);
 
         const all: EncounterListResponse = await allRes.json();
-        const drafts: EncounterListResponse = await draftRes.json();
-        const closed: EncounterListResponse = await closedRes.json();
+        const startedData: EncounterListResponse = await startedRes.json();
+        const completedData: EncounterListResponse = await completedRes.json();
 
         setStats({
           total: all.total,
-          drafts: drafts.total,
-          closed: closed.total,
+          started: startedData.total,
+          completed: completedData.total,
         });
       } catch {
         // Silently fail — stats are non-critical
@@ -81,7 +81,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tEncounters("status.draft")}
+                {tEncounters("status.started")}
               </CardTitle>
               <HugeiconsIcon icon={FileEditIcon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -89,7 +89,7 @@ export default function DashboardPage() {
               {isLoading ? (
                 <Skeleton className="h-8 w-16" />
               ) : (
-                <div className="text-2xl font-bold">{stats?.drafts ?? 0}</div>
+                <div className="text-2xl font-bold">{stats?.started ?? 0}</div>
               )}
             </CardContent>
           </Card>
@@ -97,7 +97,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tEncounters("status.closed")}
+                {tEncounters("status.completed")}
               </CardTitle>
               <HugeiconsIcon icon={Tick02Icon} size={16} className="text-muted-foreground" />
             </CardHeader>
@@ -105,7 +105,7 @@ export default function DashboardPage() {
               {isLoading ? (
                 <Skeleton className="h-8 w-16" />
               ) : (
-                <div className="text-2xl font-bold">{stats?.closed ?? 0}</div>
+                <div className="text-2xl font-bold">{stats?.completed ?? 0}</div>
               )}
             </CardContent>
           </Card>

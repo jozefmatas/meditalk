@@ -86,7 +86,7 @@ export function TemplateSidebar({
                     <HugeiconsIcon
                       icon={CheckmarkCircle01Icon}
                       size={20}
-                      className="shrink-0 text-status-closed"
+                      className="shrink-0 text-status-completed"
                     />
                     <span className="truncate">
                       {tTemplates(`sections.${section.labelKey}`)}

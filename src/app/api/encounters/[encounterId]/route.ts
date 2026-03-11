@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
 import type { Encounter, EncounterStatus, UpdateEncounterRequest } from '@/lib/types';
 
-/** Normalize legacy DB statuses (e.g. "completed" → "closed") */
+/** Normalize legacy DB statuses to current values */
 function normalizeStatus(status: string): EncounterStatus {
-  if (status === 'completed') return 'closed';
+  if (status === 'draft') return 'started';
+  if (status === 'review') return 'to_review';
+  if (status === 'closed') return 'completed';
   return status as EncounterStatus;
 }
 

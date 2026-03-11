@@ -48,11 +48,11 @@
     "loading": "Loading...",
     "loadMore": "Load More",
     "status": {
-      "draft": "Draft",
+      "started": "Started",
       "recording": "Recording",
       "processing": "Processing",
-      "review": "Review",
-      "closed": "Closed",
+      "to_review": "To Review",
+      "completed": "Completed",
       "archived": "Archived"
     },
     "type": {

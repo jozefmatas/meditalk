@@ -20,7 +20,7 @@ const makeVisit = (overrides: Partial<Encounter> = {}): Encounter => ({
   patient_name: null,
   patient_id: null,
   visit_type: "consultation",
-  status: "draft",
+  status: "started",
   soap_note: null,
   patient_letter: null,
   metadata: {},
@@ -142,13 +142,13 @@ describe("useSidebarEncounters", () => {
   });
 
   it("optimistically marks a visit complete", async () => {
-    const visit = makeVisit({ status: "draft" });
+    const visit = makeVisit({ status: "started" });
     mockFetchResponse({ encounters: [visit], total: 1 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
-      expect(result.current.visits[0].status).toBe("draft");
+      expect(result.current.visits[0].status).toBe("started");
     });
 
     mockFetchOk();
@@ -156,17 +156,17 @@ describe("useSidebarEncounters", () => {
       result.current.markComplete(visit.id);
     });
 
-    expect(result.current.visits[0].status).toBe("closed");
+    expect(result.current.visits[0].status).toBe("completed");
   });
 
   it("reverts markComplete on API failure", async () => {
-    const visit = makeVisit({ status: "draft" });
+    const visit = makeVisit({ status: "started" });
     mockFetchResponse({ encounters: [visit], total: 1 });
 
     const { result } = renderHook(() => useSidebarEncounters());
 
     await waitFor(() => {
-      expect(result.current.visits[0].status).toBe("draft");
+      expect(result.current.visits[0].status).toBe("started");
     });
 
     mockFetchError();
@@ -177,11 +177,11 @@ describe("useSidebarEncounters", () => {
     });
 
     // Optimistic
-    expect(result.current.visits[0].status).toBe("closed");
+    expect(result.current.visits[0].status).toBe("completed");
 
     // After refetch, status reverts
     await waitFor(() => {
-      expect(result.current.visits[0].status).toBe("draft");
+      expect(result.current.visits[0].status).toBe("started");
     });
   });
 
