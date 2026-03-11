@@ -122,6 +122,7 @@ function buildTemplateSystemPrompt(
 4. FORMAT: Return valid JSON with the following keys:
    - One key for each section ID listed below, with the section content as a string value.
    - A "letter" key with a patient-friendly summary letter.
+   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in ${langLabel}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
 
 TEMPLATE SECTIONS (fill each one):
 ${sectionList}
@@ -139,7 +140,7 @@ export async function generateFromTemplate(
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
   doctorNotes?: string
-): Promise<{ generatedNote: string; letter: string }> {
+): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
 
   // Build user message parts
@@ -157,7 +158,7 @@ export async function generateFromTemplate(
   }
 
   parts.push(
-    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(', ')}, and "letter".`
+    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(', ')}, "letter", and "title".`
   );
 
   const response = await anthropic.messages.create({
@@ -182,12 +183,16 @@ export async function generateFromTemplate(
 
   const parsed = JSON.parse(jsonMatch[0]) as Record<string, string>;
 
-  // Extract letter and remove it from section contents
+  // Extract letter and title, remove from section contents
   const letter =
     typeof parsed.letter === 'string'
       ? parsed.letter
       : JSON.stringify(parsed.letter || '');
   delete parsed.letter;
+
+  const suggestedTitle =
+    typeof parsed.title === 'string' ? parsed.title : '';
+  delete parsed.title;
 
   // Ensure all section IDs have content, fill missing with "Not stated"
   const notStated = NOT_STATED[language];
@@ -199,5 +204,5 @@ export async function generateFromTemplate(
 
   const generatedNote = buildTemplateHtml(template, sectionContents, sectionLabels);
 
-  return { generatedNote, letter };
+  return { generatedNote, letter, suggestedTitle };
 }

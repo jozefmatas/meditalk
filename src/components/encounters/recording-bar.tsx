@@ -21,6 +21,8 @@ import {
   LiveWaveform,
   type LiveWaveformProps,
 } from "@/components/shared/live-waveform";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Mic01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 
 type RecordingState = "idle" | "recording" | "paused";
@@ -277,6 +279,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               disabled={state !== "idle" || !!disabled}
             >
               <SelectTrigger variant="ghost" className="max-w-[220px] px-2">
+                <HugeiconsIcon icon={Mic01Icon} size={16} className="shrink-0 text-foreground" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -331,12 +334,12 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           )}
 
           <div
-            className={cn("w-40", waveformActive && "text-foreground")}
+            className={cn("h-9 w-40", waveformActive && "text-foreground")}
           >
             <LiveWaveform
               active={waveformActive}
               deviceId={selectedDeviceId || undefined}
-              height={32}
+              height={36}
               barWidth={2}
               barGap={1}
               barRadius={1}

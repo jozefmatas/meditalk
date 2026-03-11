@@ -113,6 +113,7 @@ export async function POST(request: NextRequest) {
     );
     let generatedNote: string;
     let letter: string;
+    let suggestedTitle: string;
     try {
       const result = await generateFromTemplate(
         chunkContents,
@@ -123,6 +124,7 @@ export async function POST(request: NextRequest) {
       );
       generatedNote = result.generatedNote;
       letter = result.letter;
+      suggestedTitle = result.suggestedTitle;
     } catch (anthropicErr) {
       console.error('Anthropic generation failed:', anthropicErr);
       return NextResponse.json(
@@ -156,6 +158,7 @@ export async function POST(request: NextRequest) {
     const response: GenerateResponse = {
       generatedNote,
       letter,
+      suggestedTitle: suggestedTitle || undefined,
       usedChunks,
       templateId: template.id,
       soap: generatedNote,

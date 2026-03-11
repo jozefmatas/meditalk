@@ -16,7 +16,7 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
     <TooltipProvider>
       <SidebarProvider className="bg-sidebar">
         <AppSidebar />
-        <SidebarInset className="rounded-l-3xl">
+        <SidebarInset className="max-h-svh overflow-hidden rounded-l-3xl">
           <Header />
           <div className={contentClassName ?? "flex-1 overflow-y-auto p-6"}>{children}</div>
         </SidebarInset>

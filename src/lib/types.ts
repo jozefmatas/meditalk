@@ -86,6 +86,7 @@ export interface SearchResponse {
 export interface GenerateResponse {
   generatedNote: string;
   letter: string;
+  suggestedTitle?: string;
   usedChunks: string[];
   templateId: string;
   /** @deprecated Use generatedNote instead */

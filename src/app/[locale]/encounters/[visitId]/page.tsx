@@ -12,7 +12,11 @@ import {
   type EncounterFile,
 } from "@/components/encounters/files-panel";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
-import { ReviewTabs, type ReviewTab } from "@/components/encounters/review-tabs";
+import {
+  TabsLineWithAction,
+  TabsContent,
+  type TabOption,
+} from "@/components/shared/tabs";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { PatientPanel } from "@/components/encounters/patient-panel";
 import {
@@ -21,7 +25,7 @@ import {
 } from "@/components/encounters/recording-bar";
 import { Badge } from "@/components/shared/badge";
 import { Button } from "@/components/shared/button";
-import { Input } from "@/components/shared/input";
+import { Textarea } from "@/components/shared/textarea";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -55,7 +59,11 @@ function formatVisitDate(dateString: string, locale: string) {
 }
 
 /** Statuses that show the draft-mode editor layout */
-const DRAFT_STATUSES: EncounterStatus[] = ["started", "recording", "processing"];
+const DRAFT_STATUSES: EncounterStatus[] = [
+  "started",
+  "recording",
+  "processing",
+];
 
 export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
@@ -83,7 +91,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   // Template + generation
   const [selectedTemplateId, setSelectedTemplateId] = useState(
-    getDefaultTemplate().id
+    getDefaultTemplate().id,
   );
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
@@ -97,7 +105,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
   // Review state
-  const [activeTab, setActiveTab] = useState<ReviewTab>("note");
+  const [activeTab, setActiveTab] = useState("note");
+  const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
   const [noteCopied, setNoteCopied] = useState(false);
 
   const initialDoctorNotesRef = useRef("");
@@ -114,10 +123,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, title: newTitle || null },
-        })
+        }),
       );
     },
-    [visitId, setPageTitle]
+    [visitId, setPageTitle],
   );
 
   useEffect(() => {
@@ -210,7 +219,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         body: JSON.stringify(updates),
       });
       setVisit((prev) =>
-        prev ? ({ ...prev, ...updates } as Encounter) : prev
+        prev ? ({ ...prev, ...updates } as Encounter) : prev,
       );
     } catch {
       // Silent fail
@@ -242,7 +251,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         body: JSON.stringify(updates),
       });
       setVisit((prev) =>
-        prev ? ({ ...prev, ...updates } as Encounter) : prev
+        prev ? ({ ...prev, ...updates } as Encounter) : prev,
       );
     } catch {
       // Silent fail
@@ -260,7 +269,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, status },
-        })
+        }),
       );
       // Persist to DB (fire-and-forget)
       fetch(`/api/encounters/${visitId}`, {
@@ -269,7 +278,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         body: JSON.stringify({ status }),
       }).catch(() => {});
     },
-    [visitId]
+    [visitId],
   );
 
   const handleGenerate = async () => {
@@ -281,7 +290,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     window.dispatchEvent(
       new CustomEvent("encounter-update", {
         detail: { id: visitId, status: "processing" },
-      })
+      }),
     );
 
     try {
@@ -311,9 +320,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
         const transcribeData = await transcribeRes.json();
         setVisit((prev) =>
-          prev
-            ? { ...prev, raw_text: transcribeData.transcriptText }
-            : prev
+          prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
         );
         setAudioBlob(null); // consumed
       }
@@ -343,22 +350,30 @@ export default function EncounterDetailPage({ params }: PageProps) {
               soap_note: data.generatedNote,
               patient_letter: data.letter,
             }
-          : prev
+          : prev,
       );
 
-      // Auto-transition to review
+      // Auto-set title if user hasn't provided one
+      const autoTitle = !title.trim() ? data.suggestedTitle : null;
+      const patchBody: Record<string, string> = { status: "to_review" };
+      if (autoTitle) patchBody.title = autoTitle;
+
+      // Auto-transition to review (+ title if generated)
       await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "to_review" }),
+        body: JSON.stringify(patchBody),
       });
-      setVisit((prev) =>
-        prev ? { ...prev, status: "to_review" } : prev
-      );
+      if (autoTitle) updateTitle(autoTitle);
+      setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "to_review" },
-        })
+          detail: {
+            id: visitId,
+            status: "to_review",
+            ...(autoTitle ? { title: autoTitle } : {}),
+          },
+        }),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : tPoc("errorGenerate"));
@@ -382,7 +397,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, status: "completed" },
-        })
+        }),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update status");
@@ -418,7 +433,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         // Silent fail
       }
     },
-    [visitId]
+    [visitId],
   );
 
   const handleCopyNote = useCallback(async () => {
@@ -433,9 +448,42 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim());
   const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
 
+  // Review tabs configuration
+  const allTabs: TabOption[] = useMemo(
+    () => [
+      { value: "note", label: t("detail.note") },
+      { value: "transcript", label: t("detail.transcript") },
+      { value: "add-document", label: t("detail.addDocument") },
+    ],
+    [t],
+  );
+
+  // Initialize visible tabs when transitioning out of draft
+  const defaultVisibleTabs = useMemo(
+    () => allTabs.filter((tab) => tab.value !== "add-document"),
+    [allTabs],
+  );
+
+  const currentVisibleTabs =
+    visibleTabs.length > 0 ? visibleTabs : defaultVisibleTabs;
+
+  const handleAddTab = useCallback(
+    (value: string) => {
+      const tab = allTabs.find((t) => t.value === value);
+      if (tab) {
+        setVisibleTabs((prev) => {
+          const base = prev.length > 0 ? prev : defaultVisibleTabs;
+          return [...base, tab];
+        });
+        setActiveTab(value);
+      }
+    },
+    [allTabs, defaultVisibleTabs],
+  );
+
   const parsedSections = useMemo(
     () => parseSoapSections(generatedNoteHtml),
-    [generatedNoteHtml]
+    [generatedNoteHtml],
   );
 
   const template = getTemplateById(selectedTemplateId);
@@ -515,49 +563,179 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
       {/* Main content area — hidden during generation */}
       {!isGenerating && (
-        <div className="flex flex-1 justify-center overflow-y-auto px-6 pt-4 pb-6">
-          <div className="flex h-full w-full max-w-[800px] flex-col gap-6">
-            {/* Title row */}
-            <div className="flex items-center justify-between">
+        <div className="flex flex-1 justify-center overflow-y-auto p-6">
+          <div className="flex w-full max-w-[800px] flex-col gap-6">
+            {/* Title + metadata + recording bar */}
+            <div className="flex flex-col gap-5">
               {isDraft ? (
-                <Input
-                  value={title}
-                  onChange={(e) => updateTitle(e.target.value)}
-                  onBlur={handleMetadataBlur}
-                  placeholder={t("untitled")}
-                  className="h-auto border-none bg-transparent px-0 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                />
+                <div className="flex min-h-9 items-center justify-between gap-4">
+                  <Textarea
+                    value={title}
+                    onChange={(e) => updateTitle(e.target.value)}
+                    onBlur={handleMetadataBlur}
+                    placeholder={t("untitled")}
+                    rows={1}
+                    className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                    onInput={(e) => {
+                      const target = e.currentTarget;
+                      target.style.height = "auto";
+                      target.style.height = `${target.scrollHeight}px`;
+                    }}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = "auto";
+                        el.style.height = `${el.scrollHeight}px`;
+                      }
+                    }}
+                  />
+                  <div className="flex shrink-0 items-center gap-3">
+                    <span className="text-sm text-foreground/65">
+                      {formatVisitDate(visit.visit_date, locale)}
+                    </span>
+                    <Badge
+                      variant={`status-${visit.status}` as "status-started"}
+                    >
+                      {t(`status.${visit.status}`)}
+                    </Badge>
+                  </div>
+                </div>
               ) : (
-                <h1 className="text-2xl text-muted-foreground">
-                  {title || t("untitled")}
-                </h1>
+                <div className="flex items-center gap-4">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <Textarea
+                      value={title}
+                      onChange={(e) => updateTitle(e.target.value)}
+                      onBlur={handleMetadataBlur}
+                      placeholder={t("untitled")}
+                      rows={1}
+                      className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                      onInput={(e) => {
+                        const target = e.currentTarget;
+                        target.style.height = "auto";
+                        target.style.height = `${target.scrollHeight}px`;
+                      }}
+                      ref={(el) => {
+                        if (el) {
+                          el.style.height = "auto";
+                          el.style.height = `${el.scrollHeight}px`;
+                        }
+                      }}
+                    />
+                    <div className="flex items-center gap-3">
+                      <Badge
+                        variant={`status-${visit.status}` as "status-started"}
+                      >
+                        {t(`status.${visit.status}`)}
+                      </Badge>
+                      <span className="text-sm text-foreground/65">
+                        {formatVisitDate(visit.visit_date, locale)}
+                      </span>
+                    </div>
+                  </div>
+                  {visit.status === "to_review" && (
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      className="shrink-0"
+                      onClick={handleMarkComplete}
+                    >
+                      {t("detail.markComplete")}
+                    </Button>
+                  )}
+                </div>
               )}
-              <div className="flex shrink-0 items-center gap-3">
-                {visit.status === "to_review" && (
-                  <Button variant="outline" onClick={handleMarkComplete}>
-                    {t("detail.markComplete")}
-                  </Button>
-                )}
-                <Badge variant={`status-${visit.status}` as "status-started"}>
-                  {t(`status.${visit.status}`)}
-                </Badge>
-                <span className="text-sm text-muted-foreground">
-                  {formatVisitDate(visit.visit_date, locale)}
-                </span>
-              </div>
-            </div>
 
-            {/* Draft: recording bar */}
-            {isDraft && (
-              <RecordingBar
-                ref={recordingBarRef}
-                hasRecording={!!audioBlob}
-                hasTranscript={!!visit.raw_text}
-                disabled={isGenerating}
-                onRecordingComplete={handleRecordingComplete}
-                onRecordingStateChange={handleRecordingStateChange}
-              />
-            )}
+              {isDraft && (
+                <RecordingBar
+                  ref={recordingBarRef}
+                  hasRecording={!!audioBlob}
+                  hasTranscript={!!visit.raw_text}
+                  disabled={isGenerating}
+                  onRecordingComplete={handleRecordingComplete}
+                  onRecordingStateChange={handleRecordingStateChange}
+                />
+              )}
+
+              {!isDraft && (
+                <TabsLineWithAction
+                  tabs={currentVisibleTabs}
+                  availableTabs={allTabs}
+                  value={activeTab}
+                  onValueChange={setActiveTab}
+                  onAddTab={handleAddTab}
+                  actionLabel={t("detail.addDocument")}
+                >
+                  {/* Note tab */}
+                  <TabsContent value="note">
+                    <div className="flex flex-1 gap-6">
+                      <TemplateSidebar
+                        templateId={selectedTemplateId}
+                        onTemplateChange={setSelectedTemplateId}
+                        disabled
+                        documentedSections={documentedSectionIds}
+                      />
+                      <div className="flex flex-1 flex-col gap-4">
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-lg font-medium">
+                            {t("detail.note")}
+                          </h2>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleCopyNote}
+                            disabled={!generatedNoteHtml}
+                          >
+                            {noteCopied
+                              ? t("detail.noteCopied")
+                              : t("detail.copyNote")}
+                          </Button>
+                        </div>
+                        {parsedSections.length > 0 ? (
+                          parsedSections.map((section) => (
+                            <NoteSectionCard
+                              key={section.id}
+                              title={section.title}
+                              content={section.content}
+                            />
+                          ))
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            {t("detail.noNote")}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  {/* Transcript tab */}
+                  <TabsContent value="transcript">
+                    <div className="flex-1">
+                      {visit.raw_text ? (
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                          {visit.raw_text}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          {t("detail.noTranscript")}
+                        </p>
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  {/* Add document tab */}
+                  <TabsContent value="add-document">
+                    <div className="flex-1">
+                      <TiptapEditor
+                        content=""
+                        onChange={() => {}}
+                        placeholder={t("detail.addDocument")}
+                        className="flex-1 rounded-2xl"
+                      />
+                    </div>
+                  </TabsContent>
+                </TabsLineWithAction>
+              )}
+            </div>
 
             {/* Draft: separator */}
             {isDraft && <div className="h-px bg-border" />}
@@ -587,84 +765,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
               </div>
             )}
 
-            {/* Review/closed: tabs + content */}
-            {!isDraft && (
-              <>
-                <ReviewTabs
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-
-                {/* Note tab */}
-                {activeTab === "note" && (
-                  <div className="flex flex-1 gap-6">
-                    <TemplateSidebar
-                      templateId={selectedTemplateId}
-                      onTemplateChange={setSelectedTemplateId}
-                      disabled
-                      documentedSections={documentedSectionIds}
-                    />
-                    <div className="flex flex-1 flex-col gap-4">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-medium">
-                          {t("detail.note")}
-                        </h2>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCopyNote}
-                          disabled={!generatedNoteHtml}
-                        >
-                          {noteCopied
-                            ? t("detail.noteCopied")
-                            : t("detail.copyNote")}
-                        </Button>
-                      </div>
-                      {parsedSections.length > 0 ? (
-                        parsedSections.map((section) => (
-                          <NoteSectionCard
-                            key={section.id}
-                            title={section.title}
-                            content={section.content}
-                          />
-                        ))
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          {t("detail.noNote")}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Transcript tab */}
-                {activeTab === "transcript" && (
-                  <div className="flex-1">
-                    {visit.raw_text ? (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {visit.raw_text}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        {t("detail.noTranscript")}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Add document tab */}
-                {activeTab === "add-document" && (
-                  <div className="flex-1">
-                    <TiptapEditor
-                      content=""
-                      onChange={() => {}}
-                      placeholder={t("detail.addDocument")}
-                      className="flex-1 rounded-2xl"
-                    />
-                  </div>
-                )}
-              </>
-            )}
+            {/* Bottom scroll inset */}
+            <div aria-hidden className="min-h-32 shrink-0" />
           </div>
         </div>
       )}
