@@ -1,6 +1,10 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI();
+let _openai: OpenAI | null = null;
+function openai() {
+  if (!_openai) _openai = new OpenAI();
+  return _openai;
+}
 
 /**
  * Transcribe audio using Whisper.
@@ -18,7 +22,7 @@ export async function transcribeAudio(
       ? file
       : new File([new Uint8Array(file)], filename, { type: 'audio/webm' });
 
-  const response = await openai.audio.transcriptions.create({
+  const response = await openai().audio.transcriptions.create({
     model: 'whisper-1',
     file: uploadable,
     response_format: 'text',
@@ -31,7 +35,7 @@ export async function transcribeAudio(
  * Generate a 1536-dim embedding for a single text.
  */
 export async function embedText(text: string): Promise<number[]> {
-  const response = await openai.embeddings.create({
+  const response = await openai().embeddings.create({
     model: 'text-embedding-ada-002',
     input: text,
   });
@@ -43,7 +47,7 @@ export async function embedText(text: string): Promise<number[]> {
  * Generate embeddings for multiple texts in a single API call.
  */
 export async function embedTexts(texts: string[]): Promise<number[][]> {
-  const response = await openai.embeddings.create({
+  const response = await openai().embeddings.create({
     model: 'text-embedding-ada-002',
     input: texts,
   });

@@ -3,7 +3,11 @@ import type { SupportedLanguage } from './types';
 import type { Template } from './templates/types';
 import { buildTemplateHtml, flattenSectionIds } from './templates/html';
 
-const anthropic = new Anthropic();
+let _anthropic: Anthropic | null = null;
+function anthropic() {
+  if (!_anthropic) _anthropic = new Anthropic();
+  return _anthropic;
+}
 
 const NOT_STATED: Record<SupportedLanguage, string> = {
   en: 'Not stated',
@@ -53,7 +57,7 @@ export async function generateSOAPAndLetter(
     .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
     .join('\n\n');
 
-  const response = await anthropic.messages.create({
+  const response = await anthropic().messages.create({
     model: 'claude-sonnet-4-5-20250929',
     max_tokens: 4096,
     system: buildSystemPrompt(language),
@@ -161,7 +165,7 @@ export async function generateFromTemplate(
     `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(', ')}, "letter", and "title".`
   );
 
-  const response = await anthropic.messages.create({
+  const response = await anthropic().messages.create({
     model: 'claude-sonnet-4-5-20250929',
     max_tokens: 8192,
     system: buildTemplateSystemPrompt(template, language, sectionLabels),
