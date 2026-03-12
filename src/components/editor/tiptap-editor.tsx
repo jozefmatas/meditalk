@@ -41,6 +41,7 @@ export function TiptapEditor({
       }),
       Placeholder.configure({
         placeholder: placeholder || "",
+        showOnlyCurrent: true,
       }),
       ...(slashCommandItems
         ? [createSlashCommand(() => slashItemsRef.current)]
@@ -75,12 +76,15 @@ export function TiptapEditor({
       <EditorContent
         editor={editor}
         className={cn(
-          "prose prose-sm dark:prose-invert max-w-none px-3 py-2",
+          "prose dark:prose-invert max-w-none p-6 text-foreground",
           "[&_.ProseMirror]:outline-none",
-          "[&_.ProseMirror_h2]:text-base [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:mt-4 [&_.ProseMirror_h2]:mb-1",
-          "[&_.ProseMirror_h3]:text-sm [&_.ProseMirror_h3]:font-medium [&_.ProseMirror_h3]:mt-3 [&_.ProseMirror_h3]:mb-1",
-          "[&_.ProseMirror_p]:text-sm [&_.ProseMirror_p]:leading-relaxed [&_.ProseMirror_p]:mb-2",
-          "[&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none",
+          "[&_.ProseMirror_h2]:text-lg/6 [&_.ProseMirror_h2]:font-medium [&_.ProseMirror_h2]:mt-0 [&_.ProseMirror_h2]:mb-1 [&_.ProseMirror_h2]:pt-0",
+          "[&_.ProseMirror_h3]:text-base/6 [&_.ProseMirror_h3]:font-medium [&_.ProseMirror_h3]:mt-0 [&_.ProseMirror_h3]:mb-1 [&_.ProseMirror_h3]:pt-0",
+          "[&_.ProseMirror_p]:text-base/6 [&_.ProseMirror_p]:font-normal [&_.ProseMirror_p]:mb-2",
+          "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:mb-2",
+          "[&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:mb-2",
+          "[&_.ProseMirror_li]:text-base/6",
+          "[&_.ProseMirror_.is-empty::before]:text-foreground/65 [&_.ProseMirror_.is-empty::before]:content-[attr(data-placeholder)] [&_.ProseMirror_.is-empty::before]:float-left [&_.ProseMirror_.is-empty::before]:h-0 [&_.ProseMirror_.is-empty::before]:pointer-events-none",
         )}
       />
     </div>

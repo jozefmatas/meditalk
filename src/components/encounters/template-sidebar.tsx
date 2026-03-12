@@ -6,15 +6,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   CheckmarkCircle01Icon,
   ArrowRight01Icon,
+  Add01Icon,
 } from "@hugeicons/core-free-icons";
 import { getTemplateById } from "@/lib/templates";
 import type { TemplateSection } from "@/lib/templates";
 import { TemplateSelector } from "@/components/templates/template-selector";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@/components/shared/collapsible";
+import { Button } from "@/components/shared/button";
 import { cn } from "@/lib/utils";
 
 interface TemplateSidebarProps {
@@ -27,48 +24,208 @@ interface TemplateSidebarProps {
   onInsertSection?: (sectionId: string, label: string, level: 2 | 3) => void;
   /** Section IDs whose headings already exist in the editor (draft mode). */
   usedSectionIds?: Set<string>;
+  /** Callback when clicking an already-inserted section to scroll to it. */
+  onScrollToSection?: (label: string) => void;
+  /** Pixel offset from the top of the scroll container for sticky positioning. */
+  stickyTop?: number;
 }
 
 const itemClass =
-  "flex h-8 w-full items-center gap-1.5 rounded-lg px-1.5 text-sm transition-colors";
+  "flex h-8 shrink-0 w-full items-center gap-1.5 rounded-lg px-1.5 text-sm transition-colors";
 
-function SectionButton({
-  level,
+/* ── Section item (no subsections) ── */
+
+function SectionItem({
   label,
   isUsed,
   onClick,
+  onScrollTo,
 }: {
-  level: 2 | 3;
   label: string;
   isUsed: boolean;
   onClick: () => void;
+  onScrollTo?: () => void;
 }) {
+  if (isUsed) {
+    return (
+      <button
+        type="button"
+        onClick={onScrollTo}
+        className={cn(
+          itemClass,
+          "cursor-pointer text-foreground",
+          "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+        )}
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center">
+          <HugeiconsIcon
+            icon={CheckmarkCircle01Icon}
+            size={16}
+            className="text-status-completed"
+          />
+        </span>
+        <span className="section-label truncate">{label}</span>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
-      disabled={isUsed}
       onClick={onClick}
       className={cn(
         itemClass,
-        level === 3 && "pl-7",
-        isUsed
-          ? "text-foreground/30 cursor-default"
-          : "text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer",
+        "cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
       )}
     >
       <span className="flex size-5 shrink-0 items-center justify-center">
-        {isUsed ? (
-          <HugeiconsIcon
-            icon={CheckmarkCircle01Icon}
-            size={14}
-            className="text-foreground/30"
-          />
-        ) : (
-          <span className="size-1.5 rounded-full bg-foreground/20" />
-        )}
+        <HugeiconsIcon icon={Add01Icon} size={16} />
       </span>
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+/* ── Section with subsections ── */
+
+function SectionWithSubs({
+  section,
+  sectionLabel,
+  isSectionUsed,
+  usedSectionIds,
+  onInsertSection,
+  onScrollToSection,
+  tTemplates,
+}: {
+  section: TemplateSection;
+  sectionLabel: string;
+  isSectionUsed: boolean;
+  usedSectionIds?: Set<string>;
+  onInsertSection?: (sectionId: string, label: string, level: 2 | 3) => void;
+  onScrollToSection?: (label: string) => void;
+  tTemplates: ReturnType<typeof useTranslations>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const subCount = section.subsections?.length ?? 0;
+  const allSubsUsed =
+    isSectionUsed &&
+    section.subsections?.every((sub) => usedSectionIds?.has(sub.id));
+
+  // Main item: clicking the text inserts the h2 heading, clicking the chevron toggles subsections
+  return (
+    <div>
+      <div className="flex items-center">
+        {/* Clickable label area — inserts heading or scrolls to it */}
+        {isSectionUsed ? (
+          <button
+            type="button"
+            onClick={() => onScrollToSection?.(sectionLabel)}
+            className={cn(
+              itemClass,
+              "min-w-0 flex-1 cursor-pointer",
+              allSubsUsed ? "text-foreground/30" : "text-foreground",
+              "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+            )}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <HugeiconsIcon
+                icon={CheckmarkCircle01Icon}
+                size={16}
+                className="text-status-completed"
+              />
+            </span>
+            <span className="section-label truncate">{sectionLabel}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">{subCount}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              onInsertSection?.(section.id, sectionLabel, 2)
+            }
+            className={cn(
+              itemClass,
+              "min-w-0 flex-1 cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <HugeiconsIcon icon={Add01Icon} size={16} />
+            </span>
+            <span className="truncate">{sectionLabel}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">{subCount}</span>
+          </button>
+        )}
+
+        {/* Chevron button — toggles subsections */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setOpen((prev) => !prev)}
+          className="shrink-0 text-foreground/40"
+        >
+          <HugeiconsIcon
+            icon={ArrowRight01Icon}
+            size={16}
+            className={cn(
+              "transition-transform duration-200",
+              open && "rotate-90",
+            )}
+          />
+        </Button>
+      </div>
+
+      {/* Subsections */}
+      {open && (
+        <div className="flex flex-col">
+          {section.subsections?.map((sub) => {
+            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const isSubUsed = usedSectionIds?.has(sub.id) ?? false;
+
+            if (isSubUsed) {
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => onScrollToSection?.(subLabel)}
+                  className={cn(
+                    itemClass,
+                    "cursor-pointer pl-7 text-foreground",
+                    "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+                  )}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <HugeiconsIcon
+                      icon={CheckmarkCircle01Icon}
+                      size={16}
+                      className="text-status-completed"
+                    />
+                  </span>
+                  <span className="section-label truncate">{subLabel}</span>
+                </button>
+              );
+            }
+
+            return (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => onInsertSection?.(sub.id, subLabel, 3)}
+                className={cn(
+                  itemClass,
+                  "cursor-pointer pl-7 text-foreground/65 hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center">
+                  <HugeiconsIcon icon={Add01Icon} size={16} />
+                </span>
+                <span className="truncate">{subLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -79,6 +236,8 @@ export function TemplateSidebar({
   documentedSections,
   onInsertSection,
   usedSectionIds,
+  onScrollToSection,
+  stickyTop = 0,
 }: TemplateSidebarProps) {
   const tTemplates = useTranslations("templates");
   const t = useTranslations("encounters.detail");
@@ -94,7 +253,13 @@ export function TemplateSidebar({
   );
 
   return (
-    <div className="flex w-60 shrink-0 flex-col gap-3">
+    <div
+      className={cn(
+        "flex w-60 shrink-0 flex-col gap-3 overflow-hidden",
+        isDraft ? "min-h-0" : "sticky self-start",
+      )}
+      style={isDraft ? undefined : { top: stickyTop, maxHeight: `calc(100svh - ${stickyTop + 52}px)` }}
+    >
       <div className="flex flex-col gap-2">
         <span className="text-xs text-foreground/65">
           {tTemplates("selectTemplate")}
@@ -106,9 +271,9 @@ export function TemplateSidebar({
         />
       </div>
 
-      {/* Draft mode: sections + collapsible subsections */}
+      {/* Draft mode: sections with plus icons */}
       {template && isDraft && (
-        <nav className="flex flex-col">
+        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {template.sections.map((section) => {
             const sectionLabel = tTemplates(`sections.${section.labelKey}`);
             const isSectionUsed = usedSectionIds?.has(section.id) ?? false;
@@ -117,26 +282,27 @@ export function TemplateSidebar({
 
             if (!hasSubsections) {
               return (
-                <SectionButton
+                <SectionItem
                   key={section.id}
-                  level={2}
                   label={sectionLabel}
                   isUsed={isSectionUsed}
                   onClick={() =>
                     onInsertSection?.(section.id, sectionLabel, 2)
                   }
+                  onScrollTo={() => onScrollToSection?.(sectionLabel)}
                 />
               );
             }
 
             return (
-              <CollapsibleSection
+              <SectionWithSubs
                 key={section.id}
                 section={section}
                 sectionLabel={sectionLabel}
                 isSectionUsed={isSectionUsed}
                 usedSectionIds={usedSectionIds}
                 onInsertSection={onInsertSection}
+                onScrollToSection={onScrollToSection}
                 tTemplates={tTemplates}
               />
             );
@@ -146,7 +312,7 @@ export function TemplateSidebar({
 
       {/* Review mode: documented + remaining */}
       {template && isReview && (
-        <div className="flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain">
           {documented && documented.length > 0 && (
             <div className="flex flex-col gap-2">
               <span className="text-xs text-muted-foreground">
@@ -161,7 +327,7 @@ export function TemplateSidebar({
                   >
                     <HugeiconsIcon
                       icon={CheckmarkCircle01Icon}
-                      size={20}
+                      size={16}
                       className="shrink-0 text-status-completed"
                     />
                     <span className="truncate">
@@ -204,81 +370,5 @@ export function TemplateSidebar({
         </div>
       )}
     </div>
-  );
-}
-
-function CollapsibleSection({
-  section,
-  sectionLabel,
-  isSectionUsed,
-  usedSectionIds,
-  onInsertSection,
-  tTemplates,
-}: {
-  section: TemplateSection;
-  sectionLabel: string;
-  isSectionUsed: boolean;
-  usedSectionIds?: Set<string>;
-  onInsertSection?: (sectionId: string, label: string, level: 2 | 3) => void;
-  tTemplates: ReturnType<typeof useTranslations>;
-}) {
-  const [open, setOpen] = useState(false);
-
-  // Check if all subsections are used
-  const allSubsUsed =
-    isSectionUsed &&
-    section.subsections?.every((sub) => usedSectionIds?.has(sub.id));
-
-  return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="flex items-center">
-        <CollapsibleTrigger
-          className={cn(
-            itemClass,
-            "group cursor-pointer",
-            allSubsUsed
-              ? "text-foreground/30"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground",
-          )}
-        >
-          <span className="flex size-5 shrink-0 items-center justify-center">
-            <HugeiconsIcon
-              icon={ArrowRight01Icon}
-              size={14}
-              className={cn(
-                "transition-transform duration-200",
-                open && "rotate-90",
-              )}
-            />
-          </span>
-          <span className="truncate">{sectionLabel}</span>
-        </CollapsibleTrigger>
-      </div>
-      <CollapsibleContent>
-        <div className="flex flex-col">
-          {/* Section heading button (h2) */}
-          <SectionButton
-            level={3}
-            label={sectionLabel}
-            isUsed={isSectionUsed}
-            onClick={() => onInsertSection?.(section.id, sectionLabel, 2)}
-          />
-          {/* Subsection buttons (h3) */}
-          {section.subsections?.map((sub) => {
-            const subLabel = tTemplates(`sections.${sub.labelKey}`);
-            const isSubUsed = usedSectionIds?.has(sub.id) ?? false;
-            return (
-              <SectionButton
-                key={sub.id}
-                level={3}
-                label={subLabel}
-                isUsed={isSubUsed}
-                onClick={() => onInsertSection?.(sub.id, subLabel, 3)}
-              />
-            );
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }

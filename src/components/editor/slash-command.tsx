@@ -1,23 +1,10 @@
 "use client";
 
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  forwardRef,
-  useImperativeHandle,
-} from "react";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { Extension } from "@tiptap/core";
 import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 import { ReactRenderer } from "@tiptap/react";
-import {
-  useFloating,
-  offset,
-  flip,
-  shift,
-} from "@floating-ui/react-dom";
-import { cn } from "@/lib/utils";
+import { useTranslations } from "next-intl";
 import {
   Command,
   CommandInput,
@@ -26,18 +13,20 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/shared/command";
-import type { FlatSection } from "@/lib/templates";
 
 export interface SlashCommandItem {
   id: string;
   label: string;
   level: 2 | 3;
   parentLabel?: string;
+  /** When true, the parent h2 heading should be inserted before this h3. */
+  needsParentHeading?: boolean;
 }
 
 interface SlashCommandListProps {
   items: SlashCommandItem[];
   command: (item: SlashCommandItem) => void;
+  onDismiss: () => void;
 }
 
 export interface SlashCommandListRef {
@@ -47,7 +36,8 @@ export interface SlashCommandListRef {
 export const SlashCommandList = forwardRef<
   SlashCommandListRef,
   SlashCommandListProps
->(function SlashCommandList({ items, command }, ref) {
+>(function SlashCommandList({ items, command, onDismiss }, ref) {
+  const t = useTranslations("templates");
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -61,7 +51,6 @@ export const SlashCommandList = forwardRef<
   }));
 
   useEffect(() => {
-    // Focus the command input when mounted
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
@@ -69,18 +58,27 @@ export const SlashCommandList = forwardRef<
   const subsections = items.filter((i) => i.level === 3);
 
   return (
-    <div className="z-50 w-64 rounded-lg border bg-popover shadow-md">
+    <div
+      className="z-50 w-64 rounded-lg border bg-popover shadow-md"
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          onDismiss();
+        }
+      }}
+    >
       <Command className="gap-2" shouldFilter={true}>
         <CommandInput
           ref={inputRef}
-          placeholder="Search sections..."
+          placeholder={t("slashSearchPlaceholder")}
           value={search}
           onValueChange={setSearch}
         />
         <CommandList>
-          <CommandEmpty>No sections found.</CommandEmpty>
+          <CommandEmpty>{t("slashNoResults")}</CommandEmpty>
           {sections.length > 0 && (
-            <CommandGroup heading="Sections">
+            <CommandGroup heading={t("slashSections")}>
               {sections.map((item) => (
                 <CommandItem
                   key={item.id}
@@ -93,7 +91,7 @@ export const SlashCommandList = forwardRef<
             </CommandGroup>
           )}
           {subsections.length > 0 && (
-            <CommandGroup heading="Subsections">
+            <CommandGroup heading={t("slashSubsections")}>
               {subsections.map((item) => (
                 <CommandItem
                   key={item.id}
@@ -116,7 +114,7 @@ export const SlashCommandList = forwardRef<
 
 /**
  * Creates a TipTap extension that triggers a searchable command palette
- * when the user types `#` at the start of a line.
+ * when the user types `/` in the editor.
  */
 export function createSlashCommand(
   getItems: () => SlashCommandItem[],
@@ -127,8 +125,7 @@ export function createSlashCommand(
     addOptions() {
       return {
         suggestion: {
-          char: "#",
-          startOfLine: true,
+          char: "/",
           command: ({
             editor,
             range,
@@ -139,21 +136,43 @@ export function createSlashCommand(
             props: SlashCommandItem;
           }) => {
             const item = props as SlashCommandItem;
+            const content: Record<string, unknown>[] = [];
+
+            if (item.needsParentHeading && item.parentLabel) {
+              content.push({
+                type: "heading",
+                attrs: { level: 2 },
+                content: [{ type: "text", text: item.parentLabel }],
+              });
+            }
+
+            content.push(
+              {
+                type: "heading",
+                attrs: { level: item.level },
+                content: [{ type: "text", text: item.label }],
+              },
+              { type: "paragraph" },
+            );
+
             editor
               .chain()
               .focus()
               .deleteRange(range)
-              .insertContent({
-                type: "heading",
-                attrs: { level: item.level },
-                content: [{ type: "text", text: item.label }],
-              })
+              .insertContent(content)
               .run();
           },
           items: () => getItems(),
           render: () => {
             let component: ReactRenderer<SlashCommandListRef> | null = null;
             let popup: HTMLDivElement | null = null;
+
+            const cleanup = () => {
+              component?.destroy();
+              popup?.remove();
+              popup = null;
+              component = null;
+            };
 
             return {
               onStart: (props: SuggestionProps) => {
@@ -162,7 +181,6 @@ export function createSlashCommand(
                 popup.style.zIndex = "50";
                 document.body.appendChild(popup);
 
-                // Position near the cursor
                 const coords = props.clientRect?.();
                 if (coords && popup) {
                   popup.style.left = `${coords.x}px`;
@@ -173,6 +191,10 @@ export function createSlashCommand(
                   props: {
                     items: props.items,
                     command: props.command,
+                    onDismiss: () => {
+                      cleanup();
+                      props.editor.commands.focus();
+                    },
                   },
                   editor: props.editor,
                 });
@@ -197,18 +219,14 @@ export function createSlashCommand(
 
               onKeyDown: (props: { event: KeyboardEvent }) => {
                 if (props.event.key === "Escape") {
-                  component?.destroy();
-                  popup?.remove();
-                  popup = null;
+                  cleanup();
                   return true;
                 }
                 return component?.ref?.onKeyDown(props) ?? false;
               },
 
               onExit: () => {
-                component?.destroy();
-                popup?.remove();
-                popup = null;
+                cleanup();
               },
             };
           },

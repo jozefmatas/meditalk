@@ -108,11 +108,13 @@ export function NavEncounters() {
                   >
                     <Link href={visitHref} title={visit.title || t("untitled")}>
                       {visit.status === "processing" ? (
-                        <HugeiconsIcon
-                          icon={Loading03Icon}
-                          size={20}
-                          className="shrink-0 animate-spin text-status-processing"
-                        />
+                        <span className="flex size-5 shrink-0 items-center justify-center">
+                          <HugeiconsIcon
+                            icon={Loading03Icon}
+                            size={14}
+                            className="animate-spin text-status-processing"
+                          />
+                        </span>
                       ) : (
                         <span className="flex size-5 shrink-0 items-center justify-center">
                           <span

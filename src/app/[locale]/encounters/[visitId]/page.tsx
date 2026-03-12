@@ -13,10 +13,18 @@ import {
 } from "@/components/encounters/files-panel";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
 import {
-  TabsLineWithAction,
+  Tabs,
+  TabsList,
+  TabsTrigger,
   TabsContent,
   type TabOption,
 } from "@/components/shared/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/shared/dropdown-menu";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { PatientPanel } from "@/components/encounters/patient-panel";
 import {
@@ -29,7 +37,7 @@ import { Textarea } from "@/components/shared/textarea";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AlertCircleIcon } from "@hugeicons/core-free-icons";
+import { AlertCircleIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
   TiptapEditor,
   type Editor,
@@ -112,6 +120,18 @@ export default function EncounterDetailPage({ params }: PageProps) {
   // Audio recording — blob kept in memory until Generate
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const recordingBarRef = useRef<RecordingBarRef>(null);
+
+  // Sticky header height — drives sidebar sticky offset
+  const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  useEffect(() => {
+    const el = stickyHeaderRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setStickyHeaderHeight(el.offsetHeight));
+    ro.observe(el);
+    setStickyHeaderHeight(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [visit?.status]);
 
   // TipTap editor instance (draft mode)
   const editorRef = useRef<Editor | null>(null);
@@ -534,6 +554,21 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const template = getTemplateById(selectedTemplateId);
 
+  // Persist template selection
+  const handleTemplateChange = useCallback(
+    (id: string) => {
+      setSelectedTemplateId(id);
+      if (!visit) return;
+      const meta = (visit.metadata || {}) as Record<string, unknown>;
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata: { ...meta, template_id: id } }),
+      }).catch(() => {});
+    },
+    [visit, visitId],
+  );
+
   // Flatten template sections for # slash command and sidebar
   const flatSections = useMemo(
     () => (template ? flattenTemplateSections(template) : []),
@@ -571,26 +606,105 @@ export default function EncounterDetailPage({ params }: PageProps) {
               `sections.${flatSections.find((p) => p.id === s.parentId)?.labelKey ?? s.labelKey}`,
             )
           : undefined,
+        needsParentHeading: s.parentId ? !usedSectionIds.has(s.parentId) : false,
       }));
   }, [flatSections, usedSectionIds, tTemplates]);
 
-  // Insert a heading into the editor at cursor position
+  // Insert a heading into the editor at cursor position.
+  // If inserting a subsection (h3) whose parent h2 is missing, insert the parent first.
   const handleInsertSection = useCallback(
     (sectionId: string, label: string, level: 2 | 3) => {
       const editor = editorRef.current;
       if (!editor) return;
-      editor
-        .chain()
-        .focus()
-        .insertContent({
+
+      const content: Record<string, unknown>[] = [];
+
+      // Auto-insert parent heading when adding a subsection whose parent isn't in the editor yet
+      if (level === 3) {
+        const section = flatSections.find((s) => s.id === sectionId);
+        if (section?.parentId && !usedSectionIds.has(section.parentId)) {
+          const parent = flatSections.find((s) => s.id === section.parentId);
+          if (parent) {
+            content.push({
+              type: "heading",
+              attrs: { level: 2 },
+              content: [{ type: "text", text: tTemplates(`sections.${parent.labelKey}`) }],
+            });
+          }
+        }
+      }
+
+      content.push(
+        {
           type: "heading",
           attrs: { level },
           content: [{ type: "text", text: label }],
-        })
-        .run();
+        },
+        { type: "paragraph" },
+      );
+
+      editor.chain().focus().insertContent(content).run();
     },
-    [],
+    [flatSections, usedSectionIds, tTemplates],
   );
+
+  // Scroll to an existing heading in the editor and place cursor at its end
+  const handleScrollToSection = useCallback((label: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const { doc } = editor.state;
+    let headingNodePos: number | null = null;
+    let cursorPos: number | null = null;
+
+    doc.descendants((node, pos) => {
+      if (headingNodePos !== null) return false;
+      if (
+        node.type.name === "heading" &&
+        node.textContent.trim() === label
+      ) {
+        headingNodePos = pos;
+        cursorPos = pos + node.nodeSize - 1;
+        return false;
+      }
+    });
+
+    if (headingNodePos === null || cursorPos === null) return;
+
+    // Get the heading DOM element directly from ProseMirror
+    const headingDom = editor.view.nodeDOM(headingNodePos) as HTMLElement | null;
+    if (!headingDom) return;
+
+    // Walk up from the editor DOM to find the scrollable ancestor
+    let scrollContainer: HTMLElement | null = editor.view.dom.parentElement;
+    while (scrollContainer) {
+      const { overflowY } = getComputedStyle(scrollContainer);
+      if (overflowY === "auto" || overflowY === "scroll") break;
+      scrollContainer = scrollContainer.parentElement;
+    }
+
+    if (scrollContainer) {
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const headingRect = headingDom.getBoundingClientRect();
+      const scrollTarget =
+        scrollContainer.scrollTop +
+        (headingRect.top - containerRect.top) -
+        containerRect.height / 2 +
+        headingRect.height / 2;
+
+      scrollContainer.scrollTo({ top: scrollTarget, behavior: "smooth" });
+    }
+
+    // Focus and place cursor at end of heading after the scroll animation
+    const finalPos = cursorPos;
+    setTimeout(() => {
+      editor
+        .chain()
+        .focus()
+        .setTextSelection(finalPos)
+        .run();
+    }, 300);
+  }, []);
 
   /** Match parsed sections to template sections by index (buildTemplateHtml iterates in order) */
   const documentedSectionIds = useMemo(() => {
@@ -667,53 +781,21 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
       {/* Main content area — hidden during generation */}
       {!isGenerating && (
-        <div className="flex flex-1 justify-center overflow-y-auto p-6">
-          <div className="flex w-full max-w-[800px] flex-col gap-6">
-            {/* Title + metadata + recording bar */}
-            <div className="flex flex-col gap-5">
-              {isDraft ? (
-                <div className="flex w-full items-center justify-between gap-4">
-                  <Textarea
-                    value={title}
-                    onChange={(e) => updateTitle(e.target.value)}
-                    onBlur={handleMetadataBlur}
-                    placeholder={t("untitled")}
-                    rows={1}
-                    autoFocus
-                    className="min-h-0 h-auto min-w-0 flex-1 resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                    onInput={(e) => {
-                      const target = e.currentTarget;
-                      target.style.height = "auto";
-                      target.style.height = `${target.scrollHeight}px`;
-                    }}
-                    ref={(el) => {
-                      if (el) {
-                        el.style.height = "auto";
-                        el.style.height = `${el.scrollHeight}px`;
-                      }
-                    }}
-                  />
-                  <div className="flex shrink-0 items-center gap-3">
-                    <Badge
-                      variant={`status-${visit.status}` as "status-started"}
-                    >
-                      {t(`status.${visit.status}`)}
-                    </Badge>
-                    <span className="text-sm text-foreground/65">
-                      {formatVisitDate(visit.visit_date, locale)}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-4">
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}>
+          <div className={`flex w-full max-w-[800px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}>
+            {isDraft ? (
+              <>
+                {/* Sticky header: title + recording bar */}
+                <div ref={stickyHeaderRef} className="shrink-0 flex flex-col gap-5 border-b border-border bg-background py-6">
+                  <div className="flex w-full items-center justify-between gap-4">
                     <Textarea
                       value={title}
                       onChange={(e) => updateTitle(e.target.value)}
                       onBlur={handleMetadataBlur}
                       placeholder={t("untitled")}
                       rows={1}
-                      className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                      autoFocus
+                      className="min-h-0 h-auto min-w-0 flex-1 resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
                       onInput={(e) => {
                         const target = e.currentTarget;
                         target.style.height = "auto";
@@ -726,7 +808,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                         }
                       }}
                     />
-                    <div className="flex items-center gap-3">
+                    <div className="flex shrink-0 items-center gap-3">
                       <Badge
                         variant={`status-${visit.status}` as "status-started"}
                       >
@@ -737,145 +819,213 @@ export default function EncounterDetailPage({ params }: PageProps) {
                       </span>
                     </div>
                   </div>
-                  {visit.status === "to_review" && (
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      className="shrink-0"
-                      onClick={handleMarkComplete}
-                    >
-                      {t("detail.markComplete")}
-                    </Button>
-                  )}
+                  <RecordingBar
+                    ref={recordingBarRef}
+                    disabled={isGenerating}
+                    onRecordingComplete={handleRecordingComplete}
+                    onRecordingStateChange={handleRecordingStateChange}
+                  />
                 </div>
-              )}
 
-              {isDraft && (
-                <RecordingBar
-                  ref={recordingBarRef}
-                  disabled={isGenerating}
-                  onRecordingComplete={handleRecordingComplete}
-                  onRecordingStateChange={handleRecordingStateChange}
-                />
-              )}
+                {/* Error alert */}
+                {error && (
+                  <Alert variant="destructive">
+                    <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
 
-              {!isDraft && (
-                <TabsLineWithAction
-                  tabs={currentVisibleTabs}
-                  availableTabs={allTabs}
-                  value={activeTab}
-                  onValueChange={setActiveTab}
-                  onAddTab={handleAddTab}
-                  onRemoveTab={handleRemoveTab}
-                  removableTabs={removableTabValues}
-                  actionLabel={t("detail.addDocument")}
-                >
-                  {/* Note tab */}
-                  <TabsContent value="note">
-                    <div className="flex flex-1 gap-6">
-                      <TemplateSidebar
-                        templateId={selectedTemplateId}
-                        onTemplateChange={setSelectedTemplateId}
-                        disabled
-                        documentedSections={documentedSectionIds}
+                {/* Draft: template sidebar + editor */}
+                <div className="flex flex-1 min-h-0 gap-6">
+                  <TemplateSidebar
+                    templateId={selectedTemplateId}
+                    onTemplateChange={handleTemplateChange}
+                    disabled={isGenerating}
+                    onInsertSection={handleInsertSection}
+                    usedSectionIds={usedSectionIds}
+                    onScrollToSection={handleScrollToSection}
+                  />
+                  <TiptapEditor
+                    content={doctorNotes}
+                    onChange={setDoctorNotes}
+                    placeholder={tTemplates("doctorNotesPlaceholder")}
+                    className="flex-1 overflow-y-auto rounded-2xl"
+                    onEditorReady={handleEditorReady}
+                    slashCommandItems={slashCommandItems}
+                  />
+                </div>
+              </>
+            ) : (
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-6">
+                {/* Sticky header: title + tab bar */}
+                <div ref={stickyHeaderRef} className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6">
+                  <div className="flex items-center gap-4">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <Textarea
+                        value={title}
+                        onChange={(e) => updateTitle(e.target.value)}
+                        onBlur={handleMetadataBlur}
+                        placeholder={t("untitled")}
+                        rows={1}
+                        className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                        onInput={(e) => {
+                          const target = e.currentTarget;
+                          target.style.height = "auto";
+                          target.style.height = `${target.scrollHeight}px`;
+                        }}
+                        ref={(el) => {
+                          if (el) {
+                            el.style.height = "auto";
+                            el.style.height = `${el.scrollHeight}px`;
+                          }
+                        }}
                       />
-                      <div className="flex flex-1 flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                          <h2 className="text-lg font-medium">
-                            {t("detail.note")}
-                          </h2>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleCopyNote}
-                            disabled={!generatedNoteHtml}
-                          >
-                            {noteCopied
-                              ? t("detail.noteCopied")
-                              : t("detail.copyNote")}
-                          </Button>
-                        </div>
-                        {parsedSections.length > 0 ? (
-                          parsedSections.map((section) => (
-                            <NoteSectionCard
-                              key={section.id}
-                              title={section.title}
-                              content={section.content}
-                            />
-                          ))
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {t("detail.noNote")}
-                          </p>
-                        )}
+                      <div className="flex items-center gap-3">
+                        <Badge
+                          variant={`status-${visit.status}` as "status-started"}
+                        >
+                          {t(`status.${visit.status}`)}
+                        </Badge>
+                        <span className="text-sm text-foreground/65">
+                          {formatVisitDate(visit.visit_date, locale)}
+                        </span>
                       </div>
                     </div>
-                  </TabsContent>
+                    {visit.status === "to_review" && (
+                      <Button
+                        variant="outline"
+                        size="lg"
+                        className="shrink-0"
+                        onClick={handleMarkComplete}
+                      >
+                        {t("detail.markComplete")}
+                      </Button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 border-b border-border">
+                    <TabsList variant="line">
+                      {currentVisibleTabs.map((tab) => (
+                        <TabsTrigger key={tab.value} value={tab.value}>
+                          {tab.label}
+                          {removableTabValues.includes(tab.value) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveTab(tab.value);
+                              }}
+                              className="ml-1 rounded-sm opacity-50 hover:opacity-100"
+                            >
+                              <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                            </button>
+                          )}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    {allTabs.filter((opt) => !currentVisibleTabs.some((t) => t.value === opt.value)).length > 0 && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="text-foreground/65 hover:text-foreground">
+                            + {t("detail.addDocument")}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {allTabs
+                            .filter((opt) => !currentVisibleTabs.some((t) => t.value === opt.value))
+                            .map((tab) => (
+                              <DropdownMenuItem
+                                key={tab.value}
+                                onClick={() => handleAddTab(tab.value)}
+                              >
+                                {tab.label}
+                              </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                </div>
 
-                  {/* Transcript tab */}
-                  <TabsContent value="transcript">
-                    <div className="flex-1">
-                      {visit.raw_text ? (
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                          {visit.raw_text}
-                        </p>
+                {/* Error alert */}
+                {error && (
+                  <Alert variant="destructive">
+                    <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Tab content — outside sticky area */}
+                <TabsContent value="note">
+                  <div className="flex flex-1 gap-6">
+                    <TemplateSidebar
+                      templateId={selectedTemplateId}
+                      onTemplateChange={handleTemplateChange}
+                      disabled
+                      documentedSections={documentedSectionIds}
+                      stickyTop={stickyHeaderHeight + 24}
+                    />
+                    <div className="flex flex-1 flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-lg font-medium">
+                          {t("detail.note")}
+                        </h2>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleCopyNote}
+                          disabled={!generatedNoteHtml}
+                        >
+                          {noteCopied
+                            ? t("detail.noteCopied")
+                            : t("detail.copyNote")}
+                        </Button>
+                      </div>
+                      {parsedSections.length > 0 ? (
+                        parsedSections.map((section) => (
+                          <NoteSectionCard
+                            key={section.id}
+                            title={section.title}
+                            content={section.content}
+                          />
+                        ))
                       ) : (
                         <p className="text-sm text-muted-foreground">
-                          {t("detail.noTranscript")}
+                          {t("detail.noNote")}
                         </p>
                       )}
                     </div>
-                  </TabsContent>
+                  </div>
+                </TabsContent>
 
-                  {/* Add document tab */}
-                  <TabsContent value="add-document">
-                    <div className="flex-1">
-                      <TiptapEditor
-                        content=""
-                        onChange={() => {}}
-                        placeholder={t("detail.addDocument")}
-                        className="flex-1 rounded-2xl"
-                      />
-                    </div>
-                  </TabsContent>
-                </TabsLineWithAction>
-              )}
-            </div>
+                <TabsContent value="transcript">
+                  <div className="flex-1">
+                    {visit.raw_text ? (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                        {visit.raw_text}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        {t("detail.noTranscript")}
+                      </p>
+                    )}
+                  </div>
+                </TabsContent>
 
-            {/* Draft: separator */}
-            {isDraft && <div className="h-px bg-border" />}
-
-            {/* Error alert */}
-            {error && (
-              <Alert variant="destructive">
-                <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+                <TabsContent value="add-document">
+                  <div className="flex-1">
+                    <TiptapEditor
+                      content=""
+                      onChange={() => {}}
+                      placeholder={t("detail.addDocument")}
+                      className="flex-1 rounded-2xl"
+                    />
+                  </div>
+                </TabsContent>
+              </Tabs>
             )}
 
-            {/* Draft: template sidebar + editor */}
-            {isDraft && (
-              <div className="flex flex-1 gap-6">
-                <TemplateSidebar
-                  templateId={selectedTemplateId}
-                  onTemplateChange={setSelectedTemplateId}
-                  disabled={isGenerating}
-                  onInsertSection={handleInsertSection}
-                  usedSectionIds={usedSectionIds}
-                />
-                <TiptapEditor
-                  content={doctorNotes}
-                  onChange={setDoctorNotes}
-                  placeholder={tTemplates("doctorNotesPlaceholder")}
-                  className="flex-1 rounded-2xl"
-                  onEditorReady={handleEditorReady}
-                  slashCommandItems={slashCommandItems}
-                />
-              </div>
-            )}
-
-            {/* Bottom scroll inset */}
-            <div aria-hidden className="min-h-32 shrink-0" />
+            {/* Bottom scroll inset (review mode only) */}
+            {!isDraft && <div aria-hidden className="min-h-32 shrink-0" />}
           </div>
         </div>
       )}
