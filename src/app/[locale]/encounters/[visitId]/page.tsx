@@ -63,6 +63,9 @@ interface PageProps {
   params: Promise<{ visitId: string }>;
 }
 
+/** Module-level tracking of active generations so they survive component remounts. */
+const activeGenerations = new Set<string>();
+
 function formatVisitDate(dateString: string, locale: string) {
   const formatted = new Date(dateString).toLocaleDateString(locale, {
     weekday: "short",
@@ -86,7 +89,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
   const t = useTranslations("encounters");
   const tTemplates = useTranslations("templates");
-  const tPoc = useTranslations("poc");
   const locale = useLocale();
   const router = useRouter();
   const { setPageTitle } = usePageTitle();
@@ -112,7 +114,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
   );
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(() =>
+    activeGenerations.has(visitId),
+  );
 
   // Files
   const [files, setFiles] = useState<EncounterFile[]>([]);
@@ -132,6 +136,16 @@ export default function EncounterDetailPage({ params }: PageProps) {
     setStickyHeaderHeight(el.offsetHeight);
     return () => ro.disconnect();
   }, [visit?.status]);
+
+  // Prevent accidental navigation during processing
+  useEffect(() => {
+    if (!isGenerating) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isGenerating]);
 
   // TipTap editor instance (draft mode)
   const editorRef = useRef<Editor | null>(null);
@@ -222,6 +236,59 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
     fetchVisit();
   }, [visitId, updateTitle]);
+
+  // Re-fetch encounter when a background generation completes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { visitId: doneId } = (e as CustomEvent).detail;
+      if (doneId !== visitId) return;
+      setIsGenerating(false);
+      // Re-fetch encounter to pick up generated note + updated status
+      (async () => {
+        try {
+          const res = await fetch(`/api/encounters/${visitId}`);
+          if (!res.ok) return;
+          const data: Encounter = await res.json();
+          setVisit(data);
+          if (data.title) updateTitle(data.title);
+          if (data.soap_note) setGeneratedNoteHtml(data.soap_note);
+        } catch {
+          /* silent */
+        }
+      })();
+    };
+    window.addEventListener("generation-done", handler);
+    return () => window.removeEventListener("generation-done", handler);
+  }, [visitId, updateTitle]);
+
+  // React to sidebar actions (delete, mark complete) on the current encounter
+  useEffect(() => {
+    const handleDelete = (e: Event) => {
+      const { id } = (e as CustomEvent<{ id: string }>).detail;
+      if (id === visitId) {
+        const base = locale === "sk" ? "" : `/${locale}`;
+        router.push(base || "/");
+      }
+    };
+    const handleUpdate = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{
+          id: string;
+          status?: EncounterStatus;
+        }>
+      ).detail;
+      if (detail.id !== visitId) return;
+      if (detail.status !== undefined) {
+        setVisit((prev) => (prev ? { ...prev, status: detail.status! } : prev));
+      }
+    };
+    window.addEventListener("encounter-delete", handleDelete);
+    window.addEventListener("encounter-update", handleUpdate);
+    return () => {
+      window.removeEventListener("encounter-delete", handleDelete);
+      window.removeEventListener("encounter-update", handleUpdate);
+    };
+  }, [visitId, router, locale]);
 
   // Auto-save doctor notes (2s debounce)
   useEffect(() => {
@@ -327,21 +394,31 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const handleGenerate = async () => {
     if (!visitId) return;
+    activeGenerations.add(visitId);
     setIsGenerating(true);
     setError(null);
 
-    // Reflect processing state in sidebar
+    // Reflect processing state in sidebar + persist to DB
     window.dispatchEvent(
       new CustomEvent("encounter-update", {
         detail: { id: visitId, status: "processing" },
       }),
     );
+    fetch(`/api/encounters/${visitId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "processing" }),
+    }).catch(() => {});
+
+    // Capture values at call time so the chain works even after unmount
+    const capturedTemplateId = selectedTemplateId;
+    const capturedDoctorNotes = doctorNotes;
+    const capturedTitle = title;
+    const capturedLanguage = generationLanguage;
+    const finalizedBlob = recordingBarRef.current?.finalize();
+    const blobToProcess = finalizedBlob ?? audioBlob;
 
     try {
-      // Finalize any in-progress recording first
-      const finalizedBlob = recordingBarRef.current?.finalize();
-      const blobToProcess = finalizedBlob ?? audioBlob;
-
       // Step 1: If there's a recorded audio blob, transcribe it first
       if (blobToProcess) {
         const audioFile = new File([blobToProcess], "recording.webm", {
@@ -349,7 +426,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         });
         const formData = new FormData();
         formData.append("file", audioFile);
-        formData.append("language", generationLanguage);
+        formData.append("language", capturedLanguage);
         formData.append("visitId", visitId);
 
         const transcribeRes = await fetch("/api/process-audio", {
@@ -359,14 +436,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
         if (!transcribeRes.ok) {
           const data = await transcribeRes.json();
-          throw new Error(data.error || tPoc("errorUpload"));
+          throw new Error(data.error || "Transcription failed");
         }
 
         const transcribeData = await transcribeRes.json();
         setVisit((prev) =>
           prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
         );
-        setAudioBlob(null); // consumed
+        setAudioBlob(null);
       }
 
       // Step 2: Generate note from transcript + doctor notes
@@ -375,14 +452,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           visitId,
-          templateId: selectedTemplateId,
-          doctorNotes: doctorNotes || undefined,
+          templateId: capturedTemplateId,
+          doctorNotes: capturedDoctorNotes || undefined,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || tPoc("errorGenerate"));
+        throw new Error(data.error || "Generation failed");
       }
 
       const data = await res.json();
@@ -398,7 +475,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
       );
 
       // Auto-set title if user hasn't provided one
-      const autoTitle = !title.trim() ? data.suggestedTitle : null;
+      const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
       const patchBody: Record<string, string> = { status: "to_review" };
       if (autoTitle) patchBody.title = autoTitle;
 
@@ -420,9 +497,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
         }),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : tPoc("errorGenerate"));
+      setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
+      activeGenerations.delete(visitId);
       setIsGenerating(false);
+      // Notify any remounted instances that generation is done
+      window.dispatchEvent(
+        new CustomEvent("generation-done", { detail: { visitId } }),
+      );
     }
   };
 
@@ -606,7 +688,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
               `sections.${flatSections.find((p) => p.id === s.parentId)?.labelKey ?? s.labelKey}`,
             )
           : undefined,
-        needsParentHeading: s.parentId ? !usedSectionIds.has(s.parentId) : false,
+        needsParentHeading: s.parentId
+          ? !usedSectionIds.has(s.parentId)
+          : false,
       }));
   }, [flatSections, usedSectionIds, tTemplates]);
 
@@ -628,7 +712,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
             content.push({
               type: "heading",
               attrs: { level: 2 },
-              content: [{ type: "text", text: tTemplates(`sections.${parent.labelKey}`) }],
+              content: [
+                {
+                  type: "text",
+                  text: tTemplates(`sections.${parent.labelKey}`),
+                },
+              ],
             });
           }
         }
@@ -659,10 +748,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
     doc.descendants((node, pos) => {
       if (headingNodePos !== null) return false;
-      if (
-        node.type.name === "heading" &&
-        node.textContent.trim() === label
-      ) {
+      if (node.type.name === "heading" && node.textContent.trim() === label) {
         headingNodePos = pos;
         cursorPos = pos + node.nodeSize - 1;
         return false;
@@ -672,7 +758,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
     if (headingNodePos === null || cursorPos === null) return;
 
     // Get the heading DOM element directly from ProseMirror
-    const headingDom = editor.view.nodeDOM(headingNodePos) as HTMLElement | null;
+    const headingDom = editor.view.nodeDOM(
+      headingNodePos,
+    ) as HTMLElement | null;
     if (!headingDom) return;
 
     // Walk up from the editor DOM to find the scrollable ancestor
@@ -698,11 +786,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     // Focus and place cursor at end of heading after the scroll animation
     const finalPos = cursorPos;
     setTimeout(() => {
-      editor
-        .chain()
-        .focus()
-        .setTextSelection(finalPos)
-        .run();
+      editor.chain().focus().setTextSelection(finalPos).run();
     }, 300);
   }, []);
 
@@ -781,12 +865,19 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
       {/* Main content area — hidden during generation */}
       {!isGenerating && (
-        <div className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}>
-          <div className={`flex w-full max-w-[800px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}>
+        <div
+          className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
+        >
+          <div
+            className={`flex w-full max-w-[800px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
+          >
             {isDraft ? (
               <>
                 {/* Sticky header: title + recording bar */}
-                <div ref={stickyHeaderRef} className="shrink-0 flex flex-col gap-5 border-b border-border bg-background py-6">
+                <div
+                  ref={stickyHeaderRef}
+                  className="shrink-0 flex flex-col gap-5 border-b border-border bg-background py-6"
+                >
                   <div className="flex w-full items-center justify-between gap-4">
                     <Textarea
                       value={title}
@@ -856,9 +947,16 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 </div>
               </>
             ) : (
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-6">
+              <Tabs
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="gap-6"
+              >
                 {/* Sticky header: title + tab bar */}
-                <div ref={stickyHeaderRef} className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6">
+                <div
+                  ref={stickyHeaderRef}
+                  className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6"
+                >
                   <div className="flex items-center gap-4">
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
                       <Textarea
@@ -916,22 +1014,36 @@ export default function EncounterDetailPage({ params }: PageProps) {
                               }}
                               className="ml-1 rounded-sm opacity-50 hover:opacity-100"
                             >
-                              <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                              <HugeiconsIcon
+                                icon={Cancel01Icon}
+                                className="size-3"
+                              />
                             </button>
                           )}
                         </TabsTrigger>
                       ))}
                     </TabsList>
-                    {allTabs.filter((opt) => !currentVisibleTabs.some((t) => t.value === opt.value)).length > 0 && (
+                    {allTabs.filter(
+                      (opt) =>
+                        !currentVisibleTabs.some((t) => t.value === opt.value),
+                    ).length > 0 && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="text-foreground/65 hover:text-foreground">
+                          <Button
+                            variant="ghost"
+                            className="text-foreground/65 hover:text-foreground"
+                          >
                             + {t("detail.addDocument")}
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           {allTabs
-                            .filter((opt) => !currentVisibleTabs.some((t) => t.value === opt.value))
+                            .filter(
+                              (opt) =>
+                                !currentVisibleTabs.some(
+                                  (t) => t.value === opt.value,
+                                ),
+                            )
                             .map((tab) => (
                               <DropdownMenuItem
                                 key={tab.value}

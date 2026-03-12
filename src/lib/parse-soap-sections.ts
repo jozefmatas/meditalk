@@ -50,11 +50,12 @@ export function parseSoapSections(html: string): SoapSection[] {
 }
 
 /**
- * Extract plain text from a section's HTML content (for clipboard copy).
+ * Convert a section's HTML content to markdown-style text for clipboard copy.
+ * h2 titles are **bold**, h3 subheaders are *italic*.
  */
 export function sectionToPlainText(section: SoapSection): string {
   const text = section.content
-    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, "\n$1\n")
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, "\n*$1*\n")
     .replace(/<li[^>]*>(.*?)<\/li>/gi, "  - $1\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
@@ -65,11 +66,12 @@ export function sectionToPlainText(section: SoapSection): string {
     .replace(/&quot;/g, '"')
     .trim();
 
-  return `${section.title}\n${text}`;
+  return `**${section.title}**\n${text}`;
 }
 
 /**
- * Convert all sections to a single plain text string for clipboard.
+ * Convert all sections to a single markdown-style string for clipboard.
+ * Sections are separated by blank lines.
  */
 export function allSectionsToPlainText(sections: SoapSection[]): string {
   return sections.map(sectionToPlainText).join("\n\n");

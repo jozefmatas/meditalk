@@ -99,12 +99,7 @@ export function NavEncounters() {
                   <SidebarMenuButton
                     asChild
                     isActive={isActive}
-                    className={cn(
-                      itemClass,
-                      visit.status === "processing" &&
-                        !isActive &&
-                        "bg-sidebar-accent",
-                    )}
+                    className={itemClass}
                   >
                     <Link href={visitHref} title={visit.title || t("untitled")}>
                       {visit.status === "processing" ? (

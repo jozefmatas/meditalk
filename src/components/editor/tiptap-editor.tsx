@@ -5,10 +5,7 @@ import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { cn } from "@/lib/utils";
-import {
-  createSlashCommand,
-  type SlashCommandItem,
-} from "./slash-command";
+import { createSlashCommand, type SlashCommandItem } from "./slash-command";
 
 interface TiptapEditorProps {
   content: string;
@@ -32,7 +29,9 @@ export function TiptapEditor({
   slashCommandItems,
 }: TiptapEditorProps) {
   const slashItemsRef = useRef<SlashCommandItem[]>(slashCommandItems ?? []);
-  slashItemsRef.current = slashCommandItems ?? [];
+  useEffect(() => {
+    slashItemsRef.current = slashCommandItems ?? [];
+  }, [slashCommandItems]);
 
   const editor = useEditor({
     extensions: [
@@ -44,7 +43,8 @@ export function TiptapEditor({
         showOnlyCurrent: true,
       }),
       ...(slashCommandItems
-        ? [createSlashCommand(() => slashItemsRef.current)]
+        ? // eslint-disable-next-line react-hooks/refs -- callback is invoked at event time, not render
+          [createSlashCommand(() => slashItemsRef.current)]
         : []),
     ],
     content,
@@ -73,8 +73,13 @@ export function TiptapEditor({
 
   return (
     <div
-      className={cn("rounded-lg border bg-background transition-colors focus-within:border-ring focus-within:bg-accent", className)}
-      onClick={() => { if (!editor.isFocused) editor.commands.focus("end"); }}
+      className={cn(
+        "rounded-lg border bg-background transition-colors focus-within:border-ring focus-within:bg-accent",
+        className,
+      )}
+      onClick={() => {
+        if (!editor.isFocused) editor.commands.focus("end");
+      }}
     >
       <EditorContent
         editor={editor}
