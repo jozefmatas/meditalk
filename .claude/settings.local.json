@@ -86,7 +86,9 @@
       "Bash(npx @elevenlabs/cli@latest components add:*)",
       "Bash(/Users/jozefmatas/Documents/meditalk/meditalk/src/components/shared/input-group/InputGroup.tsx << 'EOF'\nexport {\n  InputGroup,\n  InputGroupAddon,\n  InputGroupButton,\n  InputGroupText,\n  InputGroupInput,\n  InputGroupTextarea,\n} from \"@/components/generated/ui/input-group\";\nEOF)",
       "Bash(npm run lint:*)",
-      "Bash(npx prettier:*)"
+      "Bash(npx prettier:*)",
+      "Bash(vercel link:*)",
+      "Bash(vercel env add:*)"
     ],
     "deny": [],
     "ask": []
