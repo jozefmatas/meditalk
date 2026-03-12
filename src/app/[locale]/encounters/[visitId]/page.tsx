@@ -30,8 +30,16 @@ import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
-import { TiptapEditor } from "@/components/editor/tiptap-editor";
-import { getDefaultTemplate, getTemplateById } from "@/lib/templates";
+import {
+  TiptapEditor,
+  type Editor,
+  type SlashCommandItem,
+} from "@/components/editor/tiptap-editor";
+import {
+  getDefaultTemplate,
+  getTemplateById,
+  flattenTemplateSections,
+} from "@/lib/templates";
 import {
   parseSoapSections,
   allSectionsToPlainText,
@@ -103,6 +111,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
   // Audio recording — blob kept in memory until Generate
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const recordingBarRef = useRef<RecordingBarRef>(null);
+
+  // TipTap editor instance (draft mode)
+  const editorRef = useRef<Editor | null>(null);
+  const handleEditorReady = useCallback((editor: Editor) => {
+    editorRef.current = editor;
+  }, []);
 
   // Review state
   const [activeTab, setActiveTab] = useState("note");
@@ -510,6 +524,64 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const template = getTemplateById(selectedTemplateId);
 
+  // Flatten template sections for # slash command and sidebar
+  const flatSections = useMemo(
+    () => (template ? flattenTemplateSections(template) : []),
+    [template],
+  );
+
+  // Detect which section headings already exist in the editor content
+  const usedSectionIds = useMemo(() => {
+    if (!doctorNotes || flatSections.length === 0) return new Set<string>();
+    const used = new Set<string>();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(doctorNotes, "text/html");
+    const headings = doc.querySelectorAll("h2, h3");
+    headings.forEach((h) => {
+      const text = h.textContent?.trim();
+      if (!text) return;
+      const match = flatSections.find(
+        (s) => tTemplates(`sections.${s.labelKey}`) === text,
+      );
+      if (match) used.add(match.id);
+    });
+    return used;
+  }, [doctorNotes, flatSections, tTemplates]);
+
+  // Build slash command items (only unused sections)
+  const slashCommandItems: SlashCommandItem[] = useMemo(() => {
+    return flatSections
+      .filter((s) => !usedSectionIds.has(s.id))
+      .map((s) => ({
+        id: s.id,
+        label: tTemplates(`sections.${s.labelKey}`),
+        level: s.level,
+        parentLabel: s.parentId
+          ? tTemplates(
+              `sections.${flatSections.find((p) => p.id === s.parentId)?.labelKey ?? s.labelKey}`,
+            )
+          : undefined,
+      }));
+  }, [flatSections, usedSectionIds, tTemplates]);
+
+  // Insert a heading into the editor at cursor position
+  const handleInsertSection = useCallback(
+    (sectionId: string, label: string, level: 2 | 3) => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: "heading",
+          attrs: { level },
+          content: [{ type: "text", text: label }],
+        })
+        .run();
+    },
+    [],
+  );
+
   /** Match parsed sections to template sections by index (buildTemplateHtml iterates in order) */
   const documentedSectionIds = useMemo(() => {
     if (!template || !generatedNoteHtml) return new Set<string>();
@@ -780,12 +852,16 @@ export default function EncounterDetailPage({ params }: PageProps) {
                   templateId={selectedTemplateId}
                   onTemplateChange={setSelectedTemplateId}
                   disabled={isGenerating}
+                  onInsertSection={handleInsertSection}
+                  usedSectionIds={usedSectionIds}
                 />
                 <TiptapEditor
                   content={doctorNotes}
                   onChange={setDoctorNotes}
                   placeholder={tTemplates("doctorNotesPlaceholder")}
                   className="flex-1 rounded-2xl"
+                  onEditorReady={handleEditorReady}
+                  slashCommandItems={slashCommandItems}
                 />
               </div>
             )}

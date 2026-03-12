@@ -39,9 +39,8 @@ const dotColor: Record<string, string> = {
   archived: "bg-status-archived",
 };
 
-/** Figma item spec: h-9 (36px), gap-1.5 (6px), px-1.5 (6px), rounded-lg (~10px). */
 const itemClass =
-  "h-9 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5! group-has-[[data-sidebar=menu-action]:hover]/menu-item:!bg-transparent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:!bg-transparent";
+  "h-10 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5! group-has-[[data-sidebar=menu-action]:hover]/menu-item:!bg-transparent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:!bg-transparent";
 
 export function NavEncounters() {
   const t = useTranslations("encounters");
@@ -79,7 +78,7 @@ export function NavEncounters() {
       <span className="sticky top-0 z-10 bg-sidebar px-2 pb-2 text-xs text-sidebar-foreground/65">
         {tNav("latestEncounters")}
       </span>
-      <SidebarMenu className="gap-1">
+      <SidebarMenu className="gap-0.5">
         {isLoading && visits.length === 0 ? (
           Array.from({ length: 5 }).map((_, i) => (
             <SidebarMenuItem key={i}>
@@ -125,16 +124,16 @@ export function NavEncounters() {
                           />
                         </span>
                       )}
-                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div className="flex min-w-0 flex-1 flex-col">
                         <span
                           className={cn(
-                            "truncate text-sm leading-none",
+                            "truncate text-sm leading-tight",
                             visit.status === "completed" && "line-through",
                           )}
                         >
                           {visit.title || t("untitled")}
                         </span>
-                        <span className="truncate text-xs font-normal leading-none text-sidebar-foreground/65">
+                        <span className="truncate text-xs font-normal leading-tight text-sidebar-foreground/65">
                           {t(`status.${visit.status}`)}
                         </span>
                       </div>

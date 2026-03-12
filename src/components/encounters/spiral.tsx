@@ -17,12 +17,12 @@ interface SpiralProps {
 
 export function Spiral({
   totalDots = 300,
-  dotRadius = 1,
+  dotRadius = 1.25,
   duration = 2,
-  dotColor = "#242629",
+  dotColor = "#4444FF",
   margin = 1,
-  minOpacity = 0.1,
-  maxOpacity = 0.4,
+  minOpacity = 0.5,
+  maxOpacity = 1,
   minScale = 0.5,
   maxScale = 1.5,
   className,

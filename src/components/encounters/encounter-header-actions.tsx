@@ -112,7 +112,7 @@ export function EncounterHeaderActions({
               size={16}
               className={isGenerating ? "animate-spin" : ""}
             />
-            {t("detail.generate")}
+            {isGenerating ? t("detail.generating") : t("detail.generate")}
           </Button>
         )}
       </>

@@ -141,3 +141,12 @@
     cursor: pointer;
   }
 }
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% center;
+  }
+  100% {
+    background-position: -100% center;
+  }
+}
