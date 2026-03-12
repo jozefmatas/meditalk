@@ -564,8 +564,19 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const handleCopyNote = useCallback(async () => {
     const parsed = parseSoapSections(generatedNoteHtml);
-    const text = allSectionsToPlainText(parsed);
-    await navigator.clipboard.writeText(text);
+    const plainText = allSectionsToPlainText(parsed);
+    try {
+      // Copy as rich text so email clients / docs render formatting
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([generatedNoteHtml], { type: "text/html" }),
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+      ]);
+    } catch {
+      // Fallback for browsers that don't support ClipboardItem
+      await navigator.clipboard.writeText(plainText);
+    }
     setNoteCopied(true);
     setTimeout(() => setNoteCopied(false), 2000);
   }, [generatedNoteHtml]);
