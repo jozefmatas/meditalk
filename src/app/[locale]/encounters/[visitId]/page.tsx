@@ -56,7 +56,7 @@ interface PageProps {
 }
 
 function formatVisitDate(dateString: string, locale: string) {
-  return new Date(dateString).toLocaleDateString(locale, {
+  const formatted = new Date(dateString).toLocaleDateString(locale, {
     weekday: "short",
     year: "numeric",
     month: "short",
@@ -64,6 +64,7 @@ function formatVisitDate(dateString: string, locale: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
 
 /** Statuses that show the draft-mode editor layout */
@@ -158,6 +159,15 @@ export default function EncounterDetailPage({ params }: PageProps) {
         if (!res.ok) throw new Error("Visit not found");
 
         const data: Encounter = await res.json();
+        // Recording state isn't persisted across page loads — reset to started
+        if (data.status === "recording") {
+          data.status = "started";
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "started" }),
+          }).catch(() => {});
+        }
         setVisit(data);
 
         updateTitle(data.title || "");
@@ -662,7 +672,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             {/* Title + metadata + recording bar */}
             <div className="flex flex-col gap-5">
               {isDraft ? (
-                <div className="flex flex-col gap-1">
+                <div className="flex w-full items-center justify-between gap-4">
                   <Textarea
                     value={title}
                     onChange={(e) => updateTitle(e.target.value)}
@@ -670,7 +680,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                     placeholder={t("untitled")}
                     rows={1}
                     autoFocus
-                    className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                    className="min-h-0 h-auto min-w-0 flex-1 resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
                     onInput={(e) => {
                       const target = e.currentTarget;
                       target.style.height = "auto";
@@ -683,7 +693,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                       }
                     }}
                   />
-                  <div className="flex items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-3">
                     <Badge
                       variant={`status-${visit.status}` as "status-started"}
                     >
@@ -743,8 +753,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
               {isDraft && (
                 <RecordingBar
                   ref={recordingBarRef}
-                  hasRecording={!!audioBlob}
-                  hasTranscript={!!visit.raw_text}
                   disabled={isGenerating}
                   onRecordingComplete={handleRecordingComplete}
                   onRecordingStateChange={handleRecordingStateChange}

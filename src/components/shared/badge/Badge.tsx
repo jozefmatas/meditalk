@@ -20,7 +20,7 @@ const variantFixes: Partial<Record<string, string>> = {
  */
 const statusClasses: Record<string, string> = {
   "status-started": "bg-muted text-foreground/65",
-  "status-recording": "bg-status-recording/10 text-status-recording",
+  "status-recording": "bg-destructive/10 text-destructive",
   "status-processing": "bg-status-processing/10 text-status-processing",
   "status-to_review": "bg-status-to_review/10 text-status-to_review",
   "status-completed": "bg-status-completed/10 text-status-completed",

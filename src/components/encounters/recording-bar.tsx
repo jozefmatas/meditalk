@@ -23,7 +23,6 @@ import {
 } from "@/components/shared/live-waveform";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Mic01Icon } from "@hugeicons/core-free-icons";
-import { cn } from "@/lib/utils";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -33,8 +32,6 @@ export interface RecordingBarRef {
 }
 
 interface RecordingBarProps {
-  hasRecording: boolean;
-  hasTranscript: boolean;
   disabled?: boolean;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange?: (state: RecordingState) => void;
@@ -62,7 +59,7 @@ function getSupportedMimeType(): string {
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
-    { hasRecording, hasTranscript, disabled, onRecordingComplete, onRecordingStateChange },
+    { disabled, onRecordingComplete, onRecordingStateChange },
     ref
   ) {
     const t = useTranslations("encounters.detail");
@@ -230,132 +227,112 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       onRecordingStateChange?.("recording");
     }, [startTimer, onRecordingStateChange]);
 
-    // LiveWaveform is visual-only — active when recording, idle when paused.
-    // Our recording stream is managed independently so pause doesn't kill it.
-    const waveformActive = state === "recording";
+    // Device selector element — shared between idle & paused states
+    const deviceSelector = devices.length > 1 ? (
+      <Select
+        value={selectedDeviceId}
+        onValueChange={setSelectedDeviceId}
+        disabled={state === "recording" || !!disabled}
+      >
+        <SelectTrigger variant="ghost" className="px-2">
+          <HugeiconsIcon icon={Mic01Icon} size={16} className="shrink-0 text-foreground" />
+          <SelectValue className="text-left" />
+        </SelectTrigger>
+        <SelectContent>
+          {devices.map((device) => (
+            <SelectItem key={device.deviceId} value={device.deviceId}>
+              {device.label ||
+                `Microphone ${device.deviceId.slice(0, 5)}`}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    ) : devices.length === 1 ? (
+      <span className="truncate text-sm text-muted-foreground">
+        <HugeiconsIcon icon={Mic01Icon} size={16} className="mr-1.5 inline shrink-0 text-foreground" />
+        {devices[0].label || t("defaultMicrophone")}
+      </span>
+    ) : null;
 
-    return (
-      <div className="flex items-center justify-between gap-4">
-        {/* Left: action button + device selector */}
+    /* ── Idle: action button + mic picker (fills width), no status/waveform ── */
+    if (state === "idle") {
+      return (
         <div className="flex items-center gap-3">
-          {state === "idle" && (
-            <Button
-              variant="secondary"
-              size="lg"
-              onClick={handleStart}
-              disabled={!!disabled}
-              className="rounded-xl"
-            >
-              {t("startRecording")}
-            </Button>
-          )}
-
-          {state === "recording" && (
-            <Button
-              size="lg"
-              onClick={handlePause}
-              className="rounded-xl border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
-            >
-              {t("pause")}
-            </Button>
-          )}
-
-          {state === "paused" && (
-            <Button
-              variant="secondary"
-              size="lg"
-              onClick={handleResume}
-              className="rounded-xl"
-            >
-              {t("resume")}
-            </Button>
-          )}
-
-          {/* Device selector */}
-          {devices.length > 1 && (
-            <Select
-              value={selectedDeviceId}
-              onValueChange={setSelectedDeviceId}
-              disabled={state !== "idle" || !!disabled}
-            >
-              <SelectTrigger variant="ghost" className="max-w-[220px] px-2">
-                <HugeiconsIcon icon={Mic01Icon} size={16} className="shrink-0 text-foreground" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {devices.map((device) => (
-                  <SelectItem key={device.deviceId} value={device.deviceId}>
-                    {device.label ||
-                      `Microphone ${device.deviceId.slice(0, 5)}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {devices.length === 1 && (
-            <span className="max-w-[220px] truncate text-sm text-muted-foreground">
-              {devices[0].label || t("defaultMicrophone")}
-            </span>
-          )}
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={handleStart}
+            disabled={!!disabled}
+            className="shrink-0 rounded-xl"
+          >
+            {t("startRecording")}
+          </Button>
+          {deviceSelector}
         </div>
+      );
+    }
 
-        {/* Right: status + waveform */}
-        <div className="flex items-center gap-3">
-          {state === "recording" && (
+    /* ── Recording: action button + status + waveform, no mic picker ── */
+    if (state === "recording") {
+      return (
+        <div className="flex items-center justify-between gap-4">
+          <Button
+            size="lg"
+            onClick={handlePause}
+            className="shrink-0 rounded-xl border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
+          >
+            {t("pause")}
+          </Button>
+
+          <div className="flex items-center gap-3">
             <span className="flex items-center gap-2 text-sm font-medium text-destructive">
               <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
               {t("recordingStatus")} {formatDuration(duration)}
             </span>
-          )}
-
-          {state === "paused" && (
-            <span className="flex items-center gap-2 text-sm font-medium text-status-to_review">
-              <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
-              {t("pausedStatus")} {formatDuration(duration)}
-            </span>
-          )}
-
-          {state === "idle" && (
-            <span
-              className={cn(
-                "text-sm font-medium",
-                hasTranscript || hasRecording
-                  ? "text-status-completed"
-                  : "text-status-completed"
-              )}
-            >
-              {hasTranscript
-                ? t("transcribed")
-                : hasRecording
-                  ? t("recorded")
-                  : t("ready")}
-            </span>
-          )}
-
-          <div
-            className={cn("h-9 w-40", waveformActive && "text-foreground")}
-          >
-            <LiveWaveform
-              active={waveformActive}
-              deviceId={selectedDeviceId || undefined}
-              height={36}
-              barWidth={2}
-              barGap={1}
-              barRadius={1}
-              barHeight={3}
-              sensitivity={1.5}
-              mode="static"
-              fadeEdges
-              fadeWidth={16}
-              onError={
-                (() => {
-                  /* mic errors handled by device enumeration */
-                }) as LiveWaveformProps["onError"]
-              }
-            />
+            <div className="h-9 w-60 text-foreground">
+              <LiveWaveform
+                active
+                deviceId={selectedDeviceId || undefined}
+                height={36}
+                barWidth={2}
+                barGap={1}
+                barRadius={1}
+                barHeight={3}
+                sensitivity={1.5}
+                mode="static"
+                fadeEdges
+                fadeWidth={16}
+                onError={
+                  (() => {
+                    /* mic errors handled by device enumeration */
+                  }) as LiveWaveformProps["onError"]
+                }
+              />
+            </div>
           </div>
         </div>
+      );
+    }
+
+    /* ── Paused: action button + mic picker + status (no waveform) ── */
+    return (
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={handleResume}
+            className="shrink-0 rounded-xl"
+          >
+            {t("resume")}
+          </Button>
+          {deviceSelector}
+        </div>
+
+        <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
+          <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
+          {t("pausedStatus")} {formatDuration(duration)}
+        </span>
       </div>
     );
   }
