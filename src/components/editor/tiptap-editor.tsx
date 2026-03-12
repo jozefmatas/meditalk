@@ -72,7 +72,10 @@ export function TiptapEditor({
   if (!editor) return null;
 
   return (
-    <div className={cn("rounded-lg border bg-background", className)}>
+    <div
+      className={cn("rounded-lg border bg-background transition-colors focus-within:border-ring focus-within:bg-accent", className)}
+      onClick={() => { if (!editor.isFocused) editor.commands.focus("end"); }}
+    >
       <EditorContent
         editor={editor}
         className={cn(
