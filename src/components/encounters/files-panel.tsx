@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Upload04Icon,
+  DragLeft01Icon,
   Delete01Icon,
   Loading03Icon,
   File01Icon,
@@ -80,7 +80,7 @@ export function FilesPanel({
         }
       }
     },
-    [visitId, files, onFilesChange, onAudioFileAdded]
+    [visitId, files, onFilesChange, onAudioFileAdded],
   );
 
   const handleDelete = useCallback(
@@ -88,7 +88,7 @@ export function FilesPanel({
       try {
         const res = await fetch(
           `/api/encounters/${visitId}/files?fileId=${fileId}`,
-          { method: "DELETE" }
+          { method: "DELETE" },
         );
         if (!res.ok) throw new Error("Delete failed");
         onFilesChange(files.filter((f) => f.id !== fileId));
@@ -96,7 +96,7 @@ export function FilesPanel({
         // Silent fail
       }
     },
-    [visitId, files, onFilesChange]
+    [visitId, files, onFilesChange],
   );
 
   const handleDrop = useCallback(
@@ -107,14 +107,14 @@ export function FilesPanel({
         uploadFiles(e.dataTransfer.files);
       }
     },
-    [uploadFiles]
+    [uploadFiles],
   );
 
   return (
     <div className="flex w-[280px] shrink-0 flex-col gap-4 border-l bg-background p-6">
       <div className="flex flex-col gap-1">
-        <h3 className="text-lg font-medium">{t("files")}</h3>
-        <p className="text-sm leading-snug text-muted-foreground">
+        <h3 className="text-lg font-medium leading-none">{t("files")}</h3>
+        <p className="text-sm leading-snug text-foreground/65">
           {t("filesDescription")}
         </p>
       </div>
@@ -131,25 +131,27 @@ export function FilesPanel({
         onDrop={handleDrop}
         disabled={isUploading}
         className={cn(
-          "flex h-[72px] flex-col items-center justify-center gap-1 rounded-xl bg-muted p-3 transition-colors",
+          "flex flex-col items-center justify-center gap-2 rounded-xl bg-accent p-5 transition-colors",
           isDragging && "ring-2 ring-primary/50",
-          !isUploading && "hover:bg-muted/80 cursor-pointer"
+          !isUploading && "hover:bg-muted/80 cursor-pointer",
         )}
       >
         {isUploading ? (
           <HugeiconsIcon
             icon={Loading03Icon}
             size={20}
-            className="animate-spin text-muted-foreground"
+            className="size-5 shrink-0 animate-spin text-foreground/65"
           />
         ) : (
           <HugeiconsIcon
-            icon={Upload04Icon}
+            icon={DragLeft01Icon}
             size={20}
-            className="text-muted-foreground"
+            className="size-5 shrink-0 text-foreground/65"
           />
         )}
-        <span className="text-xs text-foreground/65">{t("uploadFiles")}</span>
+        <span className="text-xs text-foreground/65 text-balance">
+          {t("uploadFiles")}
+        </span>
       </button>
 
       <input

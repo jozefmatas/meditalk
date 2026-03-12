@@ -816,27 +816,25 @@ export default function EncounterDetailPage({ params }: PageProps) {
   // Loading state
   if (isLoading) {
     return (
-      <AppShell>
-        <div className="flex flex-1">
-          <div className="flex flex-1 justify-center p-6">
-            <div className="w-full max-w-[800px] space-y-6">
-              <Skeleton className="h-8 w-64" />
-              <Skeleton className="h-9 w-48" />
-              <div className="h-px bg-border" />
-              <div className="flex gap-6">
-                <div className="w-60 space-y-2">
-                  <Skeleton className="h-9 w-full" />
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-full" />
-                </div>
-                <Skeleton className="h-96 flex-1 rounded-2xl" />
+      <AppShell contentClassName="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 justify-center p-6">
+          <div className="w-full max-w-[800px] space-y-6">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-9 w-48" />
+            <div className="h-px bg-border" />
+            <div className="flex gap-6">
+              <div className="w-60 space-y-2">
+                <Skeleton className="h-9 w-full" />
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-full" />
               </div>
+              <Skeleton className="h-96 flex-1 rounded-2xl" />
             </div>
           </div>
-          <div className="w-[280px] shrink-0 border-l bg-sidebar p-6">
-            <Skeleton className="mb-4 h-6 w-16" />
-            <Skeleton className="h-[72px] w-full rounded-xl" />
-          </div>
+        </div>
+        <div className="flex h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-background p-6">
+          <Skeleton className="h-6 w-16" />
+          <Skeleton className="h-[72px] w-full rounded-xl" />
         </div>
       </AppShell>
     );
