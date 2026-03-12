@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenuContent as GeneratedDropdownMenuContent,
+  DropdownMenuItem as GeneratedDropdownMenuItem,
 } from "@/components/generated/ui/dropdown-menu";
 
 /**
@@ -24,7 +25,19 @@ function DropdownMenuContent({
   );
 }
 
-export { DropdownMenuContent };
+function DropdownMenuItem({
+  className,
+  ...props
+}: React.ComponentProps<typeof GeneratedDropdownMenuItem>) {
+  return (
+    <GeneratedDropdownMenuItem
+      className={cn("cursor-pointer", className)}
+      {...props}
+    />
+  );
+}
+
+export { DropdownMenuContent, DropdownMenuItem };
 
 export {
   DropdownMenu,
@@ -32,7 +45,6 @@ export {
   DropdownMenuTrigger,
   DropdownMenuGroup,
   DropdownMenuLabel,
-  DropdownMenuItem,
   DropdownMenuCheckboxItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,

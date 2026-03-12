@@ -7,18 +7,32 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import {
   SelectContent as GeneratedSelectContent,
+  SelectItem as GeneratedSelectItem,
   SelectLabel as GeneratedSelectLabel,
 } from "@/components/generated/ui/select";
 
 export {
   Select,
   SelectGroup,
-  SelectItem,
   SelectScrollDownButton,
   SelectScrollUpButton,
   SelectSeparator,
   SelectValue,
 } from "@/components/generated/ui/select";
+
+function SelectItem({
+  className,
+  ...props
+}: React.ComponentProps<typeof GeneratedSelectItem>) {
+  return (
+    <GeneratedSelectItem
+      className={cn("cursor-pointer", className)}
+      {...props}
+    />
+  );
+}
+
+export { SelectItem };
 
 function SelectLabel({
   className,

@@ -111,7 +111,7 @@ export function FilesPanel({
   );
 
   return (
-    <div className="flex w-[280px] shrink-0 flex-col gap-4 border-l bg-sidebar p-6">
+    <div className="flex w-[280px] shrink-0 flex-col gap-4 border-l bg-background p-6">
       <div className="flex flex-col gap-1">
         <h3 className="text-lg font-medium">{t("files")}</h3>
         <p className="text-sm leading-snug text-muted-foreground">

@@ -21,7 +21,7 @@ export function PatientPanel({
   const t = useTranslations("encounters.detail");
 
   return (
-    <div className="flex h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-sidebar p-6">
+    <div className="flex h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-background p-6">
       {/* Patient section */}
       <div className="flex flex-col gap-4">
         <h3 className="text-lg font-medium text-foreground">{t("patient")}</h3>
