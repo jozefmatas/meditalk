@@ -11,6 +11,7 @@ import {
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/shared/button";
+import { Table, TableBody, TableRow, TableCell } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
 
 export interface EncounterFile {
@@ -25,21 +26,23 @@ interface FilesPanelProps {
   visitId: string;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
-  /** Called when audio file(s) are dropped/selected — held in memory until Generate */
-  onAudioFileAdded: (blob: Blob) => void;
-  hasAudioFile: boolean;
+  /** Called when audio blob is available (recording or file drop) — kept for Generate */
+  onAudioBlobReady?: (blob: Blob) => void;
 }
 
 function isAudioFile(file: File): boolean {
   return file.type.startsWith("audio/");
 }
 
+function iconForType(type: string) {
+  return type.startsWith("audio/") ? Mic01Icon : File01Icon;
+}
+
 export function FilesPanel({
   visitId,
   files,
   onFilesChange,
-  onAudioFileAdded,
-  hasAudioFile,
+  onAudioBlobReady,
 }: FilesPanelProps) {
   const t = useTranslations("encounters.detail");
   const [isUploading, setIsUploading] = useState(false);
@@ -47,40 +50,43 @@ export function FilesPanel({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(
-    async (fileList: FileList) => {
+    async (fileList: FileList | File[]) => {
       const allFiles = Array.from(fileList);
-      const audioFiles = allFiles.filter(isAudioFile);
-      const docFiles = allFiles.filter((f) => !isAudioFile(f));
+      if (allFiles.length === 0) return;
 
-      // Audio files → hold as blob in memory (transcription happens at Generate)
-      for (const audioFile of audioFiles) {
-        onAudioFileAdded(audioFile);
-      }
-
-      // Document files → upload to files endpoint
-      if (docFiles.length > 0) {
-        setIsUploading(true);
-        try {
-          const formData = new FormData();
-          docFiles.forEach((f) => formData.append("files", f));
-
-          const res = await fetch(`/api/encounters/${visitId}/files`, {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!res.ok) throw new Error("Upload failed");
-
-          const data = await res.json();
-          onFilesChange([...files, ...data.files]);
-        } catch {
-          // Silent fail
-        } finally {
-          setIsUploading(false);
+      // For audio files, also pass the blob to the parent for Generate transcription
+      for (const file of allFiles) {
+        if (isAudioFile(file)) {
+          onAudioBlobReady?.(file);
         }
       }
+
+      // Upload ALL files (audio + docs) to storage so they persist
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        allFiles.forEach((f) => formData.append("files", f));
+
+        const res = await fetch(`/api/encounters/${visitId}/files`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error("File upload failed:", res.status, errData);
+          return;
+        }
+
+        const data = await res.json();
+        onFilesChange([...files, ...data.files]);
+      } catch (err) {
+        console.error("File upload error:", err);
+      } finally {
+        setIsUploading(false);
+      }
     },
-    [visitId, files, onFilesChange, onAudioFileAdded],
+    [visitId, files, onFilesChange, onAudioBlobReady],
   );
 
   const handleDelete = useCallback(
@@ -90,10 +96,13 @@ export function FilesPanel({
           `/api/encounters/${visitId}/files?fileId=${fileId}`,
           { method: "DELETE" },
         );
-        if (!res.ok) throw new Error("Delete failed");
+        if (!res.ok) {
+          console.error("File delete failed:", res.status);
+          return;
+        }
         onFilesChange(files.filter((f) => f.id !== fileId));
-      } catch {
-        // Silent fail
+      } catch (err) {
+        console.error("File delete error:", err);
       }
     },
     [visitId, files, onFilesChange],
@@ -158,7 +167,7 @@ export function FilesPanel({
         ref={inputRef}
         type="file"
         multiple
-        accept="image/*,.pdf,.doc,.docx,.txt,audio/*"
+        accept=".pdf,.png,.jpg,.jpeg,audio/*"
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) uploadFiles(e.target.files);
@@ -166,43 +175,41 @@ export function FilesPanel({
         }}
       />
 
-      {/* Audio file indicator */}
-      {hasAudioFile && (
-        <div className="flex items-center gap-1.5 text-sm text-status-completed">
-          <HugeiconsIcon icon={Mic01Icon} size={14} className="shrink-0" />
-          <span>{t("recorded")}</span>
-        </div>
-      )}
-
       {/* File list */}
       {files.length > 0 && (
         <div className="flex flex-col">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-foreground/65">
             {t("uploadedFiles")}
           </span>
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="group flex items-center gap-1 border-b py-3 text-sm"
-            >
-              <HugeiconsIcon
-                icon={File01Icon}
-                size={14}
-                className="shrink-0 text-muted-foreground"
-              />
-              <span className="flex-1 truncate">{file.name}</span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={() => handleDelete(file.id)}
-              >
-                <HugeiconsIcon icon={Delete01Icon} size={12} />
-              </Button>
-            </div>
-          ))}
+          <Table>
+            <TableBody>
+              {files.map((file) => (
+                <TableRow key={file.id} className="group border-border">
+                  <TableCell className="px-0 py-3 text-sm">
+                    <div className="flex items-center gap-1">
+                      <HugeiconsIcon
+                        icon={iconForType(file.type)}
+                        size={14}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="flex-1 truncate">{file.name}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() => handleDelete(file.id)}
+                      >
+                        <HugeiconsIcon icon={Delete01Icon} size={12} />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
   );
 }
+

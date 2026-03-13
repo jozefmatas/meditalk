@@ -27,7 +27,7 @@ function buildSystemPrompt(language: SupportedLanguage): string {
 
   return `You are a medical documentation assistant. You MUST follow these rules strictly:
 
-1. GROUNDING: Only use information explicitly present in the provided transcript chunks. Do NOT infer, assume, or hallucinate any medical facts.
+1. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
 2. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
 3. MISSING INFORMATION: If a SOAP section has no relevant information in the chunks, write "${notStated}".
 4. FORMAT: Return valid JSON with exactly two keys: "soap" and "letter".
@@ -120,7 +120,7 @@ function buildTemplateSystemPrompt(
 
   return `You are a medical documentation assistant. You MUST follow these rules strictly:
 
-1. GROUNDING: Only use information explicitly present in the provided transcript chunks and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
+1. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
 2. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
 3. MISSING INFORMATION: If a section has no relevant information, write "${notStated}".
 4. FORMAT: Return valid JSON with the following keys:
@@ -143,7 +143,8 @@ export async function generateFromTemplate(
   template: Template,
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
-  doctorNotes?: string
+  doctorNotes?: string,
+  fileTexts?: { name: string; type: string; text: string }[]
 ): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
 
@@ -155,6 +156,13 @@ export async function generateFromTemplate(
       .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
       .join('\n\n');
     parts.push(`Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}`);
+  }
+
+  if (fileTexts && fileTexts.length > 0) {
+    const fileSection = fileTexts
+      .map((f, i) => `[File ${i + 1}: ${f.name}]:\n${f.text}`)
+      .join('\n\n');
+    parts.push(`UPLOADED FILE CONTENTS:\n\n${fileSection}`);
   }
 
   if (doctorNotes) {

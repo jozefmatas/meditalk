@@ -119,7 +119,20 @@ export default function EncounterDetailPage({ params }: PageProps) {
   );
 
   // Files
-  const [files, setFiles] = useState<EncounterFile[]>([]);
+  const [files, setFilesState] = useState<EncounterFile[]>([]);
+
+  /** Update files state and keep visit.metadata.files in sync so auto-save doesn't overwrite */
+  const setFiles = useCallback(
+    (newFiles: EncounterFile[]) => {
+      setFilesState(newFiles);
+      setVisit((prev) => {
+        if (!prev) return prev;
+        const meta = (prev.metadata ?? {}) as Record<string, unknown>;
+        return { ...prev, metadata: { ...meta, files: newFiles } } as Encounter;
+      });
+    },
+    [],
+  );
 
   // Audio recording — blob kept in memory until Generate
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -235,6 +248,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     };
 
     fetchVisit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitId, updateTitle]);
 
   // Re-fetch encounter when a background generation completes
@@ -369,9 +383,46 @@ export default function EncounterDetailPage({ params }: PageProps) {
     }
   };
 
-  const handleRecordingComplete = useCallback((blob: Blob) => {
-    setAudioBlob(blob);
-  }, []);
+  const handleRecordingComplete = useCallback(
+    async (blob: Blob) => {
+      setAudioBlob(blob);
+
+      // Also upload to storage so it persists across refresh
+      try {
+        const file = new File([blob], "recording.webm", {
+          type: blob.type || "audio/webm",
+        });
+        const formData = new FormData();
+        formData.append("files", file);
+
+        const res = await fetch(`/api/encounters/${visitId}/files`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          console.error("Audio upload failed:", res.status);
+          return;
+        }
+
+        const data = await res.json();
+        const newFiles = data.files as EncounterFile[];
+        setFilesState((prev) => {
+          const merged = [...prev, ...newFiles];
+          // Sync visit.metadata.files
+          setVisit((v) => {
+            if (!v) return v;
+            const meta = (v.metadata ?? {}) as Record<string, unknown>;
+            return { ...v, metadata: { ...meta, files: merged } } as Encounter;
+          });
+          return merged;
+        });
+      } catch (err) {
+        console.error("Audio upload error:", err);
+      }
+    },
+    [visitId],
+  );
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
@@ -582,7 +633,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [generatedNoteHtml]);
 
   // Derived state
-  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim());
+  const hasFileContent = files.some((f) => f.extracted_text);
+  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim() || hasFileContent);
   const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
 
   // Review tabs configuration
@@ -1158,8 +1210,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             visitId={visitId}
             files={files}
             onFilesChange={setFiles}
-            onAudioFileAdded={(blob) => setAudioBlob(blob)}
-            hasAudioFile={!!audioBlob}
+            onAudioBlobReady={(blob) => setAudioBlob(blob)}
           />
         ) : (
           <PatientPanel

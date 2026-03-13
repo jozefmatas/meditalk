@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     const audioPath = `${userId}/${fileId}-${file.name}`;
 
     const { error: uploadError } = await supabase.storage
-      .from('audio')
+      .from('encounter-files')
       .upload(audioPath, file, { contentType: file.type });
 
     if (uploadError) {

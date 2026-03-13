@@ -45,6 +45,17 @@ export async function POST(request: NextRequest) {
 
     const language = (visit.language as SupportedLanguage) || 'en';
 
+    // Collect extracted text from uploaded files
+    const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+    const uploadedFiles = (visitMeta.files ?? []) as {
+      name: string;
+      type: string;
+      extracted_text?: string | null;
+    }[];
+    const fileTexts = uploadedFiles
+      .filter((f) => f.extracted_text)
+      .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));
+
     // Look up the template
     const template =
       (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
@@ -75,10 +86,12 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    const hasFileContent = fileTexts.length > 0;
+
     if (rpcError) {
       console.error('match_chunks RPC error:', rpcError);
-      // Only fail if we also have no doctor notes
-      if (!doctorNotes?.trim()) {
+      // Only fail if we also have no doctor notes or file content
+      if (!doctorNotes?.trim() && !hasFileContent) {
         return NextResponse.json(
           { error: `Chunk retrieval failed: ${rpcError.message}` },
           { status: 500 }
@@ -87,9 +100,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (!matches || matches.length === 0) {
-      if (!doctorNotes?.trim()) {
+      if (!doctorNotes?.trim() && !hasFileContent) {
         return NextResponse.json(
-          { error: 'No transcript or doctor notes available for generation' },
+          { error: 'No transcript, doctor notes, or file content available for generation' },
           { status: 404 }
         );
       }
@@ -120,7 +133,8 @@ export async function POST(request: NextRequest) {
         template,
         language,
         sectionLabels,
-        doctorNotes
+        doctorNotes,
+        fileTexts
       );
       generatedNote = result.generatedNote;
       letter = result.letter;

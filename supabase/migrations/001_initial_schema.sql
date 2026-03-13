@@ -119,35 +119,3 @@ create policy "Users can delete own transcript chunks"
     )
   );
 
--- 7) Storage bucket "audio"
-
-insert into storage.buckets (id, name, public)
-values ('audio', 'audio', false)
-on conflict (id) do nothing;
-
--- Storage RLS policies (users upload/read within their own folder):
-
-drop policy if exists "Users can upload audio" on storage.objects;
-drop policy if exists "Users can read own audio" on storage.objects;
-drop policy if exists "Users can delete own audio" on storage.objects;
-
-create policy "Users can upload audio"
-  on storage.objects for insert
-  with check (
-    bucket_id = 'audio'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
-create policy "Users can read own audio"
-  on storage.objects for select
-  using (
-    bucket_id = 'audio'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );
-
-create policy "Users can delete own audio"
-  on storage.objects for delete
-  using (
-    bucket_id = 'audio'
-    and (storage.foldername(name))[1] = auth.uid()::text
-  );

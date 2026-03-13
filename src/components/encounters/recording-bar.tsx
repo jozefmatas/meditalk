@@ -263,7 +263,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             size="lg"
             onClick={handleStart}
             disabled={!!disabled}
-            className="shrink-0 rounded-xl"
+            className="shrink-0"
           >
             {t("startRecording")}
           </Button>
@@ -279,7 +279,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           <Button
             size="lg"
             onClick={handlePause}
-            className="shrink-0 rounded-xl border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
+            className="shrink-0 border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
           >
             {t("pause")}
           </Button>
@@ -322,7 +322,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             variant="secondary"
             size="lg"
             onClick={handleResume}
-            className="shrink-0 rounded-xl"
+            className="shrink-0"
           >
             {t("resume")}
           </Button>

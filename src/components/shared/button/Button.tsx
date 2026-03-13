@@ -42,7 +42,7 @@ function Button({ variant = "default", size = "default", className, ...props }: 
     <GeneratedButton
       variant={variant}
       size={size}
-      className={cn("disabled:pointer-events-auto disabled:cursor-not-allowed", fix, sFix, iconFix, className)}
+      className={cn("rounded-lg disabled:pointer-events-auto disabled:cursor-not-allowed", fix, sFix, iconFix, className)}
       {...props}
     />
   );
