@@ -92,7 +92,9 @@
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk status)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff --stat)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log --oneline -5)",
-      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff --staged --stat)"
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff --staged --stat)",
+      "Bash(xargs:*)",
+      "Bash(git mv:*)"
     ],
     "deny": [],
     "ask": []
