@@ -313,9 +313,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         onValueChange={setSelectedDeviceId}
         disabled={state === "recording" || !!disabled}
       >
-        <SelectTrigger variant="ghost" className="px-2">
+        <SelectTrigger variant="ghost" className="w-auto min-w-0 px-2">
           <HugeiconsIcon icon={Mic01Icon} size={16} className="shrink-0 text-foreground" />
-          <SelectValue className="text-left" />
+          <SelectValue className="text-left truncate" />
         </SelectTrigger>
         <SelectContent>
           {devices.map((device) => (
@@ -345,7 +345,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             label={t("templateLabel")}
             className="w-auto max-w-[320px]"
           />
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             {deviceSelector}
             <Button
               variant="secondary"
@@ -414,10 +414,10 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           label={t("templateLabel")}
           className="w-auto max-w-[280px]"
         />
-        <div className="flex shrink-0 items-center gap-5">
-          <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-5">
+          <div className="flex min-w-0 items-center gap-3">
             {deviceSelector}
-            <div className="h-6 w-px bg-border" />
+            <div className="h-6 w-px shrink-0 bg-border" />
           </div>
           <div className="flex items-center gap-3">
             <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">

@@ -36,6 +36,7 @@ import { Button } from "@/components/shared/button";
 import { Textarea } from "@/components/shared/textarea";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
+import { TextShimmer } from "@/components/shared/text-shimmer";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import {
@@ -51,6 +52,7 @@ import {
 import {
   parseSoapSections,
   allSectionsToPlainText,
+  type SoapSection,
 } from "@/lib/parse-soap-sections";
 import type {
   Encounter,
@@ -117,22 +119,21 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const [isGenerating, setIsGenerating] = useState(() =>
     activeGenerations.has(visitId),
   );
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [streamedSections, setStreamedSections] = useState<SoapSection[]>([]);
 
   // Files
   const [files, setFilesState] = useState<EncounterFile[]>([]);
 
   /** Update files state and keep visit.metadata.files in sync so auto-save doesn't overwrite */
-  const setFiles = useCallback(
-    (newFiles: EncounterFile[]) => {
-      setFilesState(newFiles);
-      setVisit((prev) => {
-        if (!prev) return prev;
-        const meta = (prev.metadata ?? {}) as Record<string, unknown>;
-        return { ...prev, metadata: { ...meta, files: newFiles } } as Encounter;
-      });
-    },
-    [],
-  );
+  const setFiles = useCallback((newFiles: EncounterFile[]) => {
+    setFilesState(newFiles);
+    setVisit((prev) => {
+      if (!prev) return prev;
+      const meta = (prev.metadata ?? {}) as Record<string, unknown>;
+      return { ...prev, metadata: { ...meta, files: newFiles } } as Encounter;
+    });
+  }, []);
 
   // Audio recording — blob kept in memory until Generate
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -641,7 +642,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [generatedNoteHtml]);
 
   // Derived state
-  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim() || files.length > 0);
+  const canGenerate = !!(
+    visit?.raw_text ||
+    audioBlob ||
+    doctorNotes.trim() ||
+    files.length > 0
+  );
   const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
 
   // Review tabs configuration
@@ -719,6 +725,118 @@ export default function EncounterDetailPage({ params }: PageProps) {
       }).catch(() => {});
     },
     [visit, visitId],
+  );
+
+  // Re-generate note with a different template (to_review state) — streaming
+  const handleRegenerate = useCallback(
+    async (newTemplateId: string) => {
+      if (!visitId || newTemplateId === selectedTemplateId || isRegenerating)
+        return;
+
+      // Switch to note tab so user sees the streaming sections
+      if (activeTab !== "note") setActiveTab("note");
+
+      setIsRegenerating(true);
+      setStreamedSections([]);
+      setError(null);
+      setSelectedTemplateId(newTemplateId);
+
+      // Persist template choice
+      if (visit) {
+        const meta = (visit.metadata || {}) as Record<string, unknown>;
+        fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metadata: { ...meta, template_id: newTemplateId },
+          }),
+        }).catch(() => {});
+      }
+
+      try {
+        const res = await fetch("/api/regenerate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visitId,
+            templateId: newTemplateId,
+            doctorNotes: doctorNotes || undefined,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Regeneration failed");
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response stream");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE events from the buffer
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === "section") {
+                setStreamedSections((prev) => [
+                  ...prev,
+                  { id: event.id, title: event.title, content: event.content },
+                ]);
+              } else if (event.type === "complete") {
+                setGeneratedNoteHtml(event.generatedNote);
+                setVisit((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        soap_note: event.generatedNote,
+                        patient_letter: event.letter,
+                      }
+                    : prev,
+                );
+              } else if (event.type === "error") {
+                throw new Error(event.error);
+              }
+            } catch (parseErr) {
+              // If it's a rethrown Error from the event handler, propagate it
+              if (
+                parseErr instanceof Error &&
+                parseErr.message !== "Unexpected end of JSON input"
+              ) {
+                throw parseErr;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Regeneration failed");
+      } finally {
+        setIsRegenerating(false);
+      }
+    },
+    [
+      visitId,
+      selectedTemplateId,
+      isRegenerating,
+      activeTab,
+      visit,
+      doctorNotes,
+    ],
   );
 
   // Flatten template sections for # slash command and sidebar
@@ -872,6 +990,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return documented;
   }, [template, generatedNoteHtml, parsedSections]);
 
+  // Scroll to a note section card by its template section ID
+  const handleScrollToNoteSection = useCallback((sectionId: string) => {
+    const el = document.getElementById(`note-section-${sectionId}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
   // Loading state
   if (isLoading) {
     return (
@@ -946,7 +1070,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                   ref={stickyHeaderRef}
                   className="shrink-0 flex flex-col gap-5 border-b border-border bg-background py-6"
                 >
-                  <div className="flex w-full items-center justify-between gap-4">
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <Textarea
                       value={title}
                       onChange={(e) => updateTitle(e.target.value)}
@@ -954,7 +1078,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                       placeholder={t("untitled")}
                       rows={1}
                       autoFocus
-                      className="min-h-0 h-auto min-w-0 flex-1 resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                      className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
                       onInput={(e) => {
                         const target = e.currentTarget;
                         target.style.height = "auto";
@@ -967,7 +1091,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                         }
                       }}
                     />
-                    <div className="flex shrink-0 items-center gap-3">
+                    <div className="flex items-center gap-3">
                       <Badge
                         variant={`status-${visit.status}` as "status-started"}
                       >
@@ -1020,7 +1144,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               <Tabs
                 value={activeTab}
                 onValueChange={setActiveTab}
-                className="gap-6"
+                className="gap-0"
               >
                 {/* Sticky header: title + tab bar */}
                 <div
@@ -1065,6 +1189,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                         size="lg"
                         className="shrink-0"
                         onClick={handleMarkComplete}
+                        disabled={isRegenerating}
                       >
                         {t("detail.markComplete")}
                       </Button>
@@ -1139,42 +1264,77 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 {/* Tab content — outside sticky area */}
                 <TabsContent value="note">
                   <div className="flex flex-1 gap-6">
-                    <TemplateSidebar
-                      templateId={selectedTemplateId}
-                      onTemplateChange={handleTemplateChange}
-                      disabled
-                      documentedSections={documentedSectionIds}
-                      stickyTop={stickyHeaderHeight + 24}
-                    />
-                    <div className="flex flex-1 flex-col gap-4">
-                      <div className="flex items-center justify-between">
+                    <div className="pt-6">
+                      <TemplateSidebar
+                        templateId={selectedTemplateId}
+                        onTemplateChange={handleRegenerate}
+                        documentedSections={documentedSectionIds}
+                        onScrollToSection={handleScrollToNoteSection}
+                        stickyTop={stickyHeaderHeight + 24}
+                      />
+                    </div>
+                    <div className="flex flex-1 flex-col">
+                      <div
+                        className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
+                        style={{ top: stickyHeaderHeight }}
+                      >
                         <h2 className="text-lg font-medium">
                           {t("detail.note")}
                         </h2>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleCopyNote}
-                          disabled={!generatedNoteHtml}
-                        >
-                          {noteCopied
-                            ? t("detail.noteCopied")
-                            : t("detail.copyNote")}
-                        </Button>
+                        {isRegenerating ? (
+                          <TextShimmer className="text-sm" duration={3}>
+                            {t("detail.regenerating")}
+                          </TextShimmer>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="lg"
+                            onClick={handleCopyNote}
+                            disabled={!generatedNoteHtml}
+                          >
+                            {noteCopied
+                              ? t("detail.noteCopied")
+                              : t("detail.copyNote")}
+                          </Button>
+                        )}
                       </div>
-                      {parsedSections.length > 0 ? (
-                        parsedSections.map((section) => (
-                          <NoteSectionCard
-                            key={section.id}
-                            title={section.title}
-                            content={section.content}
-                          />
-                        ))
-                      ) : (
-                        <p className="text-sm text-muted-foreground">
-                          {t("detail.noNote")}
-                        </p>
-                      )}
+                      <div className="flex flex-col gap-4">
+                        {isRegenerating ? (
+                          <>
+                            {streamedSections.map((section) => (
+                              <div
+                                key={section.id}
+                                className="animate-in fade-in duration-300"
+                              >
+                                <NoteSectionCard
+                                  title={section.title}
+                                  content={section.content}
+                                />
+                              </div>
+                            ))}
+                            {streamedSections.length === 0 && (
+                              <div className="flex flex-col gap-4">
+                                <Skeleton className="h-32 rounded-2xl" />
+                                <Skeleton className="h-32 rounded-2xl" />
+                                <Skeleton className="h-32 rounded-2xl" />
+                              </div>
+                            )}
+                          </>
+                        ) : parsedSections.length > 0 ? (
+                          parsedSections.map((section, i) => (
+                            <NoteSectionCard
+                              key={section.id}
+                              id={`note-section-${template?.sections[i]?.id ?? section.id}`}
+                              title={section.title}
+                              content={section.content}
+                            />
+                          ))
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            {t("detail.noNote")}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </TabsContent>

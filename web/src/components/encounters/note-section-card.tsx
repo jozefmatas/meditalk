@@ -1,13 +1,14 @@
 "use client";
 
 interface NoteSectionCardProps {
+  id?: string;
   title: string;
   content: string;
 }
 
-export function NoteSectionCard({ title, content }: NoteSectionCardProps) {
+export function NoteSectionCard({ id, title, content }: NoteSectionCardProps) {
   return (
-    <div className="rounded-2xl border p-6">
+    <div id={id} className="rounded-2xl border p-6">
       <div className="flex flex-col gap-3 text-foreground">
         <h3 className="text-lg font-medium">{title}</h3>
         {content && (

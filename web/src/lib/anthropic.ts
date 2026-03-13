@@ -5,12 +5,12 @@ import { buildTemplateHtml, flattenSectionIds } from './templates/html';
 import { logUsage, type UsageContext } from './usage';
 
 let _anthropic: Anthropic | null = null;
-function anthropic() {
+export function anthropic() {
   if (!_anthropic) _anthropic = new Anthropic();
   return _anthropic;
 }
 
-const NOT_STATED: Record<SupportedLanguage, string> = {
+export const NOT_STATED: Record<SupportedLanguage, string> = {
   en: 'Not stated',
   sk: 'Neuvedené',
   cs: 'Neuvedeno',
@@ -106,7 +106,7 @@ export async function generateSOAPAndLetter(
 /**
  * Build a system prompt for template-based generation.
  */
-function buildTemplateSystemPrompt(
+export function buildTemplateSystemPrompt(
   template: Template,
   language: SupportedLanguage,
   sectionLabels: Record<string, string>
@@ -137,20 +137,15 @@ A clear, patient-friendly summary letter of the consultation in ${langLabel}. Us
 }
 
 /**
- * Generate a medical document from a template, transcript chunks, and optional doctor notes.
+ * Build the user message for template-based generation.
  */
-export async function generateFromTemplate(
+export function buildTemplateUserMessage(
   chunks: string[],
   template: Template,
-  language: SupportedLanguage,
-  sectionLabels: Record<string, string>,
   doctorNotes?: string,
   fileTexts?: { name: string; type: string; text: string }[],
-  ctx?: UsageContext
-): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
+): string {
   const allIds = flattenSectionIds(template);
-
-  // Build user message parts
   const parts: string[] = [];
 
   if (chunks.length > 0) {
@@ -175,6 +170,24 @@ export async function generateFromTemplate(
     `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(', ')}, "letter", and "title".`
   );
 
+  return parts.join('\n\n');
+}
+
+/**
+ * Generate a medical document from a template, transcript chunks, and optional doctor notes.
+ */
+export async function generateFromTemplate(
+  chunks: string[],
+  template: Template,
+  language: SupportedLanguage,
+  sectionLabels: Record<string, string>,
+  doctorNotes?: string,
+  fileTexts?: { name: string; type: string; text: string }[],
+  ctx?: UsageContext
+): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
+  const allIds = flattenSectionIds(template);
+  const userMessage = buildTemplateUserMessage(chunks, template, doctorNotes, fileTexts);
+
   const response = await anthropic().messages.create({
     model: 'claude-sonnet-4-5-20250929',
     max_tokens: 8192,
@@ -182,7 +195,7 @@ export async function generateFromTemplate(
     messages: [
       {
         role: 'user',
-        content: parts.join('\n\n'),
+        content: userMessage,
       },
     ],
   });

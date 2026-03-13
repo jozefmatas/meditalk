@@ -5,7 +5,7 @@ import { Spiral } from "./spiral";
 import { AnimatedMagicWand } from "./animated-magic-wand";
 import { TextShimmer } from "@/components/shared/text-shimmer";
 
-export function ProcessingOverlay() {
+export function ProcessingOverlay({ message }: { message?: string }) {
   const t = useTranslations("encounters.detail");
 
   return (
@@ -19,7 +19,7 @@ export function ProcessingOverlay() {
         </div>
       </div>
       <TextShimmer className="text-sm" duration={3}>
-        {t("generatingEncounter")}
+        {message ?? t("generatingEncounter")}
       </TextShimmer>
     </div>
   );

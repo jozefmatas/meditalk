@@ -245,13 +245,6 @@ export function TemplateSidebar({
   const isReview = !!documentedSections;
   const isDraft = !isReview;
 
-  const documented = template?.sections.filter((s) =>
-    documentedSections?.has(s.id),
-  );
-  const remaining = template?.sections.filter(
-    (s) => !documentedSections?.has(s.id),
-  );
-
   return (
     <div
       className={cn(
@@ -262,16 +255,13 @@ export function TemplateSidebar({
     >
       {/* Review mode: template selector header */}
       {isReview && (
-        <div className="flex flex-col gap-2">
-          <span className="text-xs text-foreground/65">
-            {tTemplates("selectTemplate")}
-          </span>
-          <TemplateSelector
-            value={templateId}
-            onChange={onTemplateChange}
-            disabled={disabled}
-          />
-        </div>
+        <TemplateSelector
+          value={templateId}
+          onChange={onTemplateChange}
+          disabled={disabled}
+          size="lg"
+          label={t("templateLabel")}
+        />
       )}
 
       {/* Draft mode: sections with plus icons */}
@@ -313,64 +303,24 @@ export function TemplateSidebar({
         </nav>
       )}
 
-      {/* Review mode: documented + remaining */}
+      {/* Review mode: same layout as draft — checkmarks for documented, + for remaining */}
       {template && isReview && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain">
-          {documented && documented.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <span className="text-xs text-muted-foreground">
-                {t("documented")}
-              </span>
-              <nav className="flex flex-col">
-                {documented.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    className="flex h-8 items-center gap-1.5 rounded-lg px-1.5 text-sm text-foreground transition-colors hover:bg-accent"
-                  >
-                    <HugeiconsIcon
-                      icon={CheckmarkCircle01Icon}
-                      size={16}
-                      className="shrink-0 text-status-completed"
-                    />
-                    <span className="truncate">
-                      {tTemplates(`sections.${section.labelKey}`)}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-          )}
+        <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+          {template.sections.map((section) => {
+            const sectionLabel = tTemplates(`sections.${section.labelKey}`);
+            const isDocumented = documentedSections?.has(section.id) ?? false;
 
-          {documented &&
-            documented.length > 0 &&
-            remaining &&
-            remaining.length > 0 && <div className="h-px bg-border" />}
-
-          {remaining && remaining.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <span className="text-xs text-muted-foreground">
-                {t("remaining")}
-              </span>
-              <nav className="flex flex-col">
-                {remaining.map((section) => (
-                  <button
-                    key={section.id}
-                    type="button"
-                    className="flex h-8 items-center gap-1.5 rounded-lg px-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <span className="flex size-5 shrink-0 items-center justify-center">
-                      <span className="size-3.5 rounded-full border border-muted-foreground/30" />
-                    </span>
-                    <span className="truncate">
-                      {tTemplates(`sections.${section.labelKey}`)}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-          )}
-        </div>
+            return (
+              <SectionItem
+                key={section.id}
+                label={sectionLabel}
+                isUsed={isDocumented}
+                onClick={() => {}}
+                onScrollTo={() => onScrollToSection?.(section.id)}
+              />
+            );
+          })}
+        </nav>
       )}
     </div>
   );
