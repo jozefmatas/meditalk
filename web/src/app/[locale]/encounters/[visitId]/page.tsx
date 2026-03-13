@@ -469,11 +469,13 @@ export default function EncounterDetailPage({ params }: PageProps) {
     const capturedDoctorNotes = doctorNotes;
     const capturedTitle = title;
     const capturedLanguage = generationLanguage;
-    const finalizedBlob = recordingBarRef.current?.finalize();
-    const blobToProcess = finalizedBlob ?? audioBlob;
+    const finalized = recordingBarRef.current?.finalize();
+    const blobToProcess = finalized?.blob ?? audioBlob;
+    const streamingTranscript = finalized?.transcript ?? null;
 
     try {
-      // Step 1: If there's a recorded audio blob, transcribe it first
+      // Step 1: If there's a recorded audio blob, process it (chunk + embed)
+      // If we have a streaming transcript from Scribe, skip batch transcription
       if (blobToProcess) {
         const audioFile = new File([blobToProcess], "recording.webm", {
           type: blobToProcess.type,
@@ -482,6 +484,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
         formData.append("file", audioFile);
         formData.append("language", capturedLanguage);
         formData.append("visitId", visitId);
+        if (streamingTranscript) {
+          formData.append("transcriptText", streamingTranscript);
+        }
 
         const transcribeRes = await fetch("/api/process-audio", {
           method: "POST",

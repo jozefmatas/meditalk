@@ -19,6 +19,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@elevenlabs/client": "^0.15.1",
+    "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@fontsource-variable/figtree": "^5.2.10",
     "@hugeicons/core-free-icons": "^3.1.1",
     "@hugeicons/react": "^1.1.5",

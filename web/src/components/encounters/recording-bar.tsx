@@ -28,8 +28,8 @@ import { Mic01Icon } from "@hugeicons/core-free-icons";
 type RecordingState = "idle" | "recording" | "paused";
 
 export interface RecordingBarRef {
-  /** Stop recorder (if active) and return the accumulated blob, or null. */
-  finalize: () => Blob | null;
+  /** Stop recorder + Scribe stream, return blob and pre-transcribed text. */
+  finalize: () => { blob: Blob | null; transcript: string | null };
 }
 
 interface RecordingBarProps {
@@ -82,6 +82,11 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const elapsedBeforePauseRef = useRef(0);
     const recordingStartRef = useRef(0);
 
+    // Scribe streaming refs
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scribeRef = useRef<any>(null);
+    const transcriptRef = useRef<string>("");
+
     // Enumerate audio devices on mount
     useEffect(() => {
       async function loadDevices() {
@@ -113,7 +118,63 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       return new Blob(chunksRef.current, { type: mimeTypeRef.current });
     }, []);
 
-    /** Expose finalize() so the page can stop & grab the blob (e.g. on Generate) */
+    /** Start Scribe real-time streaming (fire-and-forget, non-blocking) */
+    const startScribe = useCallback(async (deviceId?: string) => {
+      try {
+        // Fetch single-use token from server
+        const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
+        if (!tokenRes.ok) {
+          console.warn("[scribe] Token fetch failed, will fall back to batch");
+          return;
+        }
+        const { token } = await tokenRes.json();
+
+        // Dynamically import client SDK to keep bundle lean
+        const { Scribe, RealtimeEvents } = await import("@elevenlabs/client");
+
+        const connection = Scribe.connect({
+          token,
+          modelId: "scribe_v2",
+          microphone: {
+            deviceId: deviceId || undefined,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+
+        connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (msg: { text: string }) => {
+          if (msg.text) {
+            transcriptRef.current = transcriptRef.current
+              ? transcriptRef.current + " " + msg.text
+              : msg.text;
+          }
+        });
+
+        connection.on(RealtimeEvents.ERROR, (err: unknown) => {
+          console.warn("[scribe] Streaming error:", err);
+        });
+
+        scribeRef.current = connection;
+      } catch (err) {
+        console.warn("[scribe] Failed to start streaming:", err);
+      }
+    }, []);
+
+    /** Stop Scribe connection */
+    const stopScribe = useCallback(() => {
+      if (scribeRef.current) {
+        try {
+          scribeRef.current.close();
+        } catch {
+          // ignore
+        }
+        scribeRef.current = null;
+      }
+    }, []);
+
+    /** Expose finalize() so the page can stop & grab the blob + transcript */
     useImperativeHandle(
       ref,
       () => ({
@@ -131,15 +192,21 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             clearInterval(timerRef.current);
             timerRef.current = null;
           }
+
+          // Stop Scribe and grab transcript
+          stopScribe();
+          const transcript = transcriptRef.current || null;
+          transcriptRef.current = "";
+
           setState("idle");
           setDuration(0);
           elapsedBeforePauseRef.current = 0;
           const blob = buildBlob();
           chunksRef.current = [];
-          return blob;
+          return { blob, transcript };
         },
       }),
-      [buildBlob]
+      [buildBlob, stopScribe]
     );
 
     const startTimer = useCallback(() => {
@@ -175,6 +242,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const handleStart = useCallback(async () => {
       setDuration(0);
       elapsedBeforePauseRef.current = 0;
+      transcriptRef.current = "";
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -202,33 +270,41 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         };
 
         recorder.start(1000);
+
+        // Start Scribe streaming in parallel (non-blocking)
+        startScribe(selectedDeviceId || undefined);
+
         startTimer();
         setState("recording");
         onRecordingStateChange?.("recording");
       } catch {
         // Mic access denied — stay idle
       }
-    }, [selectedDeviceId, buildBlob, onRecordingComplete, startTimer, onRecordingStateChange]);
+    }, [selectedDeviceId, buildBlob, onRecordingComplete, startTimer, onRecordingStateChange, startScribe]);
 
     const handlePause = useCallback(() => {
       const recorder = mediaRecorderRef.current;
       if (recorder?.state === "recording") {
         recorder.pause();
       }
+      // Close Scribe on pause to avoid transcribing silence
+      stopScribe();
       pauseTimer();
       setState("paused");
       onRecordingStateChange?.("paused");
-    }, [pauseTimer, onRecordingStateChange]);
+    }, [pauseTimer, onRecordingStateChange, stopScribe]);
 
     const handleResume = useCallback(() => {
       const recorder = mediaRecorderRef.current;
       if (recorder?.state === "paused") {
         recorder.resume();
       }
+      // Reconnect Scribe with context from previous transcript
+      startScribe(selectedDeviceId || undefined);
       startTimer();
       setState("recording");
       onRecordingStateChange?.("recording");
-    }, [startTimer, onRecordingStateChange]);
+    }, [startTimer, onRecordingStateChange, startScribe, selectedDeviceId]);
 
     // Device selector element — shared between idle & paused states
     const deviceSelector = devices.length > 1 ? (

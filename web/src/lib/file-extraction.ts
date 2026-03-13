@@ -1,8 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import { PDFParse } from 'pdf-parse';
-import { transcribeAudio } from './openai';
+import { transcribeAudio } from './elevenlabs';
 import type { SupportedLanguage } from './types';
+import { logUsage, type UsageContext } from './usage';
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -30,18 +31,19 @@ export async function extractTextFromFile(
   filename: string,
   mimeType: string,
   language: SupportedLanguage,
+  ctx?: UsageContext,
 ): Promise<string | null> {
   try {
     if (mimeType === 'application/pdf') {
-      return await extractFromPdf(buffer, language);
+      return await extractFromPdf(buffer, language, ctx);
     }
 
     if (mimeType.startsWith('image/')) {
-      return await extractFromImage(buffer, mimeType, language);
+      return await extractFromImage(buffer, mimeType, language, ctx);
     }
 
     if (mimeType.startsWith('audio/')) {
-      return await extractFromAudio(buffer, filename);
+      return await extractFromAudio(buffer, filename, ctx);
     }
 
     return null;
@@ -58,6 +60,7 @@ export async function extractTextFromFile(
 async function extractFromPdf(
   buffer: Buffer,
   language: SupportedLanguage,
+  ctx?: UsageContext,
 ): Promise<string | null> {
   const pdf = new PDFParse({ data: new Uint8Array(buffer) });
   const result = await pdf.getText();
@@ -70,7 +73,7 @@ async function extractFromPdf(
 
   // Scanned PDF — fall back to Claude document API
   const base64 = buffer.toString('base64');
-  return await ocrPdfWithClaude(base64, language);
+  return await ocrPdfWithClaude(base64, language, ctx);
 }
 
 /**
@@ -80,12 +83,14 @@ async function extractFromImage(
   buffer: Buffer,
   mimeType: string,
   language: SupportedLanguage,
+  ctx?: UsageContext,
 ): Promise<string | null> {
   const base64 = buffer.toString('base64');
   return await ocrImageWithClaude(
     base64,
     mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
     language,
+    ctx,
   );
 }
 
@@ -95,8 +100,9 @@ async function extractFromImage(
 async function extractFromAudio(
   buffer: Buffer,
   filename: string,
+  ctx?: UsageContext,
 ): Promise<string | null> {
-  const text = await transcribeAudio(buffer, filename);
+  const text = await transcribeAudio(buffer, filename, ctx);
   return text?.trim() || null;
 }
 
@@ -112,6 +118,7 @@ async function ocrImageWithClaude(
   base64Data: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
   language: SupportedLanguage,
+  ctx?: UsageContext,
 ): Promise<string | null> {
   const content: ContentBlockParam[] = [
     {
@@ -134,6 +141,18 @@ async function ocrImageWithClaude(
     messages: [{ role: 'user', content }],
   });
 
+  if (ctx) {
+    logUsage({
+      userId: ctx.userId,
+      visitId: ctx.visitId,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5-20250929',
+      operation: 'ocr_image',
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
+
   const text =
     response.content[0].type === 'text' ? response.content[0].text : '';
   return text?.trim() || null;
@@ -145,6 +164,7 @@ async function ocrImageWithClaude(
 async function ocrPdfWithClaude(
   base64Data: string,
   language: SupportedLanguage,
+  ctx?: UsageContext,
 ): Promise<string | null> {
   const content: ContentBlockParam[] = [
     {
@@ -166,6 +186,18 @@ async function ocrPdfWithClaude(
     max_tokens: 4096,
     messages: [{ role: 'user', content }],
   });
+
+  if (ctx) {
+    logUsage({
+      userId: ctx.userId,
+      visitId: ctx.visitId,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5-20250929',
+      operation: 'ocr_pdf',
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
 
   const text =
     response.content[0].type === 'text' ? response.content[0].text : '';

@@ -94,7 +94,10 @@
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log --oneline -5)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff --staged --stat)",
       "Bash(xargs:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(npx create-next-app@latest:*)",
+      "WebFetch(domain:help.elevenlabs.io)",
+      "WebFetch(domain:www.npmjs.com)"
     ],
     "deny": [],
     "ask": []

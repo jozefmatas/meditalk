@@ -15,7 +15,7 @@ const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { supabase } = await requireAuth();
+    const { userId, supabase } = await requireAuth();
 
     const body = await request.json();
     // Support both visitId (new) and transcriptId (legacy)
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
           }
 
           const buffer = Buffer.from(await fileData.arrayBuffer());
-          const text = await extractTextFromFile(buffer, file.name, file.type, language);
+          const text = await extractTextFromFile(buffer, file.name, file.type, language, { userId, visitId });
           file.extracted_text = text;
         } catch (err) {
           console.error(`Text extraction failed for ${file.name}:`, err);
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     let chunkContents: string[] = [];
     let usedChunks: string[] = [];
 
-    const queryEmbedding = await embedText(RETRIEVAL_QUERY[language]);
+    const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], { userId, visitId });
 
     const { data: matches, error: rpcError } = await supabase.rpc(
       'match_chunks',
@@ -171,7 +171,8 @@ export async function POST(request: NextRequest) {
         language,
         sectionLabels,
         doctorNotes,
-        fileTexts
+        fileTexts,
+        { userId, visitId }
       );
       generatedNote = result.generatedNote;
       letter = result.letter;

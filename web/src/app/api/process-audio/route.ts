@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
-import { transcribeAudio, embedTexts } from '@/lib/openai';
+import { transcribeAudio } from '@/lib/elevenlabs';
+import { embedTexts } from '@/lib/openai';
 import { chunkText } from '@/lib/chunking';
 import type { ProcessAudioResponse, SupportedLanguage } from '@/lib/types';
 
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
     const title = (formData.get('title') as string) || null;
     const language = (formData.get('language') as string) || 'en';
     const existingVisitId = (formData.get('visitId') as string) || null;
+    const preTranscript = (formData.get('transcriptText') as string) || null;
 
     if (!file) {
       return NextResponse.json({ error: 'No audio file provided' }, { status: 400 });
@@ -63,8 +65,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Transcribe via Whisper
-    const rawText = await transcribeAudio(file, file.name);
+    // Use pre-transcribed text from real-time streaming, or fall back to batch
+    const usageCtx = { userId, visitId: existingVisitId || undefined };
+    const rawText = preTranscript || await transcribeAudio(file, file.name, usageCtx);
 
     let visitId: string;
 
@@ -122,7 +125,7 @@ export async function POST(request: NextRequest) {
 
     // Chunk and embed
     const chunks = chunkText(rawText);
-    const embeddings = await embedTexts(chunks);
+    const embeddings = await embedTexts(chunks, { userId, visitId });
 
     const chunkRows = chunks.map((content, i) => ({
       visit_id: visitId,

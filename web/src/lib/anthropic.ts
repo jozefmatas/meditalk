@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { SupportedLanguage } from './types';
 import type { Template } from './templates/types';
 import { buildTemplateHtml, flattenSectionIds } from './templates/html';
+import { logUsage, type UsageContext } from './usage';
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -144,7 +145,8 @@ export async function generateFromTemplate(
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
   doctorNotes?: string,
-  fileTexts?: { name: string; type: string; text: string }[]
+  fileTexts?: { name: string; type: string; text: string }[],
+  ctx?: UsageContext
 ): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
 
@@ -184,6 +186,18 @@ export async function generateFromTemplate(
       },
     ],
   });
+
+  if (ctx) {
+    logUsage({
+      userId: ctx.userId,
+      visitId: ctx.visitId,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5-20250929',
+      operation: 'generate_template',
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
 
   const text =
     response.content[0].type === 'text' ? response.content[0].text : '';
