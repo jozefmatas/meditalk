@@ -341,6 +341,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             value={templateId}
             onChange={onTemplateChange}
             disabled={!!disabled}
+            size="lg"
+            label={t("templateLabel")}
             className="w-auto max-w-[320px]"
           />
           <div className="flex shrink-0 items-center gap-3">
@@ -408,6 +410,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           value={templateId}
           onChange={onTemplateChange}
           disabled={!!disabled}
+          size="lg"
+          label={t("templateLabel")}
           className="w-auto max-w-[280px]"
         />
         <div className="flex shrink-0 items-center gap-5">

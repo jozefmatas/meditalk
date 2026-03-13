@@ -10,6 +10,9 @@ interface TemplateSelectorProps {
   onChange: (templateId: string) => void;
   disabled?: boolean;
   className?: string;
+  variant?: "default" | "ghost";
+  size?: "default" | "sm" | "lg";
+  label?: string;
 }
 
 export function TemplateSelector({
@@ -17,6 +20,9 @@ export function TemplateSelector({
   onChange,
   disabled,
   className,
+  variant,
+  size,
+  label,
 }: TemplateSelectorProps) {
   const t = useTranslations("templates");
 
@@ -39,6 +45,9 @@ export function TemplateSelector({
       emptyText={t("noResults")}
       disabled={disabled}
       className={className ?? "w-full"}
+      variant={variant}
+      size={size}
+      label={label}
     />
   );
 }

@@ -88,7 +88,7 @@ export function TiptapEditor({
           "[&_.ProseMirror]:outline-none",
           "[&_.ProseMirror_h2]:text-lg/6 [&_.ProseMirror_h2]:font-medium [&_.ProseMirror_h2]:mt-0 [&_.ProseMirror_h2]:mb-1 [&_.ProseMirror_h2]:pt-0",
           "[&_.ProseMirror_h3]:text-base/6 [&_.ProseMirror_h3]:font-medium [&_.ProseMirror_h3]:mt-0 [&_.ProseMirror_h3]:mb-1 [&_.ProseMirror_h3]:pt-0",
-          "[&_.ProseMirror_p]:text-base/6 [&_.ProseMirror_p]:font-normal [&_.ProseMirror_p]:mb-2",
+          "[&_.ProseMirror_p]:text-sm/6 [&_.ProseMirror_p]:font-normal [&_.ProseMirror_p]:mb-2",
           "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:mb-2",
           "[&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:mb-2",
           "[&_.ProseMirror_li]:text-base/6",

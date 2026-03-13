@@ -46,7 +46,16 @@ interface ComboboxProps {
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  variant?: "default" | "ghost";
+  size?: "default" | "sm" | "lg";
+  /** Prefix label rendered before the value, e.g. "Template" → "Template: Value" */
+  label?: string;
 }
+
+const triggerVariants: Record<string, string> = {
+  default: "border-input bg-background",
+  ghost: "border-transparent bg-transparent shadow-none",
+};
 
 function Combobox({
   value,
@@ -58,6 +67,9 @@ function Combobox({
   emptyText = "No results found.",
   disabled,
   className,
+  variant = "default",
+  size = "default",
+  label,
 }: ComboboxProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -73,20 +85,25 @@ function Combobox({
       <PopoverTrigger asChild>
         <Button
           variant="outline"
+          size={size}
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
           className={cn(
             "justify-between font-normal",
+            triggerVariants[variant],
             !value && "text-muted-foreground",
             className,
           )}
         >
+          {label && (
+            <span className="text-foreground/65 shrink-0">{label}:</span>
+          )}
           <span className="truncate">{selectedLabel ?? placeholder}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             strokeWidth={2}
-            className="size-4 shrink-0 opacity-50"
+            className="size-4 shrink-0 text-foreground/65"
           />
         </Button>
       </PopoverTrigger>

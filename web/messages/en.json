@@ -112,6 +112,7 @@
       "resume": "Resume",
       "recordingStatus": "Recording",
       "pausedStatus": "Paused",
+      "templateLabel": "Template",
       "defaultMicrophone": "Default microphone",
       "generatingEncounter": "Generating your encounter",
       "note": "Note",

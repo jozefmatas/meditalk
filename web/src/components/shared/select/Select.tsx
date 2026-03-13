@@ -59,11 +59,14 @@ function SelectTrigger({
   className,
   size = "default",
   variant = "default",
+  label,
   children,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default";
   variant?: "default" | "ghost";
+  /** Prefix label rendered before the value, e.g. "Template" → "Template: Value" */
+  label?: string;
 }) {
   return (
     <SelectPrimitive.Trigger
@@ -76,6 +79,9 @@ function SelectTrigger({
       )}
       {...props}
     >
+      {label && (
+        <span className="text-foreground/65 shrink-0">{label}:</span>
+      )}
       {children}
       <SelectPrimitive.Icon asChild>
         <HugeiconsIcon

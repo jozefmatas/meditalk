@@ -93,6 +93,36 @@ export const WithDefaultValue: Story = {
   ),
 };
 
+export const WithLabel: Story = {
+  render: () => (
+    <Select defaultValue="complex">
+      <SelectTrigger label="Template">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="complex">Komplexné lekárske vyšetrenie</SelectItem>
+        <SelectItem value="preventive">Preventívna prehliadka</SelectItem>
+        <SelectItem value="follow_up">Kontrolné vyšetrenie</SelectItem>
+      </SelectContent>
+    </Select>
+  ),
+};
+
+export const WithLabelGhost: Story = {
+  render: () => (
+    <Select defaultValue="complex">
+      <SelectTrigger label="Template" variant="ghost">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="complex">Komplexné lekárske vyšetrenie</SelectItem>
+        <SelectItem value="preventive">Preventívna prehliadka</SelectItem>
+        <SelectItem value="follow_up">Kontrolné vyšetrenie</SelectItem>
+      </SelectContent>
+    </Select>
+  ),
+};
+
 export const Disabled: Story = {
   render: () => (
     <Select disabled>
