@@ -21,6 +21,7 @@ import {
   LiveWaveform,
   type LiveWaveformProps,
 } from "@/components/shared/live-waveform";
+import { TemplateSelector } from "@/components/templates/template-selector";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Mic01Icon } from "@hugeicons/core-free-icons";
 
@@ -35,6 +36,8 @@ interface RecordingBarProps {
   disabled?: boolean;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange?: (state: RecordingState) => void;
+  templateId: string;
+  onTemplateChange: (id: string) => void;
 }
 
 function formatDuration(seconds: number) {
@@ -59,7 +62,7 @@ function getSupportedMimeType(): string {
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
-    { disabled, onRecordingComplete, onRecordingStateChange },
+    { disabled, onRecordingComplete, onRecordingStateChange, templateId, onTemplateChange },
     ref
   ) {
     const t = useTranslations("encounters.detail");
@@ -254,85 +257,103 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       </span>
     ) : null;
 
-    /* ── Idle: action button + mic picker (fills width), no status/waveform ── */
+    /* ── Idle: template selector (left) | mic + start button (right) ── */
     if (state === "idle") {
       return (
-        <div className="flex items-center gap-3">
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={handleStart}
-            disabled={!!disabled}
-            className="shrink-0"
-          >
-            {t("startRecording")}
-          </Button>
-          {deviceSelector}
-        </div>
-      );
-    }
-
-    /* ── Recording: action button + status + waveform, no mic picker ── */
-    if (state === "recording") {
-      return (
         <div className="flex items-center justify-between gap-4">
-          <Button
-            size="lg"
-            onClick={handlePause}
-            className="shrink-0 border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
-          >
-            {t("pause")}
-          </Button>
-
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-2 text-sm font-medium text-destructive">
-              <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
-              {t("recordingStatus")} {formatDuration(duration)}
-            </span>
-            <div className="h-9 w-60 text-foreground">
-              <LiveWaveform
-                active
-                deviceId={selectedDeviceId || undefined}
-                height={36}
-                barWidth={2}
-                barGap={1}
-                barRadius={1}
-                barHeight={3}
-                sensitivity={1.5}
-                mode="static"
-                fadeEdges
-                fadeWidth={16}
-                onError={
-                  (() => {
-                    /* mic errors handled by device enumeration */
-                  }) as LiveWaveformProps["onError"]
-                }
-              />
-            </div>
+          <TemplateSelector
+            value={templateId}
+            onChange={onTemplateChange}
+            disabled={!!disabled}
+            className="w-auto max-w-[320px]"
+          />
+          <div className="flex shrink-0 items-center gap-3">
+            {deviceSelector}
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={handleStart}
+              disabled={!!disabled}
+              className="shrink-0"
+            >
+              {t("startRecording")}
+            </Button>
           </div>
         </div>
       );
     }
 
-    /* ── Paused: action button + mic picker + status (no waveform) ── */
+    /* ── Recording: waveform (left) | status + pause button (right) ── */
+    if (state === "recording") {
+      return (
+        <div className="flex items-center justify-between gap-4">
+          <div className="h-9 min-w-0 max-w-[360px] flex-1 text-foreground">
+            <LiveWaveform
+              active
+              deviceId={selectedDeviceId || undefined}
+              height={36}
+              barWidth={2}
+              barGap={1}
+              barRadius={1}
+              barHeight={3}
+              sensitivity={1.5}
+              mode="static"
+              fadeEdges
+              fadeWidth={16}
+              onError={
+                (() => {
+                  /* mic errors handled by device enumeration */
+                }) as LiveWaveformProps["onError"]
+              }
+            />
+          </div>
+
+          <div className="flex shrink-0 items-center gap-3">
+            <span className="flex items-center gap-2 text-sm font-medium text-destructive">
+              <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
+              {t("recordingStatus")} {formatDuration(duration)}
+            </span>
+            <Button
+              size="lg"
+              onClick={handlePause}
+              className="shrink-0 border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
+            >
+              {t("pause")}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ── Paused: template selector (left) | mic + divider + status + resume button (right) ── */
     return (
       <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={handleResume}
-            className="shrink-0"
-          >
-            {t("resume")}
-          </Button>
-          {deviceSelector}
+        <TemplateSelector
+          value={templateId}
+          onChange={onTemplateChange}
+          disabled={!!disabled}
+          className="w-auto max-w-[280px]"
+        />
+        <div className="flex shrink-0 items-center gap-5">
+          <div className="flex items-center gap-3">
+            {deviceSelector}
+            <div className="h-6 w-px bg-border" />
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
+              <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
+              {t("pausedStatus")} {formatDuration(duration)}
+            </span>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={handleResume}
+              className="shrink-0"
+            >
+              {t("resume")}
+            </Button>
+          </div>
         </div>
-
-        <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
-          <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
-          {t("pausedStatus")} {formatDuration(duration)}
-        </span>
       </div>
     );
   }

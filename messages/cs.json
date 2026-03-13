@@ -37,7 +37,8 @@
     "templates": "Šablony",
     "encounters": "Návštěvy",
     "newEncounter": "Nová návštěva",
-    "latestEncounters": "Poslední"
+    "ongoingEncounters": "Probíhající",
+    "completedEncounters": "Dokončené"
   },
   "encounters": {
     "title": "Návštěvy",

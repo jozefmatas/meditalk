@@ -870,7 +870,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return (
       <AppShell contentClassName="flex flex-1 overflow-hidden">
         <div className="flex flex-1 justify-center p-6">
-          <div className="w-full max-w-[800px] space-y-6">
+          <div className="w-full max-w-[960px] space-y-6">
             <Skeleton className="h-8 w-64" />
             <Skeleton className="h-9 w-48" />
             <div className="h-px bg-border" />
@@ -930,7 +930,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
           className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
         >
           <div
-            className={`flex w-full max-w-[800px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
+            className={`flex w-full max-w-[960px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
           >
             {isDraft ? (
               <>
@@ -976,6 +976,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
                     disabled={isGenerating}
                     onRecordingComplete={handleRecordingComplete}
                     onRecordingStateChange={handleRecordingStateChange}
+                    templateId={selectedTemplateId}
+                    onTemplateChange={handleTemplateChange}
                   />
                 </div>
 

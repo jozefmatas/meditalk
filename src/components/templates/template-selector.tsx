@@ -9,12 +9,14 @@ interface TemplateSelectorProps {
   value: string;
   onChange: (templateId: string) => void;
   disabled?: boolean;
+  className?: string;
 }
 
 export function TemplateSelector({
   value,
   onChange,
   disabled,
+  className,
 }: TemplateSelectorProps) {
   const t = useTranslations("templates");
 
@@ -36,7 +38,7 @@ export function TemplateSelector({
       searchPlaceholder={t("selectTemplate")}
       emptyText={t("noResults")}
       disabled={disabled}
-      className="w-full"
+      className={className ?? "w-full"}
     />
   );
 }

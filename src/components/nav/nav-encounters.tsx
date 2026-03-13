@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useSidebarEncounters } from "@/hooks/use-sidebar-encounters";
+import type { Encounter } from "@/lib/types";
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -42,6 +43,100 @@ const dotColor: Record<string, string> = {
 const itemClass =
   "h-10 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5! group-has-[[data-sidebar=menu-action]:hover]/menu-item:!bg-transparent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:!bg-transparent";
 
+const ONGOING_STATUSES = new Set(["started", "recording", "processing", "to_review"]);
+
+function EncounterItem({
+  visit,
+  isActive,
+  href,
+  t,
+  tNav,
+  onDelete,
+  onMarkComplete,
+}: {
+  visit: Encounter;
+  isActive: boolean;
+  href: string;
+  t: ReturnType<typeof useTranslations>;
+  tNav: ReturnType<typeof useTranslations>;
+  onDelete: (id: string) => void;
+  onMarkComplete: (id: string) => void;
+}) {
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={isActive} className={itemClass}>
+        <Link href={href} title={visit.title || t("untitled")}>
+          {visit.status === "processing" ? (
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                size={14}
+                className="animate-spin text-status-processing"
+              />
+            </span>
+          ) : (
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  dotColor[visit.status] || dotColor.started,
+                  visit.status === "recording" && "animate-pulse",
+                )}
+              />
+            </span>
+          )}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span
+              className={cn(
+                "truncate text-sm leading-tight",
+                visit.status === "completed" && "line-through",
+              )}
+            >
+              {visit.title || t("untitled")}
+            </span>
+            <span className="truncate text-xs font-normal leading-tight text-sidebar-foreground/65">
+              {t(`status.${visit.status}`)}
+            </span>
+          </div>
+        </Link>
+      </SidebarMenuButton>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <SidebarMenuAction showOnHover className="top-2!">
+            <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
+          </SidebarMenuAction>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="start" className="min-w-44">
+          <DropdownMenuItem asChild>
+            <Link href={href} className="gap-2">
+              <HugeiconsIcon icon={LinkSquare01Icon} size={16} />
+              {tNav("openVisit")}
+            </Link>
+          </DropdownMenuItem>
+          {visit.status === "to_review" && (
+            <DropdownMenuItem
+              onClick={() => onMarkComplete(visit.id)}
+              className="gap-2"
+            >
+              <HugeiconsIcon icon={Tick02Icon} size={16} />
+              {tNav("markComplete")}
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => onDelete(visit.id)}
+            className="gap-2"
+          >
+            <HugeiconsIcon icon={Delete01Icon} size={16} />
+            {tNav("deleteVisit")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuItem>
+  );
+}
+
 export function NavEncounters() {
   const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
@@ -51,6 +146,15 @@ export function NavEncounters() {
     useSidebarEncounters();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const ongoing = useMemo(
+    () => visits.filter((v) => ONGOING_STATUSES.has(v.status)),
+    [visits],
+  );
+  const completed = useMemo(
+    () => visits.filter((v) => v.status === "completed"),
+    [visits],
+  );
 
   // Infinite scroll — observe the sentinel at the bottom of the list
   useEffect(() => {
@@ -68,118 +172,62 @@ export function NavEncounters() {
     return () => observer.disconnect();
   }, [loadMore]);
 
+  const renderItems = (items: Encounter[]) =>
+    items.map((visit) => {
+      const visitHref = getHref(`/encounters/${visit.id}`);
+      const isActive = pathname === visitHref;
+      return (
+        <EncounterItem
+          key={visit.id}
+          visit={visit}
+          isActive={isActive}
+          href={visitHref}
+          t={t}
+          tNav={tNav}
+          onDelete={deleteVisit}
+          onMarkComplete={markComplete}
+        />
+      );
+    });
+
   return (
-    // Scroll only happens here; "Latest" label sticks at the top
     <div
       ref={scrollRef}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden"
     >
-      {/* Sticky label — stays visible while scrolling the list */}
-      <span className="sticky top-0 z-10 bg-sidebar px-2 pb-2 text-xs text-sidebar-foreground/65">
-        {tNav("latestEncounters")}
-      </span>
-      <SidebarMenu className="gap-0.5">
-        {isLoading && visits.length === 0 ? (
-          Array.from({ length: 5 }).map((_, i) => (
+      {isLoading && visits.length === 0 ? (
+        <SidebarMenu className="gap-0.5">
+          {Array.from({ length: 5 }).map((_, i) => (
             <SidebarMenuItem key={i}>
               <SidebarMenuSkeleton />
             </SidebarMenuItem>
-          ))
-        ) : visits.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-sidebar-foreground/65">
-            {t("empty.title")}
-          </div>
-        ) : (
-          <>
-            {visits.map((visit) => {
-              const visitHref = getHref(`/encounters/${visit.id}`);
-              const isActive = pathname === visitHref;
-              return (
-                <SidebarMenuItem key={visit.id}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive}
-                    className={itemClass}
-                  >
-                    <Link href={visitHref} title={visit.title || t("untitled")}>
-                      {visit.status === "processing" ? (
-                        <span className="flex size-5 shrink-0 items-center justify-center">
-                          <HugeiconsIcon
-                            icon={Loading03Icon}
-                            size={14}
-                            className="animate-spin text-status-processing"
-                          />
-                        </span>
-                      ) : (
-                        <span className="flex size-5 shrink-0 items-center justify-center">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              dotColor[visit.status] || dotColor.started,
-                              visit.status === "recording" && "animate-pulse",
-                            )}
-                          />
-                        </span>
-                      )}
-                      <div className="flex min-w-0 flex-1 flex-col">
-                        <span
-                          className={cn(
-                            "truncate text-sm leading-tight",
-                            visit.status === "completed" && "line-through",
-                          )}
-                        >
-                          {visit.title || t("untitled")}
-                        </span>
-                        <span className="truncate text-xs font-normal leading-tight text-sidebar-foreground/65">
-                          {t(`status.${visit.status}`)}
-                        </span>
-                      </div>
-                    </Link>
-                  </SidebarMenuButton>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <SidebarMenuAction showOnHover className="top-2!">
-                        <HugeiconsIcon icon={MoreHorizontalIcon} size={16} />
-                      </SidebarMenuAction>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent
-                      side="right"
-                      align="start"
-                      className="min-w-44"
-                    >
-                      <DropdownMenuItem asChild>
-                        <Link href={visitHref} className="gap-2">
-                          <HugeiconsIcon icon={LinkSquare01Icon} size={16} />
-                          {tNav("openVisit")}
-                        </Link>
-                      </DropdownMenuItem>
-                      {visit.status === "to_review" && (
-                        <DropdownMenuItem
-                          onClick={() => markComplete(visit.id)}
-                          className="gap-2"
-                        >
-                          <HugeiconsIcon icon={Tick02Icon} size={16} />
-                          {tNav("markComplete")}
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => deleteVisit(visit.id)}
-                        className="gap-2"
-                      >
-                        <HugeiconsIcon icon={Delete01Icon} size={16} />
-                        {tNav("deleteVisit")}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </SidebarMenuItem>
-              );
-            })}
-            {hasMore && <div ref={sentinelRef} className="h-1 shrink-0" />}
-          </>
-        )}
-      </SidebarMenu>
+          ))}
+        </SidebarMenu>
+      ) : (
+        <>
+          {ongoing.length > 0 && (
+            <div>
+              <span className="sticky top-0 z-10 block bg-sidebar px-2 pb-2 text-xs text-sidebar-foreground/65">
+                {tNav("ongoingEncounters")}
+              </span>
+              <SidebarMenu className="gap-0.5">
+                {renderItems(ongoing)}
+              </SidebarMenu>
+            </div>
+          )}
+          {completed.length > 0 && (
+            <div>
+              <span className="sticky top-0 z-10 block bg-sidebar px-2 pb-2 pt-3 text-xs text-sidebar-foreground/65">
+                {tNav("completedEncounters")}
+              </span>
+              <SidebarMenu className="gap-0.5">
+                {renderItems(completed)}
+              </SidebarMenu>
+            </div>
+          )}
+          {hasMore && <div ref={sentinelRef} className="h-1 shrink-0" />}
+        </>
+      )}
     </div>
   );
 }

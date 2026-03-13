@@ -37,7 +37,8 @@
     "templates": "Templates",
     "encounters": "Encounters",
     "newEncounter": "New encounter",
-    "latestEncounters": "Latest"
+    "ongoingEncounters": "Ongoing",
+    "completedEncounters": "Completed"
   },
   "encounters": {
     "title": "Encounters",

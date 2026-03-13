@@ -260,16 +260,19 @@ export function TemplateSidebar({
       )}
       style={isDraft ? undefined : { top: stickyTop, maxHeight: `calc(100svh - ${stickyTop + 52}px)` }}
     >
-      <div className="flex flex-col gap-2">
-        <span className="text-xs text-foreground/65">
-          {tTemplates("selectTemplate")}
-        </span>
-        <TemplateSelector
-          value={templateId}
-          onChange={onTemplateChange}
-          disabled={disabled}
-        />
-      </div>
+      {/* Review mode: template selector header */}
+      {isReview && (
+        <div className="flex flex-col gap-2">
+          <span className="text-xs text-foreground/65">
+            {tTemplates("selectTemplate")}
+          </span>
+          <TemplateSelector
+            value={templateId}
+            onChange={onTemplateChange}
+            disabled={disabled}
+          />
+        </div>
+      )}
 
       {/* Draft mode: sections with plus icons */}
       {template && isDraft && (
