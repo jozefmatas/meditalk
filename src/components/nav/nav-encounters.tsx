@@ -43,7 +43,12 @@ const dotColor: Record<string, string> = {
 const itemClass =
   "h-10 gap-1.5 px-1.5 py-0 rounded-lg group-data-[collapsible=icon]:p-1.5! group-has-[[data-sidebar=menu-action]:hover]/menu-item:!bg-transparent group-has-[[data-sidebar=menu-action][aria-expanded=true]]/menu-item:!bg-transparent";
 
-const ONGOING_STATUSES = new Set(["started", "recording", "processing", "to_review"]);
+const ONGOING_STATUSES = new Set([
+  "started",
+  "recording",
+  "processing",
+  "to_review",
+]);
 
 function EncounterItem({
   visit,
@@ -217,7 +222,12 @@ export function NavEncounters() {
           )}
           {completed.length > 0 && (
             <div>
-              <span className="sticky top-0 z-10 block bg-sidebar px-2 pb-2 pt-3 text-xs text-sidebar-foreground/65">
+              <span
+                className={cn(
+                  "sticky top-0 z-10 block bg-sidebar px-2 pb-2 text-xs text-sidebar-foreground/65",
+                  ongoing.length > 0 && "pt-3",
+                )}
+              >
                 {tNav("completedEncounters")}
               </span>
               <SidebarMenu className="gap-0.5">

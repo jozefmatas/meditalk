@@ -1,4 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import { HugeiconsIcon } from "@hugeicons/react";
+import {
+  File01Icon,
+  Delete01Icon,
+  Mic01Icon,
+} from "@hugeicons/core-free-icons";
+import { Button } from "@/components/shared/button";
 import {
   Table,
   TableHeader,
@@ -54,22 +61,38 @@ export const Default: Story = {
 };
 
 const files = [
-  { name: "report.pdf", size: "2.4 MB" },
-  { name: "scan-results.jpg", size: "1.1 MB" },
-  { name: "notes.txt", size: "12 KB" },
+  { name: "report.pdf", type: "application/pdf" },
+  { name: "scan-results.jpg", type: "image/jpeg" },
+  { name: "notes.txt", type: "text/plain" },
+  { name: "very-long-filename-that-should-truncate.pdf", type: "application/pdf" },
+  { name: "AUD-20260310-WA0006.ogg", type: "audio/ogg" },
 ];
 
 export const Compact: Story = {
   name: "Compact (Files)",
   render: () => (
     <div className="w-[240px]">
-      <span className="text-xs text-muted-foreground">Uploaded files</span>
-      <Table>
+      <span className="text-xs text-foreground/65">Uploaded files</span>
+      <Table variant="compact">
         <TableBody>
           {files.map((file) => (
-            <TableRow key={file.name} className="border-border">
-              <TableCell className="px-0 py-3 text-sm leading-none">
-                {file.name}
+            <TableRow key={file.name} className="group border-border">
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-1">
+                  <HugeiconsIcon
+                    icon={file.type.startsWith("audio/") ? Mic01Icon : File01Icon}
+                    size={14}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                  >
+                    <HugeiconsIcon icon={Delete01Icon} size={12} />
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}

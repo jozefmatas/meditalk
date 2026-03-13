@@ -20,6 +20,7 @@ export interface EncounterFile {
   size: number;
   type: string;
   extracted_text?: string | null;
+  source?: string;
 }
 
 interface FilesPanelProps {
@@ -181,22 +182,22 @@ export function FilesPanel({
           <span className="text-xs text-foreground/65">
             {t("uploadedFiles")}
           </span>
-          <Table>
+          <Table variant="compact">
             <TableBody>
               {files.map((file) => (
                 <TableRow key={file.id} className="group border-border">
-                  <TableCell className="px-0 py-3 text-sm">
-                    <div className="flex items-center gap-1">
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-1">
                       <HugeiconsIcon
                         icon={iconForType(file.type)}
                         size={14}
                         className="shrink-0 text-muted-foreground"
                       />
-                      <span className="flex-1 truncate">{file.name}</span>
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
                       <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        variant="outline"
+                        size="icon-sm"
+                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                         onClick={() => handleDelete(file.id)}
                       >
                         <HugeiconsIcon icon={Delete01Icon} size={12} />

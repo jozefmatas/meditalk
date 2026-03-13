@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/supabase/auth';
 import { embedText } from '@/lib/openai';
 import { generateFromTemplate } from '@/lib/anthropic';
+import { extractTextFromFile } from '@/lib/file-extraction';
 import { getTemplateById, getDefaultTemplate } from '@/lib/templates';
 import { flattenSectionIds } from '@/lib/templates/html';
 import type { GenerateResponse, SupportedLanguage } from '@/lib/types';
@@ -45,13 +46,49 @@ export async function POST(request: NextRequest) {
 
     const language = (visit.language as SupportedLanguage) || 'en';
 
-    // Collect extracted text from uploaded files
+    // Process uploaded files — extract text from any that haven't been processed yet
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
     const uploadedFiles = (visitMeta.files ?? []) as {
+      id: string;
       name: string;
       type: string;
+      path: string;
+      source?: string;
       extracted_text?: string | null;
     }[];
+
+    // Extract text from unprocessed files (skip recording files — handled by process-audio)
+    const unprocessed = uploadedFiles.filter(
+      (f) => !f.extracted_text && f.source !== 'recording' && f.path
+    );
+
+    if (unprocessed.length > 0) {
+      for (const file of unprocessed) {
+        try {
+          const { data: fileData, error: dlError } = await supabase.storage
+            .from('encounter-files')
+            .download(file.path);
+
+          if (dlError || !fileData) {
+            console.error(`Failed to download ${file.name}:`, dlError);
+            continue;
+          }
+
+          const buffer = Buffer.from(await fileData.arrayBuffer());
+          const text = await extractTextFromFile(buffer, file.name, file.type, language);
+          file.extracted_text = text;
+        } catch (err) {
+          console.error(`Text extraction failed for ${file.name}:`, err);
+        }
+      }
+
+      // Persist extracted text back to metadata
+      await supabase
+        .from('visits')
+        .update({ metadata: { ...visitMeta, files: uploadedFiles } })
+        .eq('id', visitId);
+    }
+
     const fileTexts = uploadedFiles
       .filter((f) => f.extracted_text)
       .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));

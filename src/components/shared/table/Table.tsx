@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  Table,
+  Table as GeneratedTable,
   TableHeader,
   TableBody,
   TableFooter,
@@ -12,6 +12,23 @@ import {
   TableCaption,
 } from "@/components/generated/ui/table";
 import { cn } from "@/lib/utils";
+
+interface TableProps extends React.ComponentProps<"table"> {
+  variant?: "default" | "compact";
+}
+
+function Table({ className, variant = "default", ...props }: TableProps) {
+  return (
+    <GeneratedTable
+      className={cn(
+        variant === "compact" &&
+          "table-fixed text-xs **:data-[slot=table-cell]:px-1! **:data-[slot=table-cell]:py-2! **:data-[slot=table-cell]:overflow-hidden",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
 
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (

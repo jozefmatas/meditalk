@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
-import { extractTextFromFile } from "@/lib/file-extraction";
-import type { SupportedLanguage } from "@/lib/types";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -49,10 +47,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { userId, supabase } = await requireAuth();
     const { encounterId } = await params;
 
-    // Verify ownership and get language for text extraction
+    // Verify ownership
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("metadata, language")
+      .select("metadata")
       .eq("id", encounterId)
       .eq("user_id", userId)
       .single();
@@ -93,22 +91,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         continue;
       }
 
-      // Extract text content from the file
-      const language = ((visit as Record<string, unknown>).language as SupportedLanguage) || "sk";
-      let extractedText: string | null = null;
-      try {
-        extractedText = await extractTextFromFile(buffer, file.name, file.type, language);
-      } catch (err) {
-        console.error(`Text extraction failed for ${file.name}:`, err);
-      }
-
       const fileMeta: Record<string, unknown> = {
         id: fileId,
         name: file.name,
         size: file.size,
         type: file.type,
         path: storagePath,
-        extracted_text: extractedText,
       };
 
       newFiles.push(fileMeta);

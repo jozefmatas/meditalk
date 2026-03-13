@@ -406,7 +406,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
         }
 
         const data = await res.json();
-        const newFiles = data.files as EncounterFile[];
+        const newFiles = (data.files as EncounterFile[]).map((f) => ({
+          ...f,
+          source: "recording" as const,
+        }));
         setFilesState((prev) => {
           const merged = [...prev, ...newFiles];
           // Sync visit.metadata.files
@@ -633,8 +636,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [generatedNoteHtml]);
 
   // Derived state
-  const hasFileContent = files.some((f) => f.extracted_text);
-  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim() || hasFileContent);
+  const canGenerate = !!(visit?.raw_text || audioBlob || doctorNotes.trim() || files.length > 0);
   const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
 
   // Review tabs configuration
