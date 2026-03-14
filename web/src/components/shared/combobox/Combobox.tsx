@@ -96,10 +96,14 @@ function Combobox({
             className,
           )}
         >
-          {label && (
-            <span className="text-foreground/65 shrink-0">{label}:</span>
+          {label ? (
+            <span className="flex min-w-0 items-center gap-0.5">
+              <span className="text-foreground/65 shrink-0">{label}:</span>
+              <span className="truncate">{selectedLabel ?? placeholder}</span>
+            </span>
+          ) : (
+            <span className="truncate">{selectedLabel ?? placeholder}</span>
           )}
-          <span className="truncate">{selectedLabel ?? placeholder}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             strokeWidth={2}

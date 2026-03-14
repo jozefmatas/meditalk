@@ -43,7 +43,11 @@ interface EncounterHeaderActionsProps {
   isGenerating: boolean;
 }
 
-const DRAFT_STATUSES: EncounterStatus[] = ["started", "recording", "processing"];
+const DRAFT_STATUSES: EncounterStatus[] = [
+  "started",
+  "recording",
+  "processing",
+];
 
 export function EncounterHeaderActions({
   status,
@@ -71,10 +75,7 @@ export function EncounterHeaderActions({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              variant="destructive"
-              onSelect={onDelete}
-            >
+            <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <HugeiconsIcon icon={Delete01Icon} size={14} />
               {tNav("deleteVisit")}
             </DropdownMenuItem>
@@ -87,7 +88,7 @@ export function EncounterHeaderActions({
             value={generationLanguage}
             onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
           >
-            <SelectTrigger className="w-auto">
+            <SelectTrigger className="w-auto" label={t("detail.noteLanguage")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="end">
@@ -115,7 +116,7 @@ export function EncounterHeaderActions({
             {isGenerating ? t("detail.generating") : t("detail.generate")}
           </Button>
         )}
-      </>
+      </>,
     );
 
     return () => setHeaderActions(null);

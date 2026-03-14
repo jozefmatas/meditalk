@@ -84,6 +84,7 @@
       "transcript": "Transcript",
       "search": "Search",
       "searchPlaceholder": "Search within encounter...",
+      "noteLanguage": "Note language",
       "generate": "Generate",
       "generating": "Generating...",
       "soapNote": "Generated Note",

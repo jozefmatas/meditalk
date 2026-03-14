@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { useRouter } from "next/navigation";
+import { useRouter as useNextRouter } from "next/navigation";
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { createClient } from "@/lib/supabase/client";
 import { routing, type Locale } from "@/i18n/routing";
+import { useRouter, usePathname } from "@/i18n/navigation";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useSidebar } from "@/components/shared/sidebar";
 import {
@@ -46,7 +47,9 @@ export function ClinicSwitcher() {
   const t = useTranslations("nav");
   const tAuth = useTranslations("auth");
   const locale = useLocale() as Locale;
-  const router = useRouter();
+  const nextRouter = useNextRouter();
+  const intlRouter = useRouter();
+  const pathname = usePathname();
   const getHref = useLocalizedHref();
   const { isMobile } = useSidebar();
   const [userName, setUserName] = useState<string>("...");
@@ -69,15 +72,11 @@ export function ClinicSwitcher() {
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.refresh();
+    nextRouter.refresh();
   };
 
   const handleLocaleChange = (newLocale: string) => {
-    const loc = newLocale as Locale;
-    const newPath = loc === routing.defaultLocale ? "/" : `/${loc}`;
-    document.cookie = `NEXT_LOCALE=${loc}; path=/; max-age=31536000; SameSite=Lax`;
-    router.push(newPath);
-    router.refresh();
+    intlRouter.replace(pathname, { locale: newLocale as Locale });
   };
 
   return (

@@ -39,20 +39,15 @@ function SelectLabel({
   ...props
 }: React.ComponentProps<typeof GeneratedSelectLabel>) {
   return (
-    <GeneratedSelectLabel
-      className={cn("font-medium", className)}
-      {...props}
-    />
+    <GeneratedSelectLabel className={cn("font-medium", className)} {...props} />
   );
 }
 
 export { SelectLabel };
 
 const triggerVariants: Record<string, string> = {
-  default:
-    "border-input bg-background dark:bg-input/30 dark:hover:bg-input/50",
-  ghost:
-    "border-transparent bg-transparent shadow-none dark:bg-transparent",
+  default: "border-input bg-background dark:bg-input/30 dark:hover:bg-input/50",
+  ghost: "border-transparent bg-transparent shadow-none dark:bg-transparent",
 };
 
 function SelectTrigger({
@@ -75,14 +70,18 @@ function SelectTrigger({
       className={cn(
         "flex w-fit min-w-0 overflow-hidden items-center justify-between gap-1.5 rounded-lg border py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-9 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:block *:data-[slot=select-value]:truncate dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         triggerVariants[variant],
-        className
+        className,
       )}
       {...props}
     >
-      {label && (
-        <span className="text-foreground/65 shrink-0">{label}:</span>
+      {label ? (
+        <span className="flex min-w-0 items-center gap-0.5">
+          <span className="text-foreground/65 shrink-0">{label}:</span>
+          {children}
+        </span>
+      ) : (
+        children
       )}
-      {children}
       <SelectPrimitive.Icon asChild>
         <HugeiconsIcon
           icon={ArrowDown01Icon}
@@ -103,7 +102,7 @@ function SelectContent({
       position={position}
       className={cn(
         "p-1 min-w-(--radix-select-trigger-width) data-[state=closed]:overflow-hidden",
-        className
+        className,
       )}
       {...props}
     />

@@ -6,6 +6,9 @@ const mockLocale = vi.fn(() => "sk");
 vi.mock("next-intl", () => ({
   useLocale: () => mockLocale(),
 }));
+vi.mock("@/i18n/routing", () => ({
+  routing: { defaultLocale: "sk", locales: ["sk", "cs", "en"] },
+}));
 
 describe("useLocalizedHref", () => {
   it("returns path without prefix for default locale (sk)", () => {
