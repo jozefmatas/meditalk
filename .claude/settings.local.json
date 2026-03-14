@@ -100,7 +100,15 @@
       "WebFetch(domain:www.npmjs.com)",
       "Bash(npx next lint)",
       "Bash(npx next lint:*)",
-      "Bash(npm run test:*)"
+      "Bash(npm run test:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk/web log --oneline --all -10)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk/web log --all --full-history --oneline -- \"*/middleware.ts\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk/web log --all --pretty=format:\"%H %s\" -- \"src/proxy.ts\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk show eef63f3dbf0e6dac092e41e0450f55349f818598 --name-only)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log --all --full-history --format=\"%H\" -- \"middleware.ts\" \"*/middleware.ts\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk show:*)",
+      "Bash(npx eslint:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk rev-parse --show-toplevel:*)"
     ],
     "deny": [],
     "ask": []
