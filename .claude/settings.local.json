@@ -97,7 +97,10 @@
       "Bash(git mv:*)",
       "Bash(npx create-next-app@latest:*)",
       "WebFetch(domain:help.elevenlabs.io)",
-      "WebFetch(domain:www.npmjs.com)"
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npx next lint)",
+      "Bash(npx next lint:*)",
+      "Bash(npm run test:*)"
     ],
     "deny": [],
     "ask": []

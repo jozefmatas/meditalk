@@ -26,6 +26,8 @@ interface TemplateSidebarProps {
   usedSectionIds?: Set<string>;
   /** Callback when clicking an already-inserted section to scroll to it. */
   onScrollToSection?: (label: string) => void;
+  /** Callback to re-add a removed section (review mode). */
+  onAddSection?: (sectionId: string) => void;
   /** Pixel offset from the top of the scroll container for sticky positioning. */
   stickyTop?: number;
 }
@@ -136,14 +138,14 @@ function SectionWithSubs({
               />
             </span>
             <span className="section-label truncate">{sectionLabel}</span>
-            <span className="ml-auto shrink-0 text-xs text-foreground/40">{subCount}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">
+              {subCount}
+            </span>
           </button>
         ) : (
           <button
             type="button"
-            onClick={() =>
-              onInsertSection?.(section.id, sectionLabel, 2)
-            }
+            onClick={() => onInsertSection?.(section.id, sectionLabel, 2)}
             className={cn(
               itemClass,
               "min-w-0 flex-1 cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
@@ -153,7 +155,9 @@ function SectionWithSubs({
               <HugeiconsIcon icon={Add01Icon} size={16} />
             </span>
             <span className="truncate">{sectionLabel}</span>
-            <span className="ml-auto shrink-0 text-xs text-foreground/40">{subCount}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">
+              {subCount}
+            </span>
           </button>
         )}
 
@@ -229,6 +233,146 @@ function SectionWithSubs({
   );
 }
 
+/* ── Review-mode section with subsections (passes IDs, not labels) ── */
+
+function ReviewSectionWithSubs({
+  section,
+  sectionLabel,
+  documentedSections,
+  onAddSection,
+  onScrollToSection,
+  tTemplates,
+}: {
+  section: TemplateSection;
+  sectionLabel: string;
+  documentedSections?: Set<string>;
+  onAddSection?: (sectionId: string) => void;
+  onScrollToSection?: (sectionId: string) => void;
+  tTemplates: ReturnType<typeof useTranslations>;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const isDocumented = documentedSections?.has(section.id) ?? false;
+  const subCount = section.subsections?.length ?? 0;
+  const allSubsDocumented =
+    isDocumented &&
+    section.subsections?.every((sub) => documentedSections?.has(sub.id));
+
+  return (
+    <div>
+      <div className="flex items-center">
+        {isDocumented ? (
+          <button
+            type="button"
+            onClick={() => onScrollToSection?.(section.id)}
+            className={cn(
+              itemClass,
+              "min-w-0 flex-1 cursor-pointer",
+              allSubsDocumented ? "text-foreground/30" : "text-foreground",
+              "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+            )}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <HugeiconsIcon
+                icon={CheckmarkCircle01Icon}
+                size={16}
+                className="text-status-completed"
+              />
+            </span>
+            <span className="section-label truncate">{sectionLabel}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">
+              {subCount}
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onAddSection?.(section.id)}
+            className={cn(
+              itemClass,
+              "min-w-0 flex-1 cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center">
+              <HugeiconsIcon icon={Add01Icon} size={16} />
+            </span>
+            <span className="truncate">{sectionLabel}</span>
+            <span className="ml-auto shrink-0 text-xs text-foreground/40">
+              {subCount}
+            </span>
+          </button>
+        )}
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setOpen((prev) => !prev)}
+          className="shrink-0 text-foreground/40"
+        >
+          <HugeiconsIcon
+            icon={ArrowRight01Icon}
+            size={16}
+            className={cn(
+              "transition-transform duration-200",
+              open && "rotate-90",
+            )}
+          />
+        </Button>
+      </div>
+
+      {open && (
+        <div className="flex flex-col">
+          {section.subsections?.map((sub) => {
+            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const isSubDocumented = documentedSections?.has(sub.id) ?? false;
+
+            if (isSubDocumented) {
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => onScrollToSection?.(sub.id)}
+                  className={cn(
+                    itemClass,
+                    "cursor-pointer pl-7 text-foreground",
+                    "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+                  )}
+                >
+                  <span className="flex size-5 shrink-0 items-center justify-center">
+                    <HugeiconsIcon
+                      icon={CheckmarkCircle01Icon}
+                      size={16}
+                      className="text-status-completed"
+                    />
+                  </span>
+                  <span className="section-label truncate">{subLabel}</span>
+                </button>
+              );
+            }
+
+            return (
+              <button
+                key={sub.id}
+                type="button"
+                onClick={() => onAddSection?.(sub.id)}
+                className={cn(
+                  itemClass,
+                  "cursor-pointer pl-7 text-foreground/65 hover:bg-accent hover:text-foreground",
+                )}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center">
+                  <HugeiconsIcon icon={Add01Icon} size={16} />
+                </span>
+                <span className="truncate">{subLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TemplateSidebar({
   templateId,
   onTemplateChange,
@@ -237,6 +381,7 @@ export function TemplateSidebar({
   onInsertSection,
   usedSectionIds,
   onScrollToSection,
+  onAddSection,
   stickyTop = 0,
 }: TemplateSidebarProps) {
   const tTemplates = useTranslations("templates");
@@ -251,7 +396,11 @@ export function TemplateSidebar({
         "flex w-60 shrink-0 flex-col gap-3 overflow-hidden",
         isDraft ? "min-h-0" : "sticky self-start",
       )}
-      style={isDraft ? undefined : { top: stickyTop, maxHeight: `calc(100svh - ${stickyTop + 52}px)` }}
+      style={
+        isDraft
+          ? undefined
+          : { top: stickyTop, maxHeight: `calc(100svh - ${stickyTop + 52}px)` }
+      }
     >
       {/* Review mode: template selector header */}
       {isReview && (
@@ -279,9 +428,7 @@ export function TemplateSidebar({
                   key={section.id}
                   label={sectionLabel}
                   isUsed={isSectionUsed}
-                  onClick={() =>
-                    onInsertSection?.(section.id, sectionLabel, 2)
-                  }
+                  onClick={() => onInsertSection?.(section.id, sectionLabel, 2)}
                   onScrollTo={() => onScrollToSection?.(sectionLabel)}
                 />
               );
@@ -309,14 +456,30 @@ export function TemplateSidebar({
           {template.sections.map((section) => {
             const sectionLabel = tTemplates(`sections.${section.labelKey}`);
             const isDocumented = documentedSections?.has(section.id) ?? false;
+            const hasSubsections =
+              section.subsections && section.subsections.length > 0;
+
+            if (!hasSubsections) {
+              return (
+                <SectionItem
+                  key={section.id}
+                  label={sectionLabel}
+                  isUsed={isDocumented}
+                  onClick={() => onAddSection?.(section.id)}
+                  onScrollTo={() => onScrollToSection?.(section.id)}
+                />
+              );
+            }
 
             return (
-              <SectionItem
+              <ReviewSectionWithSubs
                 key={section.id}
-                label={sectionLabel}
-                isUsed={isDocumented}
-                onClick={() => {}}
-                onScrollTo={() => onScrollToSection?.(section.id)}
+                section={section}
+                sectionLabel={sectionLabel}
+                documentedSections={documentedSections}
+                onAddSection={onAddSection}
+                onScrollToSection={onScrollToSection}
+                tTemplates={tTemplates}
               />
             );
           })}

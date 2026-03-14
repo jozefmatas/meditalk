@@ -51,9 +51,11 @@ import {
 } from "@/lib/templates";
 import {
   parseSoapSections,
+  parseNoteToSectionMap,
   allSectionsToPlainText,
   type SoapSection,
 } from "@/lib/parse-soap-sections";
+import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import type {
   Encounter,
   EncounterType,
@@ -121,6 +123,15 @@ export default function EncounterDetailPage({ params }: PageProps) {
   );
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [streamedSections, setStreamedSections] = useState<SoapSection[]>([]);
+
+  // Editable section state (review mode)
+  const [sectionContents, setSectionContents] = useState<
+    Record<string, string>
+  >({});
+  const [removedSections, setRemovedSections] = useState<Set<string>>(
+    new Set(),
+  );
+  const sectionContentsRef = useRef<Record<string, string>>({});
 
   // Files
   const [files, setFilesState] = useState<EncounterFile[]>([]);
@@ -623,18 +634,29 @@ export default function EncounterDetailPage({ params }: PageProps) {
   );
 
   const handleCopyNote = useCallback(async () => {
-    const parsed = parseSoapSections(generatedNoteHtml);
+    // Rebuild HTML from current editable state
+    const currentHtml =
+      template && Object.keys(sectionContentsRef.current).length > 0
+        ? buildTemplateHtml(
+            template,
+            Object.fromEntries(
+              Object.entries(sectionContentsRef.current).filter(
+                ([id]) => !removedSections.has(id),
+              ),
+            ),
+            sectionLabels,
+          )
+        : generatedNoteHtml;
+    const parsed = parseSoapSections(currentHtml);
     const plainText = allSectionsToPlainText(parsed);
     try {
-      // Copy as rich text so email clients / docs render formatting
       await navigator.clipboard.write([
         new ClipboardItem({
-          "text/html": new Blob([generatedNoteHtml], { type: "text/html" }),
+          "text/html": new Blob([currentHtml], { type: "text/html" }),
           "text/plain": new Blob([plainText], { type: "text/plain" }),
         }),
       ]);
     } catch {
-      // Fallback for browsers that don't support ClipboardItem
       await navigator.clipboard.writeText(plainText);
     }
     setNoteCopied(true);
@@ -705,12 +727,46 @@ export default function EncounterDetailPage({ params }: PageProps) {
     [currentVisibleTabs, defaultVisibleTabs],
   );
 
-  const parsedSections = useMemo(
-    () => parseSoapSections(generatedNoteHtml),
-    [generatedNoteHtml],
-  );
-
   const template = getTemplateById(selectedTemplateId);
+
+  // Build section labels map from translations (for buildTemplateHtml)
+  const sectionLabels = useMemo(() => {
+    if (!template) return {};
+    const labels: Record<string, string> = {};
+    for (const id of flattenSectionIds(template)) {
+      labels[id] = tTemplates(`sections.${id}`);
+    }
+    return labels;
+  }, [template, tTemplates]);
+
+  // Initialize sectionContents from generated HTML
+  useEffect(() => {
+    if (!template || !generatedNoteHtml) return;
+    const map = parseNoteToSectionMap(generatedNoteHtml, template);
+    setSectionContents(map);
+    sectionContentsRef.current = map;
+
+    // Auto-hide sections/subsections whose content was "Not stated" (now empty)
+    const removed = new Set<string>();
+    for (const section of template.sections) {
+      const hasContent = !!map[section.id]?.trim();
+      const hasSubContent = section.subsections?.some(
+        (sub) => !!map[sub.id]?.trim(),
+      );
+
+      if (!hasContent && !hasSubContent) {
+        // Entire section empty — hide card and all subsections
+        removed.add(section.id);
+        section.subsections?.forEach((sub) => removed.add(sub.id));
+      } else {
+        // Some content exists — only hide individual empty subsections
+        section.subsections?.forEach((sub) => {
+          if (!map[sub.id]?.trim()) removed.add(sub.id);
+        });
+      }
+    }
+    setRemovedSections(removed);
+  }, [generatedNoteHtml, template]);
 
   // Persist template selection
   const handleTemplateChange = useCallback(
@@ -978,23 +1034,99 @@ export default function EncounterDetailPage({ params }: PageProps) {
     }, 300);
   }, []);
 
-  /** Match parsed sections to template sections by index (buildTemplateHtml iterates in order) */
+  /** Determine which section/subsection IDs have content and are not removed */
   const documentedSectionIds = useMemo(() => {
-    if (!template || !generatedNoteHtml) return new Set<string>();
+    if (!template) return new Set<string>();
     const documented = new Set<string>();
-    template.sections.forEach((section, i) => {
-      if (parsedSections[i] && parsedSections[i].content.trim()) {
-        documented.add(section.id);
+    for (const id of flattenSectionIds(template)) {
+      if (!removedSections.has(id) && sectionContents[id]?.trim()) {
+        documented.add(id);
       }
-    });
+    }
     return documented;
-  }, [template, generatedNoteHtml, parsedSections]);
+  }, [template, sectionContents, removedSections]);
 
   // Scroll to a note section card by its template section ID
   const handleScrollToNoteSection = useCallback((sectionId: string) => {
     const el = document.getElementById(`note-section-${sectionId}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  // Rebuild HTML from current section state and save to DB
+  const saveNoteRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const saveNote = useCallback(
+    (contents: Record<string, string>, removed: Set<string>) => {
+      if (!template || !visitId) return;
+      clearTimeout(saveNoteRef.current);
+      saveNoteRef.current = setTimeout(async () => {
+        // Filter out removed sections
+        const filtered: Record<string, string> = {};
+        for (const [id, text] of Object.entries(contents)) {
+          if (!removed.has(id)) filtered[id] = text;
+        }
+        const html = buildTemplateHtml(template, filtered, sectionLabels);
+        try {
+          await fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ soap_note: html }),
+          });
+          // Update local state so copy works with latest
+          setGeneratedNoteHtml(html);
+          setVisit((prev) => (prev ? { ...prev, soap_note: html } : prev));
+        } catch {
+          // Silent fail
+        }
+      }, 2000);
+    },
+    [template, visitId, sectionLabels],
+  );
+
+  // Handle section content edit
+  const handleSectionContentChange = useCallback(
+    (sectionId: string, newContent: string) => {
+      setSectionContents((prev) => {
+        const next = { ...prev, [sectionId]: newContent };
+        sectionContentsRef.current = next;
+        saveNote(next, removedSections);
+        return next;
+      });
+    },
+    [saveNote, removedSections],
+  );
+
+  // Handle section removal
+  const handleRemoveSection = useCallback(
+    (sectionId: string) => {
+      setRemovedSections((prev) => {
+        const next = new Set(prev);
+        next.add(sectionId);
+        saveNote(sectionContentsRef.current, next);
+        return next;
+      });
+    },
+    [saveNote],
+  );
+
+  // Handle re-adding a removed section from sidebar
+  const handleAddSection = useCallback(
+    (sectionId: string) => {
+      setRemovedSections((prev) => {
+        const next = new Set(prev);
+        next.delete(sectionId);
+        saveNote(sectionContentsRef.current, next);
+        return next;
+      });
+      // Ensure an empty content entry exists so the card renders with placeholder
+      setSectionContents((prev) => {
+        if (sectionId in prev) return prev;
+        const next = { ...prev, [sectionId]: "" };
+        sectionContentsRef.current = next;
+        return next;
+      });
+    },
+    [saveNote],
+  );
 
   // Loading state
   if (isLoading) {
@@ -1270,6 +1402,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                         onTemplateChange={handleRegenerate}
                         documentedSections={documentedSectionIds}
                         onScrollToSection={handleScrollToNoteSection}
+                        onAddSection={handleAddSection}
                         stickyTop={stickyHeaderHeight + 24}
                       />
                     </div>
@@ -1307,6 +1440,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                                 className="animate-in fade-in duration-300"
                               >
                                 <NoteSectionCard
+                                  sectionId={section.id}
                                   title={section.title}
                                   content={section.content}
                                 />
@@ -1320,15 +1454,34 @@ export default function EncounterDetailPage({ params }: PageProps) {
                               </div>
                             )}
                           </>
-                        ) : parsedSections.length > 0 ? (
-                          parsedSections.map((section, i) => (
-                            <NoteSectionCard
-                              key={section.id}
-                              id={`note-section-${template?.sections[i]?.id ?? section.id}`}
-                              title={section.title}
-                              content={section.content}
-                            />
-                          ))
+                        ) : template &&
+                          Object.keys(sectionContents).length > 0 ? (
+                          template.sections
+                            .filter((s) => !removedSections.has(s.id))
+                            .map((section) => (
+                              <NoteSectionCard
+                                key={section.id}
+                                id={`note-section-${section.id}`}
+                                sectionId={section.id}
+                                title={tTemplates(
+                                  `sections.${section.labelKey}`,
+                                )}
+                                content={sectionContents[section.id] ?? ""}
+                                subsections={section.subsections
+                                  ?.filter(
+                                    (sub) => !removedSections.has(sub.id),
+                                  )
+                                  .map((sub) => ({
+                                    id: sub.id,
+                                    title: tTemplates(
+                                      `sections.${sub.labelKey}`,
+                                    ),
+                                    content: sectionContents[sub.id] ?? "",
+                                  }))}
+                                onContentChange={handleSectionContentChange}
+                                onRemove={handleRemoveSection}
+                              />
+                            ))
                         ) : (
                           <p className="text-sm text-muted-foreground">
                             {t("detail.noNote")}

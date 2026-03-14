@@ -1,3 +1,8 @@
+import type { Template } from "./templates/types";
+
+/** Values the AI uses for sections with no relevant information — treat as empty. */
+const NOT_STATED_VALUES = new Set(["Not stated", "Neuvedené", "Neuvedeno"]);
+
 export interface SoapSection {
   id: string;
   title: string;
@@ -75,4 +80,88 @@ export function sectionToPlainText(section: SoapSection): string {
  */
 export function allSectionsToPlainText(sections: SoapSection[]): string {
   return sections.map(sectionToPlainText).join("\n\n");
+}
+
+/**
+ * Strip HTML tags and decode entities, returning plain text.
+ * If the result is a NOT_STATED placeholder, returns empty string.
+ */
+function htmlToText(html: string): string {
+  const text = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .trim();
+  // Treat AI "not stated" placeholders as empty
+  if (NOT_STATED_VALUES.has(text)) return "";
+  return text;
+}
+
+/**
+ * Parse generated note HTML into a map of { sectionId → text content }
+ * keyed by template section/subsection IDs.
+ *
+ * The HTML from buildTemplateHtml has:
+ *   <h2>Title</h2><p>content</p><h3>Sub</h3><p>sub content</p>...
+ *
+ * We split on <h2> to get top-level sections (mapped by index to template),
+ * then split each section's content on <h3> to get subsection content.
+ */
+export function parseNoteToSectionMap(
+  html: string,
+  template: Template,
+): Record<string, string> {
+  if (!html) return {};
+
+  const map: Record<string, string> = {};
+  const h2Parts = html.split(/(?=<h2[^>]*>)/i).filter((p) => p.trim());
+
+  for (let i = 0; i < h2Parts.length; i++) {
+    const templateSection = template.sections[i];
+    if (!templateSection) break;
+
+    const part = h2Parts[i];
+
+    // Strip the <h2>...</h2> tag to get the body
+    const bodyStart = part.indexOf("</h2>");
+    if (bodyStart === -1) continue;
+    const body = part.slice(bodyStart + 5).trim();
+
+    if (!templateSection.subsections?.length) {
+      // No subsections — entire body is this section's content
+      map[templateSection.id] = htmlToText(body);
+    } else {
+      // Split body on <h3> to separate parent content from subsection content
+      const h3Parts = body.split(/(?=<h3[^>]*>)/i);
+
+      // First chunk (before any <h3>) is the parent section content
+      if (h3Parts[0] && !h3Parts[0].startsWith("<h3")) {
+        map[templateSection.id] = htmlToText(h3Parts[0]);
+      } else {
+        map[templateSection.id] = "";
+      }
+
+      // Remaining chunks are subsections, mapped by index
+      let subIdx = 0;
+      for (const h3Part of h3Parts) {
+        if (!h3Part.startsWith("<h3")) continue;
+        const sub = templateSection.subsections[subIdx];
+        if (!sub) break;
+
+        const subBodyStart = h3Part.indexOf("</h3>");
+        if (subBodyStart === -1) {
+          subIdx++;
+          continue;
+        }
+        map[sub.id] = htmlToText(h3Part.slice(subBodyStart + 5));
+        subIdx++;
+      }
+    }
+  }
+
+  return map;
 }
