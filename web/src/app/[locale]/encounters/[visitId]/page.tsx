@@ -131,6 +131,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const [removedSections, setRemovedSections] = useState<Set<string>>(
     new Set(),
   );
+  const [focusSectionId, setFocusSectionId] = useState<string | null>(null);
   const sectionContentsRef = useRef<Record<string, string>>({});
 
   // Files
@@ -1124,9 +1125,18 @@ export default function EncounterDetailPage({ params }: PageProps) {
         sectionContentsRef.current = next;
         return next;
       });
+      // Scroll to the section and auto-focus its editor after render
+      setFocusSectionId(sectionId);
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`note-section-${sectionId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     },
     [saveNote],
   );
+
+  const handleAutoFocused = useCallback(() => setFocusSectionId(null), []);
 
   // Loading state
   if (isLoading) {
@@ -1480,6 +1490,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
                                   }))}
                                 onContentChange={handleSectionContentChange}
                                 onRemove={handleRemoveSection}
+                                autoFocusId={focusSectionId}
+                                onAutoFocused={handleAutoFocused}
                               />
                             ))
                         ) : (

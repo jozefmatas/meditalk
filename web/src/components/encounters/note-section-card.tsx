@@ -22,6 +22,10 @@ interface NoteSectionCardProps {
   subsections?: SubsectionData[];
   onContentChange?: (sectionId: string, newContent: string) => void;
   onRemove?: (sectionId: string) => void;
+  /** Which section/subsection ID to auto-focus (set after re-adding from sidebar) */
+  autoFocusId?: string | null;
+  /** Called after auto-focus completes, so the parent can clear the state */
+  onAutoFocused?: () => void;
 }
 
 const editorClassName = cn(
@@ -38,10 +42,14 @@ function InlineEditor({
   sectionId,
   content,
   onContentChange,
+  autoFocus,
+  onAutoFocused,
 }: {
   sectionId: string;
   content: string;
   onContentChange?: (sectionId: string, newContent: string) => void;
+  autoFocus?: boolean;
+  onAutoFocused?: () => void;
 }) {
   const lastEmittedRef = useRef(content);
 
@@ -80,6 +88,15 @@ function InlineEditor({
     lastEmittedRef.current = content;
     editor.commands.setContent(`<p>${content.replace(/\n/g, "</p><p>")}</p>`);
   }, [editor, content]);
+
+  // Auto-focus when section is re-added from sidebar
+  useEffect(() => {
+    if (!autoFocus || !editor) return;
+    requestAnimationFrame(() => {
+      editor.commands.focus("end");
+      onAutoFocused?.();
+    });
+  }, [autoFocus, editor, onAutoFocused]);
 
   if (!editor) return null;
 
@@ -121,6 +138,8 @@ export function NoteSectionCard({
   subsections,
   onContentChange,
   onRemove,
+  autoFocusId,
+  onAutoFocused,
 }: NoteSectionCardProps) {
   return (
     <div id={id} className="rounded-2xl border p-6">
@@ -135,10 +154,16 @@ export function NoteSectionCard({
           sectionId={sectionId}
           content={content}
           onContentChange={onContentChange}
+          autoFocus={autoFocusId === sectionId}
+          onAutoFocused={onAutoFocused}
         />
 
         {subsections?.map((sub) => (
-          <div key={sub.id} className="flex flex-col gap-1 mt-2">
+          <div
+            key={sub.id}
+            id={`note-section-${sub.id}`}
+            className="flex flex-col gap-1 mt-2"
+          >
             <SectionHeader
               title={sub.title}
               sectionId={sub.id}
@@ -149,6 +174,8 @@ export function NoteSectionCard({
               sectionId={sub.id}
               content={sub.content}
               onContentChange={onContentChange}
+              autoFocus={autoFocusId === sub.id}
+              onAutoFocused={onAutoFocused}
             />
           </div>
         ))}
