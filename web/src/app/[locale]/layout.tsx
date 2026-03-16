@@ -14,7 +14,8 @@ const figtree = Figtree({
 
 export const metadata: Metadata = {
   title: "MediTalk - Medical Communication Platform",
-  description: "Healthcare communication platform for Slovak and Czech medical professionals",
+  description:
+    "Healthcare communication platform for Slovak and Czech medical professionals",
 };
 
 export default async function LocaleLayout({
@@ -27,7 +28,7 @@ export default async function LocaleLayout({
   const { locale } = await params;
 
   // Validate that the incoming locale is valid
-  if (!routing.locales.includes(locale as 'sk' | 'cs' | 'en')) {
+  if (!routing.locales.includes(locale as "sk" | "cs" | "en")) {
     notFound();
   }
 
@@ -52,14 +53,10 @@ export default async function LocaleLayout({
           }}
         />
       </head>
-      <body
-        className={`${figtree.className} antialiased`}
-      >
+      <body className={`${figtree.className} antialiased`}>
         <NextIntlClientProvider messages={messages}>
           <PageTitleProvider>
-            <HeaderActionsProvider>
-              {children}
-            </HeaderActionsProvider>
+            <HeaderActionsProvider>{children}</HeaderActionsProvider>
           </PageTitleProvider>
         </NextIntlClientProvider>
       </body>

@@ -5,10 +5,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SearchIcon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
-import {
-  InputGroup,
-  InputGroupAddon,
-} from "@/components/shared/input-group";
+import { InputGroup, InputGroupAddon } from "@/components/shared/input-group";
 
 export {
   Command,

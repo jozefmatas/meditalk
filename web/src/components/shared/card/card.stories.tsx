@@ -1,5 +1,12 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "./index";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from "./index";
 import { Button } from "../button";
 
 const meta = {

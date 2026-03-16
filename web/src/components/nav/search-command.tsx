@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Home01Icon, Add01Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import {
+  Home01Icon,
+  Add01Icon,
+  Settings01Icon,
+} from "@hugeicons/core-free-icons";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import type { Encounter, EncounterListResponse } from "@/lib/types";
@@ -83,7 +87,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
       setQuery("");
       router.push(href);
     },
-    [router, onOpenChange]
+    [router, onOpenChange],
   );
 
   const formatDate = (dateStr: string) => {
@@ -132,7 +136,12 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
               <HugeiconsIcon icon={Home01Icon} size={16} />
               <span>{tNav("dashboard")}</span>
             </CommandItem>
-            <CommandItem onSelect={() => { onOpenChange(false); createEncounter(); }}>
+            <CommandItem
+              onSelect={() => {
+                onOpenChange(false);
+                createEncounter();
+              }}
+            >
               <HugeiconsIcon icon={Add01Icon} size={16} />
               <span>{tNav("newEncounter")}</span>
             </CommandItem>

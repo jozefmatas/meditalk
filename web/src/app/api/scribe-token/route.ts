@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/supabase/auth';
-import { generateScribeToken } from '@/lib/elevenlabs';
+import { NextResponse } from "next/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { generateScribeToken } from "@/lib/elevenlabs";
 
 export async function POST() {
   try {
@@ -9,10 +9,10 @@ export async function POST() {
     return NextResponse.json({ token });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error('Scribe token error:', err);
+    console.error("Scribe token error:", err);
     return NextResponse.json(
-      { error: 'Failed to generate token' },
-      { status: 500 }
+      { error: "Failed to generate token" },
+      { status: 500 },
     );
   }
 }

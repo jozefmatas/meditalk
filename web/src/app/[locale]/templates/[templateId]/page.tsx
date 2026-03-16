@@ -4,7 +4,12 @@ import { use } from "react";
 import { useTranslations } from "next-intl";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/shared/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NoteIcon } from "@hugeicons/core-free-icons";
 import { getTemplateById } from "@/lib/templates";
@@ -80,13 +85,7 @@ function SectionItem({
         className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
       >
-        <span
-          className={
-            depth === 0
-              ? "font-medium"
-              : "text-muted-foreground"
-          }
-        >
+        <span className={depth === 0 ? "font-medium" : "text-muted-foreground"}>
           {tSections(section.labelKey)}
         </span>
       </div>

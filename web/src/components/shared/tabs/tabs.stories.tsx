@@ -61,9 +61,7 @@ export const Line: Story = {
         </p>
       </TabsContent>
       <TabsContent value="tab2">
-        <p className="text-sm text-muted-foreground">
-          Note content goes here.
-        </p>
+        <p className="text-sm text-muted-foreground">Note content goes here.</p>
       </TabsContent>
     </Tabs>
   ),
@@ -182,9 +180,7 @@ export const AllVariants: Story = {
             <TabsTrigger value="tab2">Note</TabsTrigger>
           </TabsList>
           <TabsContent value="tab1">
-            <p className="text-sm text-muted-foreground">
-              Transcript content.
-            </p>
+            <p className="text-sm text-muted-foreground">Transcript content.</p>
           </TabsContent>
         </Tabs>
       </div>

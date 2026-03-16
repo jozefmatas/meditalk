@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { Extension } from "@tiptap/core";
 import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 import { ReactRenderer } from "@tiptap/react";
@@ -116,9 +122,7 @@ export const SlashCommandList = forwardRef<
  * Creates a TipTap extension that triggers a searchable command palette
  * when the user types `/` in the editor.
  */
-export function createSlashCommand(
-  getItems: () => SlashCommandItem[],
-) {
+export function createSlashCommand(getItems: () => SlashCommandItem[]) {
   return Extension.create({
     name: "slashCommand",
 
@@ -131,7 +135,11 @@ export function createSlashCommand(
             range,
             props,
           }: {
-            editor: ReturnType<typeof import("@tiptap/core").Editor.prototype.chain> extends never ? never : import("@tiptap/core").Editor;
+            editor: ReturnType<
+              typeof import("@tiptap/core").Editor.prototype.chain
+            > extends never
+              ? never
+              : import("@tiptap/core").Editor;
             range: { from: number; to: number };
             props: SlashCommandItem;
           }) => {

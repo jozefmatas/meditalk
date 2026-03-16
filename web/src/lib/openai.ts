@@ -1,5 +1,5 @@
-import OpenAI from 'openai';
-import { logUsage, type UsageContext } from './usage';
+import OpenAI from "openai";
+import { logUsage, type UsageContext } from "./usage";
 
 let _openai: OpenAI | null = null;
 function openai() {
@@ -10,9 +10,12 @@ function openai() {
 /**
  * Generate a 1536-dim embedding for a single text.
  */
-export async function embedText(text: string, ctx?: UsageContext): Promise<number[]> {
+export async function embedText(
+  text: string,
+  ctx?: UsageContext,
+): Promise<number[]> {
   const response = await openai().embeddings.create({
-    model: 'text-embedding-ada-002',
+    model: "text-embedding-ada-002",
     input: text,
   });
 
@@ -20,9 +23,9 @@ export async function embedText(text: string, ctx?: UsageContext): Promise<numbe
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'openai',
-      model: 'text-embedding-ada-002',
-      operation: 'embed',
+      provider: "openai",
+      model: "text-embedding-ada-002",
+      operation: "embed",
       inputTokens: response.usage.prompt_tokens,
     });
   }
@@ -33,9 +36,12 @@ export async function embedText(text: string, ctx?: UsageContext): Promise<numbe
 /**
  * Generate embeddings for multiple texts in a single API call.
  */
-export async function embedTexts(texts: string[], ctx?: UsageContext): Promise<number[][]> {
+export async function embedTexts(
+  texts: string[],
+  ctx?: UsageContext,
+): Promise<number[][]> {
   const response = await openai().embeddings.create({
-    model: 'text-embedding-ada-002',
+    model: "text-embedding-ada-002",
     input: texts,
   });
 
@@ -43,9 +49,9 @@ export async function embedTexts(texts: string[], ctx?: UsageContext): Promise<n
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'openai',
-      model: 'text-embedding-ada-002',
-      operation: 'embed',
+      provider: "openai",
+      model: "text-embedding-ada-002",
+      operation: "embed",
       inputTokens: response.usage.prompt_tokens,
     });
   }

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "@supabase/supabase-js";
 
 let _adminClient: ReturnType<typeof createClient> | null = null;
 
@@ -17,7 +17,7 @@ export function createAdminClient() {
         autoRefreshToken: false,
         persistSession: false,
       },
-    }
+    },
   );
 
   return _adminClient;

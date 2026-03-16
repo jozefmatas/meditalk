@@ -19,7 +19,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <>
-      <Sidebar collapsible="icon" className="group-data-[side=left]:border-r-0" {...props}>
+      <Sidebar
+        collapsible="icon"
+        className="group-data-[side=left]:border-r-0"
+        {...props}
+      >
         {/* Figma node 100:1619 — entire content area has p-2, sidebar root has 0 padding */}
         <SidebarContent className="gap-0 overflow-hidden p-2">
           {/* Brand + nav — sticky top, never scrolls */}
@@ -42,7 +46,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarFooter className="p-0">
           <ClinicSwitcher />
         </SidebarFooter>
-
       </Sidebar>
       <SearchCommand open={searchOpen} onOpenChange={setSearchOpen} />
     </>

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/shared/card";
 import { Button } from "@/components/shared/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, NoteIcon } from "@hugeicons/core-free-icons";
@@ -19,7 +24,9 @@ export default function TemplatesPage() {
     <AppShell>
       <div className="max-w-3xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t("title")}
+          </h1>
           <p className="text-muted-foreground">{t("description")}</p>
         </div>
 

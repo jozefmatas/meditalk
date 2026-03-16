@@ -1,12 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/supabase/auth';
-import type { Encounter, EncounterStatus, UpdateEncounterRequest } from '@/lib/types';
+import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import type {
+  Encounter,
+  EncounterStatus,
+  UpdateEncounterRequest,
+} from "@/lib/types";
 
 /** Normalize legacy DB statuses to current values */
 function normalizeStatus(status: string): EncounterStatus {
-  if (status === 'draft') return 'started';
-  if (status === 'review') return 'to_review';
-  if (status === 'closed') return 'completed';
+  if (status === "draft") return "started";
+  if (status === "review") return "to_review";
+  if (status === "closed") return "completed";
   return status as EncounterStatus;
 }
 
@@ -25,21 +29,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // Get visit
     const { data: visit, error } = await supabase
-      .from('visits')
-      .select('*')
-      .eq('id', visitId)
-      .eq('user_id', userId)
+      .from("visits")
+      .select("*")
+      .eq("id", visitId)
+      .eq("user_id", userId)
       .single();
 
     if (error || !visit) {
-      return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
+      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
     // Get chunks count
     const { count: chunkCount } = await supabase
-      .from('transcript_chunks')
-      .select('*', { count: 'exact', head: true })
-      .eq('visit_id', visitId);
+      .from("transcript_chunks")
+      .select("*", { count: "exact", head: true })
+      .eq("visit_id", visitId);
 
     return NextResponse.json({
       ...visit,
@@ -48,8 +52,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     } as Encounter & { chunkCount: number });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error('Visit fetch error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Visit fetch error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
@@ -67,42 +74,53 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
     if (body.title !== undefined) updateData.title = body.title;
-    if (body.patient_name !== undefined) updateData.patient_name = body.patient_name;
+    if (body.patient_name !== undefined)
+      updateData.patient_name = body.patient_name;
     if (body.patient_id !== undefined) updateData.patient_id = body.patient_id;
     if (body.visit_type !== undefined) updateData.visit_type = body.visit_type;
     if (body.visit_date !== undefined) updateData.visit_date = body.visit_date;
     if (body.status !== undefined) updateData.status = body.status;
     if (body.language !== undefined) updateData.language = body.language;
     if (body.soap_note !== undefined) updateData.soap_note = body.soap_note;
-    if (body.patient_letter !== undefined) updateData.patient_letter = body.patient_letter;
+    if (body.patient_letter !== undefined)
+      updateData.patient_letter = body.patient_letter;
     if (body.metadata !== undefined) updateData.metadata = body.metadata;
 
     if (Object.keys(updateData).length === 0) {
-      return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+      return NextResponse.json(
+        { error: "No fields to update" },
+        { status: 400 },
+      );
     }
 
     const { data: visit, error } = await supabase
-      .from('visits')
+      .from("visits")
       .update(updateData)
-      .eq('id', visitId)
-      .eq('user_id', userId)
+      .eq("id", visitId)
+      .eq("user_id", userId)
       .select()
       .single();
 
     if (error) {
-      console.error('Error updating visit:', error);
-      return NextResponse.json({ error: 'Failed to update visit' }, { status: 500 });
+      console.error("Error updating visit:", error);
+      return NextResponse.json(
+        { error: "Failed to update visit" },
+        { status: 500 },
+      );
     }
 
     if (!visit) {
-      return NextResponse.json({ error: 'Visit not found' }, { status: 404 });
+      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
     return NextResponse.json(visit as Encounter);
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error('Visit update error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Visit update error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
@@ -116,51 +134,60 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const { encounterId: visitId } = await params;
 
     const searchParams = request.nextUrl.searchParams;
-    const hardDelete = searchParams.get('hard') === 'true';
+    const hardDelete = searchParams.get("hard") === "true";
 
     if (hardDelete) {
       // Get audio path first to clean up storage
       const { data: visit } = await supabase
-        .from('visits')
-        .select('audio_path')
-        .eq('id', visitId)
-        .eq('user_id', userId)
+        .from("visits")
+        .select("audio_path")
+        .eq("id", visitId)
+        .eq("user_id", userId)
         .single();
 
       // Delete from storage if audio exists
       if (visit?.audio_path) {
-        await supabase.storage.from('audio').remove([visit.audio_path]);
+        await supabase.storage.from("audio").remove([visit.audio_path]);
       }
 
       // Hard delete (will cascade to chunks)
       const { error } = await supabase
-        .from('visits')
+        .from("visits")
         .delete()
-        .eq('id', visitId)
-        .eq('user_id', userId);
+        .eq("id", visitId)
+        .eq("user_id", userId);
 
       if (error) {
-        console.error('Error deleting visit:', error);
-        return NextResponse.json({ error: 'Failed to delete visit' }, { status: 500 });
+        console.error("Error deleting visit:", error);
+        return NextResponse.json(
+          { error: "Failed to delete visit" },
+          { status: 500 },
+        );
       }
     } else {
       // Soft delete (archive)
       const { error } = await supabase
-        .from('visits')
-        .update({ status: 'archived' })
-        .eq('id', visitId)
-        .eq('user_id', userId);
+        .from("visits")
+        .update({ status: "archived" })
+        .eq("id", visitId)
+        .eq("user_id", userId);
 
       if (error) {
-        console.error('Error archiving visit:', error);
-        return NextResponse.json({ error: 'Failed to archive visit' }, { status: 500 });
+        console.error("Error archiving visit:", error);
+        return NextResponse.json(
+          { error: "Failed to archive visit" },
+          { status: 500 },
+        );
       }
     }
 
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error('Visit delete error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("Visit delete error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

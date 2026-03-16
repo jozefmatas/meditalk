@@ -31,7 +31,12 @@ type Story = StoryObj<typeof meta>;
 const invoices = [
   { id: "INV001", status: "Paid", method: "Credit Card", amount: "$250.00" },
   { id: "INV002", status: "Pending", method: "PayPal", amount: "$150.00" },
-  { id: "INV003", status: "Unpaid", method: "Bank Transfer", amount: "$350.00" },
+  {
+    id: "INV003",
+    status: "Unpaid",
+    method: "Bank Transfer",
+    amount: "$350.00",
+  },
 ];
 
 export const Default: Story = {
@@ -64,7 +69,10 @@ const files = [
   { name: "report.pdf", type: "application/pdf" },
   { name: "scan-results.jpg", type: "image/jpeg" },
   { name: "notes.txt", type: "text/plain" },
-  { name: "very-long-filename-that-should-truncate.pdf", type: "application/pdf" },
+  {
+    name: "very-long-filename-that-should-truncate.pdf",
+    type: "application/pdf",
+  },
   { name: "AUD-20260310-WA0006.ogg", type: "audio/ogg" },
 ];
 
@@ -80,7 +88,9 @@ export const Compact: Story = {
               <TableCell>
                 <div className="flex min-w-0 items-center gap-1">
                   <HugeiconsIcon
-                    icon={file.type.startsWith("audio/") ? Mic01Icon : File01Icon}
+                    icon={
+                      file.type.startsWith("audio/") ? Mic01Icon : File01Icon
+                    }
                     size={14}
                     className="shrink-0 text-muted-foreground"
                   />

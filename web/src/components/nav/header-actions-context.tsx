@@ -12,8 +12,13 @@ const HeaderActionsContext = createContext<HeaderActionsContextValue>({
   setHeaderActions: () => {},
 });
 
-export function HeaderActionsProvider({ children }: { children: React.ReactNode }) {
-  const [headerActions, setHeaderActionsState] = useState<React.ReactNode | null>(null);
+export function HeaderActionsProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [headerActions, setHeaderActionsState] =
+    useState<React.ReactNode | null>(null);
   const setHeaderActions = useCallback((actions: React.ReactNode | null) => {
     setHeaderActionsState(actions);
   }, []);

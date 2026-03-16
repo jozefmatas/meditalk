@@ -17,10 +17,8 @@ type ButtonProps = React.ComponentProps<typeof GeneratedButton>;
  */
 const variantFixes: Partial<Record<string, string>> = {
   default: "hover:bg-primary/90",
-  outline:
-    "hover:bg-accent aria-expanded:bg-accent",
-  ghost:
-    "hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent/50",
+  outline: "hover:bg-accent aria-expanded:bg-accent",
+  ghost: "hover:bg-accent aria-expanded:bg-accent dark:hover:bg-accent/50",
 };
 
 /** default & lg → size-5 icons; all others → size-4 (overrides generated xs/sm smaller defaults) */
@@ -32,17 +30,29 @@ const sizeFixes: Partial<Record<string, string>> = {
   lg: "px-4",
 };
 
-function Button({ variant = "default", size = "default", className, ...props }: ButtonProps) {
+function Button({
+  variant = "default",
+  size = "default",
+  className,
+  ...props
+}: ButtonProps) {
   const fix = variant ? variantFixes[variant] : undefined;
   const sFix = size ? sizeFixes[size] : undefined;
-  const iconFix = size === "default" || size === "lg" || size === "icon" || size === "icon-lg"
-    ? iconSize5
-    : iconSize4;
+  const iconFix =
+    size === "default" || size === "lg" || size === "icon" || size === "icon-lg"
+      ? iconSize5
+      : iconSize4;
   return (
     <GeneratedButton
       variant={variant}
       size={size}
-      className={cn("rounded-lg disabled:pointer-events-auto disabled:cursor-not-allowed", fix, sFix, iconFix, className)}
+      className={cn(
+        "rounded-lg disabled:pointer-events-auto disabled:cursor-not-allowed",
+        fix,
+        sFix,
+        iconFix,
+        className,
+      )}
       {...props}
     />
   );

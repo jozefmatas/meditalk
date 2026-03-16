@@ -1,1 +1,5 @@
-export { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/generated/ui/collapsible";
+export {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/generated/ui/collapsible";

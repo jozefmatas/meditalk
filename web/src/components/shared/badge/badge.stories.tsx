@@ -71,7 +71,9 @@ export const AllBaseVariants: Story = {
       <Badge variant="destructive">Destructive</Badge>
       <Badge variant="outline">Outline</Badge>
       <Badge variant="ghost">Ghost</Badge>
-      <Badge variant="link">Open Link <HugeiconsIcon icon={ArrowUpRight01Icon} /></Badge>
+      <Badge variant="link">
+        Open Link <HugeiconsIcon icon={ArrowUpRight01Icon} />
+      </Badge>
     </div>
   ),
 };
@@ -124,7 +126,9 @@ export const AllVariants: Story = {
           <Badge variant="destructive">Destructive</Badge>
           <Badge variant="outline">Outline</Badge>
           <Badge variant="ghost">Ghost</Badge>
-          <Badge variant="link">Open Link <HugeiconsIcon icon={ArrowUpRight01Icon} /></Badge>
+          <Badge variant="link">
+            Open Link <HugeiconsIcon icon={ArrowUpRight01Icon} />
+          </Badge>
         </div>
       </div>
       <div>

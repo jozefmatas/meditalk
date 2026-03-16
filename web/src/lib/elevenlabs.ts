@@ -1,5 +1,5 @@
-import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
-import { logUsage, type UsageContext } from './usage';
+import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { logUsage, type UsageContext } from "./usage";
 
 let _client: ElevenLabsClient | null = null;
 function elevenlabs() {
@@ -17,7 +17,7 @@ function elevenlabs() {
 export async function transcribeAudio(
   file: File | Buffer,
   filename: string,
-  ctx?: UsageContext
+  ctx?: UsageContext,
 ): Promise<string> {
   const blob =
     file instanceof File
@@ -26,18 +26,20 @@ export async function transcribeAudio(
 
   const result = await elevenlabs().speechToText.convert({
     file: blob,
-    modelId: 'scribe_v2',
+    modelId: "scribe_v2",
   });
 
   if (ctx) {
     const lastWord = result.words?.[result.words.length - 1];
-    const durationSeconds = lastWord?.end ?? (file instanceof File ? file.size : file.byteLength) / 16000;
+    const durationSeconds =
+      lastWord?.end ??
+      (file instanceof File ? file.size : file.byteLength) / 16000;
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'elevenlabs',
-      model: 'scribe_v2',
-      operation: 'transcribe',
+      provider: "elevenlabs",
+      model: "scribe_v2",
+      operation: "transcribe",
       durationSeconds,
     });
   }
@@ -51,14 +53,14 @@ export async function transcribeAudio(
  */
 export async function generateScribeToken(): Promise<string> {
   const response = await fetch(
-    'https://api.elevenlabs.io/v1/speech-to-text/realtime/token',
+    "https://api.elevenlabs.io/v1/speech-to-text/realtime/token",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'xi-api-key': process.env.ELEVENLABS_API_KEY!,
-        'Content-Type': 'application/json',
+        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "Content-Type": "application/json",
       },
-    }
+    },
   );
 
   if (!response.ok) {

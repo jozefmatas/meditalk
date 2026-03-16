@@ -1,9 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
-import { PDFParse } from 'pdf-parse';
-import { transcribeAudio } from './elevenlabs';
-import type { SupportedLanguage } from './types';
-import { logUsage, type UsageContext } from './usage';
+import Anthropic from "@anthropic-ai/sdk";
+import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
+import { PDFParse } from "pdf-parse";
+import { transcribeAudio } from "./elevenlabs";
+import type { SupportedLanguage } from "./types";
+import { logUsage, type UsageContext } from "./usage";
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -12,9 +12,9 @@ function anthropic() {
 }
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  en: 'English',
-  sk: 'Slovak',
-  cs: 'Czech',
+  en: "English",
+  sk: "Slovak",
+  cs: "Czech",
 };
 
 /**
@@ -34,15 +34,15 @@ export async function extractTextFromFile(
   ctx?: UsageContext,
 ): Promise<string | null> {
   try {
-    if (mimeType === 'application/pdf') {
+    if (mimeType === "application/pdf") {
       return await extractFromPdf(buffer, language, ctx);
     }
 
-    if (mimeType.startsWith('image/')) {
+    if (mimeType.startsWith("image/")) {
       return await extractFromImage(buffer, mimeType, language, ctx);
     }
 
-    if (mimeType.startsWith('audio/')) {
+    if (mimeType.startsWith("audio/")) {
       return await extractFromAudio(buffer, filename, ctx);
     }
 
@@ -72,7 +72,7 @@ async function extractFromPdf(
   }
 
   // Scanned PDF — fall back to Claude document API
-  const base64 = buffer.toString('base64');
+  const base64 = buffer.toString("base64");
   return await ocrPdfWithClaude(base64, language, ctx);
 }
 
@@ -85,10 +85,10 @@ async function extractFromImage(
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  const base64 = buffer.toString('base64');
+  const base64 = buffer.toString("base64");
   return await ocrImageWithClaude(
     base64,
-    mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+    mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
     language,
     ctx,
   );
@@ -116,45 +116,45 @@ function ocrPrompt(language: SupportedLanguage): string {
  */
 async function ocrImageWithClaude(
   base64Data: string,
-  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+  mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
   const content: ContentBlockParam[] = [
     {
-      type: 'image',
+      type: "image",
       source: {
-        type: 'base64',
+        type: "base64",
         media_type: mediaType,
         data: base64Data,
       },
     },
     {
-      type: 'text',
+      type: "text",
       text: ocrPrompt(language),
     },
   ];
 
   const response = await anthropic().messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
-    messages: [{ role: 'user', content }],
+    messages: [{ role: "user", content }],
   });
 
   if (ctx) {
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-5-20250929',
-      operation: 'ocr_image',
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      operation: "ocr_image",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
   }
 
   const text =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+    response.content[0].type === "text" ? response.content[0].text : "";
   return text?.trim() || null;
 }
 
@@ -168,38 +168,38 @@ async function ocrPdfWithClaude(
 ): Promise<string | null> {
   const content: ContentBlockParam[] = [
     {
-      type: 'document',
+      type: "document",
       source: {
-        type: 'base64',
-        media_type: 'application/pdf',
+        type: "base64",
+        media_type: "application/pdf",
         data: base64Data,
       },
     },
     {
-      type: 'text',
+      type: "text",
       text: ocrPrompt(language),
     },
   ];
 
   const response = await anthropic().messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
-    messages: [{ role: 'user', content }],
+    messages: [{ role: "user", content }],
   });
 
   if (ctx) {
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-5-20250929',
-      operation: 'ocr_pdf',
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      operation: "ocr_pdf",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
   }
 
   const text =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+    response.content[0].type === "text" ? response.content[0].text : "";
   return text?.trim() || null;
 }

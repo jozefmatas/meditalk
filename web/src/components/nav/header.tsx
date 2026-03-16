@@ -33,7 +33,9 @@ export function Header() {
   const { headerActions } = useHeaderActions();
 
   const buildBreadcrumbs = (): BreadcrumbData[] => {
-    const cleanPath = pathname.replace(/^\/(sk|cs|en)(?=\/|$)/, "").replace(/^\//, "");
+    const cleanPath = pathname
+      .replace(/^\/(sk|cs|en)(?=\/|$)/, "")
+      .replace(/^\//, "");
     const segments = cleanPath.split("/").filter(Boolean);
 
     if (segments[0] === "encounters") {
@@ -98,9 +100,7 @@ export function Header() {
         </BreadcrumbList>
       </Breadcrumb>
       {headerActions && (
-        <div className="ml-auto flex items-center gap-2">
-          {headerActions}
-        </div>
+        <div className="ml-auto flex items-center gap-2">{headerActions}</div>
       )}
     </header>
   );

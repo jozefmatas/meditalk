@@ -4,9 +4,7 @@ import * as React from "react";
 import { Slot } from "radix-ui";
 import { cn } from "@/lib/utils";
 
-import {
-  BreadcrumbSeparator as GeneratedBreadcrumbSeparator,
-} from "@/components/generated/ui/breadcrumb";
+import { BreadcrumbSeparator as GeneratedBreadcrumbSeparator } from "@/components/generated/ui/breadcrumb";
 
 export {
   Breadcrumb,
@@ -42,7 +40,7 @@ function BreadcrumbLink({
       data-slot="breadcrumb-link"
       className={cn(
         "text-foreground/65 transition-colors hover:text-foreground",
-        className
+        className,
       )}
       {...props}
     />

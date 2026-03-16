@@ -51,7 +51,10 @@ describe("useSidebarEncounters", () => {
   });
 
   it("fetches visits on mount", async () => {
-    const visits = [makeVisit({ title: "Visit 1" }), makeVisit({ title: "Visit 2" })];
+    const visits = [
+      makeVisit({ title: "Visit 1" }),
+      makeVisit({ title: "Visit 2" }),
+    ];
     mockFetchResponse({ encounters: visits, total: 2, page: 1, limit: 20 });
 
     const { result } = renderHook(() => useSidebarEncounters());
@@ -66,7 +69,7 @@ describe("useSidebarEncounters", () => {
     expect(result.current.visits[0].title).toBe("Visit 1");
     expect(result.current.hasMore).toBe(false);
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/api/encounters?")
+      expect.stringContaining("/api/encounters?"),
     );
   });
 

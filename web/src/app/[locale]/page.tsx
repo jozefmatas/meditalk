@@ -3,11 +3,22 @@
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/shared/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/shared/card";
 import { Button } from "@/components/shared/button";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, Folder01Icon, Tick02Icon, FileEditIcon, Loading03Icon } from "@hugeicons/core-free-icons";
+import {
+  Add01Icon,
+  Folder01Icon,
+  Tick02Icon,
+  FileEditIcon,
+  Loading03Icon,
+} from "@hugeicons/core-free-icons";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import type { EncounterListResponse } from "@/lib/types";
 
@@ -57,7 +68,9 @@ export default function DashboardPage() {
     <AppShell>
       <div className="max-w-4xl space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("welcome")}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {t("welcome")}
+          </h1>
         </div>
 
         {/* Stats cards */}
@@ -67,7 +80,11 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {tEncounters("title")}
               </CardTitle>
-              <HugeiconsIcon icon={Folder01Icon} size={16} className="text-muted-foreground" />
+              <HugeiconsIcon
+                icon={Folder01Icon}
+                size={16}
+                className="text-muted-foreground"
+              />
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -83,7 +100,11 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {tEncounters("status.started")}
               </CardTitle>
-              <HugeiconsIcon icon={FileEditIcon} size={16} className="text-muted-foreground" />
+              <HugeiconsIcon
+                icon={FileEditIcon}
+                size={16}
+                className="text-muted-foreground"
+              />
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -99,13 +120,19 @@ export default function DashboardPage() {
               <CardTitle className="text-sm font-medium text-muted-foreground">
                 {tEncounters("status.completed")}
               </CardTitle>
-              <HugeiconsIcon icon={Tick02Icon} size={16} className="text-muted-foreground" />
+              <HugeiconsIcon
+                icon={Tick02Icon}
+                size={16}
+                className="text-muted-foreground"
+              />
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <Skeleton className="h-8 w-16" />
               ) : (
-                <div className="text-2xl font-bold">{stats?.completed ?? 0}</div>
+                <div className="text-2xl font-bold">
+                  {stats?.completed ?? 0}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -116,11 +143,17 @@ export default function DashboardPage() {
           <CardContent className="flex items-center justify-between py-6">
             <div>
               <h3 className="font-medium">{tNav("newEncounter")}</h3>
-              <p className="text-sm text-muted-foreground">{tEncounters("empty.description")}</p>
+              <p className="text-sm text-muted-foreground">
+                {tEncounters("empty.description")}
+              </p>
             </div>
             <Button onClick={() => createEncounter()} disabled={isCreating}>
               {isCreating ? (
-                <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin" />
+                <HugeiconsIcon
+                  icon={Loading03Icon}
+                  size={16}
+                  className="animate-spin"
+                />
               ) : (
                 <HugeiconsIcon icon={Add01Icon} size={16} />
               )}

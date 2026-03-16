@@ -103,7 +103,11 @@ function TabsLineWithAction({
   );
 
   return (
-    <Tabs value={value} onValueChange={onValueChange} className={cn("gap-6", className)}>
+    <Tabs
+      value={value}
+      onValueChange={onValueChange}
+      className={cn("gap-6", className)}
+    >
       <div className="flex items-center gap-1 border-b border-border">
         <TabsList variant="line">
           {tabs.map((tab) => (
@@ -127,7 +131,10 @@ function TabsLineWithAction({
         {hiddenTabs.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="text-foreground/65 hover:text-foreground">
+              <Button
+                variant="ghost"
+                className="text-foreground/65 hover:text-foreground"
+              >
                 + {actionLabel}
               </Button>
             </DropdownMenuTrigger>

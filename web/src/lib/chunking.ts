@@ -9,7 +9,7 @@
 export function chunkText(
   text: string,
   chunkSize = 1000,
-  overlap = 200
+  overlap = 200,
 ): string[] {
   if (!text.trim()) return [];
 
@@ -20,7 +20,7 @@ export function chunkText(
   const parts = sentences ?? splitByWords(text, chunkSize);
 
   const chunks: string[] = [];
-  let current = '';
+  let current = "";
 
   for (const part of parts) {
     // If a single part exceeds chunkSize, split it by words
@@ -66,10 +66,10 @@ function getOverlap(text: string, overlap: number): string {
 function splitByWords(text: string, maxLen: number): string[] {
   const words = text.split(/\s+/);
   const segments: string[] = [];
-  let current = '';
+  let current = "";
 
   for (const word of words) {
-    const candidate = current ? current + ' ' + word : word;
+    const candidate = current ? current + " " + word : word;
     if (candidate.length > maxLen && current) {
       segments.push(current);
       current = word;

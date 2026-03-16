@@ -1,19 +1,19 @@
-'use client';
+"use client";
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from "react";
 
 function getSupportedMimeType(): string {
   const types = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-    'audio/mp4',
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
   ];
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
-  return 'audio/mp4';
+  return "audio/mp4";
 }
 
 export function useAudioRecorder() {
@@ -32,56 +32,61 @@ export function useAudioRecorder() {
    * Start recording from a given MediaStream (e.g. from LiveWaveform's onStreamReady).
    * If no stream is provided, requests the microphone directly.
    */
-  const start = useCallback(async (externalStream?: MediaStream) => {
-    try {
-      setError(null);
-      setAudioBlob(null);
-      setDuration(0);
+  const start = useCallback(
+    async (externalStream?: MediaStream) => {
+      try {
+        setError(null);
+        setAudioBlob(null);
+        setDuration(0);
 
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
-        setAudioUrl(null);
+        if (audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+          setAudioUrl(null);
+        }
+
+        const stream =
+          externalStream ??
+          (await navigator.mediaDevices.getUserMedia({ audio: true }));
+        streamRef.current = externalStream ? null : stream; // only own streams we created
+
+        const mimeType = getSupportedMimeType();
+        const recorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorderRef.current = recorder;
+        chunksRef.current = [];
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            chunksRef.current.push(e.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          const blob = new Blob(chunksRef.current, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          setAudioBlob(blob);
+          setAudioUrl(url);
+
+          // Only stop tracks we own (not external streams)
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+          }
+        };
+
+        recorder.start(1000);
+        setIsRecording(true);
+
+        // Duration timer
+        const startTime = Date.now();
+        timerRef.current = setInterval(() => {
+          setDuration(Math.floor((Date.now() - startTime) / 1000));
+        }, 1000);
+      } catch {
+        setError("microphone_error");
       }
-
-      const stream = externalStream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = externalStream ? null : stream; // only own streams we created
-
-      const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        setAudioBlob(blob);
-        setAudioUrl(url);
-
-        // Only stop tracks we own (not external streams)
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
-      };
-
-      recorder.start(1000);
-      setIsRecording(true);
-
-      // Duration timer
-      const startTime = Date.now();
-      timerRef.current = setInterval(() => {
-        setDuration(Math.floor((Date.now() - startTime) / 1000));
-      }, 1000);
-    } catch {
-      setError('microphone_error');
-    }
-  }, [audioUrl]);
+    },
+    [audioUrl],
+  );
 
   const stop = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {

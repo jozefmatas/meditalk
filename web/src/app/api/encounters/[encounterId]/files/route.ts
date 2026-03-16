@@ -33,7 +33,7 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     if (err instanceof Response) return err;
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -63,14 +63,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const uploadedFiles = formData.getAll("files") as File[];
 
     if (uploadedFiles.length === 0) {
-      return NextResponse.json(
-        { error: "No files provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
     const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const existingFiles = ((meta.files ?? []) as Record<string, unknown>[]);
+    const existingFiles = (meta.files ?? []) as Record<string, unknown>[];
     const newFiles: Record<string, unknown>[] = [];
 
     for (const file of uploadedFiles) {
@@ -113,7 +110,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     if (updateError) {
       return NextResponse.json(
         { error: "Failed to update metadata" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -123,7 +120,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     console.error("File upload error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -139,10 +136,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const fileId = request.nextUrl.searchParams.get("fileId");
 
     if (!fileId) {
-      return NextResponse.json(
-        { error: "fileId required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "fileId required" }, { status: 400 });
     }
 
     const { data: visit, error: visitError } = await supabase
@@ -157,10 +151,8 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const files = ((meta.files ?? []) as Record<string, unknown>[]);
-    const fileToDelete = files.find(
-      (f) => f.id === fileId
-    );
+    const files = (meta.files ?? []) as Record<string, unknown>[];
+    const fileToDelete = files.find((f) => f.id === fileId);
 
     if (!fileToDelete) {
       return NextResponse.json({ error: "File not found" }, { status: 404 });
@@ -187,7 +179,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     console.error("File delete error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
