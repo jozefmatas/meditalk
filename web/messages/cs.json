@@ -127,6 +127,15 @@
       "patientName": "Jméno",
       "personalId": "Rodné číslo",
       "codes": "Kódy",
+      "icdSelected": "Vybrané",
+      "icdSuggested": "Navrhované",
+      "icdSaved": "Uložené",
+      "icdSearchPlaceholder": "Hledat...",
+      "icdSearching": "Hledá se...",
+      "icdNoResults": "Žádné kódy nenalezeny",
+      "icdNoSuggestions": "Vygenerujte zprávu pro návrhy",
+      "icdAllSelected": "Všechny navrhované kódy vybrány",
+      "icdSavedEmpty": "Zatím žádné uložené kódy",
       "transcribing": "Přepisuje se..."
     },
     "delete": {

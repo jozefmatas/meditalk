@@ -49,7 +49,7 @@ export async function runClinicalAnalysis(
   const allIcdHints = [
     ...new Set(CLINICAL_CONCEPTS.flatMap((c) => c.icdHints)),
   ];
-  const icdReference = buildIcdReferenceForConcepts(allIcdHints, 5);
+  const icdReference = buildIcdReferenceForConcepts(allIcdHints, 5, language);
 
   const regionalRef = buildRegionalTermsReference(language);
   const conceptRef = buildConceptTriggersReference(language);

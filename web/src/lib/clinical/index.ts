@@ -5,6 +5,8 @@ export {
   buildIcdReferenceForConcepts,
   getIcdDescription,
   isValidIcdCode,
+  searchIcd,
+  resolveIcdCodes,
 } from "./icd-index";
 export type {
   ClinicalAnalysis,

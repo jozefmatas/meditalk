@@ -74,7 +74,7 @@ export function TiptapEditor({
   return (
     <div
       className={cn(
-        "rounded-lg border bg-background transition-colors focus-within:border-ring focus-within:bg-accent",
+        "rounded-lg border bg-background transition-colors hover:border-ring focus-within:border-ring focus-within:bg-accent",
         className,
       )}
       onClick={() => {

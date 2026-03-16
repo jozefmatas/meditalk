@@ -51,6 +51,12 @@ export function useEncounterGeneration({
 
   const initialDoctorNotesRef = useRef("");
 
+  // Client-side cache: templateId → { generatedNote, letter }
+  // Enables instant switching between previously generated templates
+  const templateCacheRef = useRef<
+    Map<string, { generatedNote: string; letter: string }>
+  >(new Map());
+
   // Stable refs for callbacks
   const updateTitleRef = useRef(updateTitle);
   updateTitleRef.current = updateTitle;
@@ -338,10 +344,47 @@ export function useEncounterGeneration({
       if (!visitId || newTemplateId === selectedTemplateId || isRegenerating)
         return;
 
+      // Cache current template's note before switching
+      if (visit?.soap_note) {
+        templateCacheRef.current.set(selectedTemplateId, {
+          generatedNote: visit.soap_note,
+          letter: visit.patient_letter || "",
+        });
+      }
+
+      setSelectedTemplateId(newTemplateId);
+
+      // Instant restore from cache if target template was previously generated
+      const cached = templateCacheRef.current.get(newTemplateId);
+      if (cached) {
+        setGeneratedNoteHtml(cached.generatedNote);
+        setVisit((prev) =>
+          prev
+            ? {
+                ...prev,
+                soap_note: cached.generatedNote,
+                patient_letter: cached.letter,
+              }
+            : prev,
+        );
+        // Persist template switch + restored note to DB
+        const meta = (visit?.metadata || {}) as Record<string, unknown>;
+        fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            soap_note: cached.generatedNote,
+            patient_letter: cached.letter,
+            metadata: { ...meta, template_id: newTemplateId },
+          }),
+        }).catch(() => {});
+        return;
+      }
+
+      // No cache — proceed with streaming regeneration
       setIsRegenerating(true);
       setStreamedSections([]);
       setError(null);
-      setSelectedTemplateId(newTemplateId);
 
       // Persist template choice
       if (visit) {
@@ -401,6 +444,11 @@ export function useEncounterGeneration({
                   { id: event.id, title: event.title, content: event.content },
                 ]);
               } else if (event.type === "complete") {
+                // Cache the newly generated note
+                templateCacheRef.current.set(newTemplateId, {
+                  generatedNote: event.generatedNote,
+                  letter: event.letter || "",
+                });
                 setGeneratedNoteHtml(event.generatedNote);
                 setVisit((prev) =>
                   prev
@@ -455,6 +503,12 @@ export function useEncounterGeneration({
     }
     if (data.soap_note) {
       setGeneratedNoteHtml(data.soap_note);
+      // Seed cache with the initially loaded template's note
+      const tid = (meta?.template_id as string) || getDefaultTemplate().id;
+      templateCacheRef.current.set(tid, {
+        generatedNote: data.soap_note,
+        letter: data.patient_letter || "",
+      });
     }
   }, []);
 

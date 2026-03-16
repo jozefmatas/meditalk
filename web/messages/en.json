@@ -127,6 +127,15 @@
       "patientName": "Name",
       "personalId": "Personal identification number",
       "codes": "Codes",
+      "icdSelected": "Selected",
+      "icdSuggested": "Suggested",
+      "icdSaved": "Saved",
+      "icdSearchPlaceholder": "Search...",
+      "icdSearching": "Searching...",
+      "icdNoResults": "No codes found",
+      "icdNoSuggestions": "Generate a note to get suggestions",
+      "icdAllSelected": "All suggested codes selected",
+      "icdSavedEmpty": "No saved codes yet",
       "transcribing": "Transcribing..."
     },
     "delete": {

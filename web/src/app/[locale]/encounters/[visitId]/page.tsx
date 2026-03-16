@@ -8,7 +8,7 @@ import { usePageTitle } from "@/components/nav/page-title-context";
 import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
 import { FilesPanel } from "@/components/encounters/files-panel";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
-import { PatientPanel } from "@/components/encounters/patient-panel";
+import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
 import { ReviewView } from "@/components/encounters/review-view";
 import { Alert, AlertDescription } from "@/components/shared/alert";
@@ -353,12 +353,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
             onAudioBlobReady={(blob) => generation.setAudioBlob(blob)}
           />
         ) : (
-          <PatientPanel
-            patientName={metadata.patientName}
-            patientId={metadata.patientId}
-            onPatientNameChange={metadata.setPatientName}
-            onPatientIdChange={metadata.setPatientId}
-            onBlur={metadata.handlePatientBlur}
+          <IcdPanel
+            visit={data.visit}
+            setVisit={data.setVisit}
           />
         ))}
     </AppShell>

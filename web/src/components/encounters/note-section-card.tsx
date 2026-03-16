@@ -67,7 +67,7 @@ function InlineEditor({
     immediatelyRender: false,
     onBlur: ({ editor }) => {
       if (!onContentChange) return;
-      const text = editor.getText().trim();
+      const text = editor.getText({ blockSeparator: "\n" }).trim();
       if (text !== lastEmittedRef.current) {
         lastEmittedRef.current = text;
         onContentChange(sectionId, text);

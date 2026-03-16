@@ -17,6 +17,14 @@ import {
 } from "@/lib/clinical";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
+import { parseNoteToSectionMap } from "@/lib/parse-soap-sections";
+
+const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
+  en: "English",
+  sk: "Slovak",
+  cs: "Czech",
+};
 
 /**
  * Streaming regeneration endpoint.
@@ -56,7 +64,7 @@ export async function POST(request: NextRequest) {
     // Fetch visit metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("id, language, metadata")
+      .select("id, language, metadata, soap_note, patient_letter")
       .eq("id", visitId)
       .single();
 
@@ -122,41 +130,99 @@ export async function POST(request: NextRequest) {
       sectionLabels[id] = templateSections[id] || id;
     }
 
-    // Pass 1: Clinical analysis (non-fatal)
+    // Determine generation path: fast reformat vs full generation
+    const existingNote = visit.soap_note as string | null;
+    const oldTemplateId = (visitMeta.template_id as string) || null;
+    const oldTemplate = oldTemplateId ? getTemplateById(oldTemplateId) : null;
+
     let clinicalAnalysis: ClinicalAnalysis | null = null;
-    if (chunkContents.length > 0) {
-      try {
-        clinicalAnalysis = await runClinicalAnalysis(chunkContents, language, {
-          userId,
-          visitId,
-        });
-      } catch (analysisErr) {
-        console.warn(
-          "Clinical analysis failed, proceeding without enrichment:",
-          analysisErr,
-        );
+    const cachedAnalysis = visitMeta.clinical_analysis as
+      | Record<string, unknown>
+      | undefined;
+
+    let streamModel: string;
+    let systemPrompt: string;
+    let userMessage: string;
+    let reuseLetterFromVisit = false;
+
+    if (existingNote && oldTemplate && oldTemplateId !== template.id) {
+      // ─── FAST PATH: Reformat existing note with Haiku ───
+      const sectionMap = parseNoteToSectionMap(existingNote, oldTemplate);
+      reuseLetterFromVisit = true;
+
+      const currentSections = Object.entries(sectionMap)
+        .filter(([, content]) => content.trim())
+        .map(([id, content]) => `[${id}]: ${content}`)
+        .join("\n\n");
+
+      const notStated = NOT_STATED[language];
+      const langLabel = LANGUAGE_LABELS[language];
+      const sectionList = allIds
+        .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
+        .join("\n");
+
+      streamModel = HAIKU_MODEL;
+
+      systemPrompt = `You reorganize medical documentation between template formats.
+Rules:
+1. Preserve ALL clinical information. Do not omit any details from the source.
+2. Preserve the EXACT tone, voice, and writing style of the original note. Do not rephrase, simplify, or embellish — copy the wording verbatim where it fits and only restructure when necessary to fit a different section.
+3. Write in ${langLabel}, except medical terms.
+4. Sections with no relevant content: "${notStated}".
+5. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}`;
+
+      userMessage = `CURRENT NOTE SECTIONS:\n\n${currentSections}\n\nReorganize into these target template sections:\n${sectionList}\n\nReturn valid JSON.`;
+
+      // Load cached analysis for the SSE event (not used in prompt)
+      if (cachedAnalysis?.inferredSpecialty) {
+        clinicalAnalysis = {
+          ...cachedAnalysis,
+          usage: { inputTokens: 0, outputTokens: 0 },
+        } as ClinicalAnalysis;
       }
+    } else {
+      // ─── FULL PATH: Generate from transcript with Opus ───
+      streamModel = GENERATION_MODEL;
+
+      if (cachedAnalysis?.inferredSpecialty) {
+        clinicalAnalysis = {
+          ...cachedAnalysis,
+          usage: { inputTokens: 0, outputTokens: 0 },
+        } as ClinicalAnalysis;
+      } else if (chunkContents.length > 0) {
+        try {
+          clinicalAnalysis = await runClinicalAnalysis(
+            chunkContents,
+            language,
+            { userId, visitId },
+          );
+        } catch (analysisErr) {
+          console.warn(
+            "Clinical analysis failed, proceeding without enrichment:",
+            analysisErr,
+          );
+        }
+      }
+
+      const baseSystemPrompt = buildTemplateSystemPrompt(
+        template,
+        language,
+        sectionLabels,
+      );
+      systemPrompt = clinicalAnalysis
+        ? buildEnrichedSystemPrompt(baseSystemPrompt, clinicalAnalysis)
+        : baseSystemPrompt;
+      userMessage = buildTemplateUserMessage(
+        chunkContents,
+        template,
+        doctorNotes,
+        fileTexts,
+      );
     }
 
-    // Build prompts (enriched with clinical analysis if available)
-    const baseSystemPrompt = buildTemplateSystemPrompt(
-      template,
-      language,
-      sectionLabels,
-    );
-    const systemPrompt = clinicalAnalysis
-      ? buildEnrichedSystemPrompt(baseSystemPrompt, clinicalAnalysis)
-      : baseSystemPrompt;
-    const userMessage = buildTemplateUserMessage(
-      chunkContents,
-      template,
-      doctorNotes,
-      fileTexts,
-    );
-
-    // Stream Anthropic response (Opus 4.6)
+    // Stream Anthropic response
     const stream = anthropic().messages.stream({
-      model: GENERATION_MODEL,
+      model: streamModel,
       max_tokens: 8192,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
@@ -266,15 +332,25 @@ export async function POST(request: NextRequest) {
             return;
           }
 
-          const letter =
-            typeof parsed.letter === "string"
-              ? parsed.letter
-              : JSON.stringify(parsed.letter || "");
-          delete parsed.letter;
+          let letter: string;
+          let suggestedTitle: string;
 
-          const suggestedTitle =
-            typeof parsed.title === "string" ? parsed.title : "";
-          delete parsed.title;
+          if (reuseLetterFromVisit) {
+            // Reformat path — keep existing letter and title
+            letter = (visit.patient_letter as string) || "";
+            suggestedTitle = "";
+            delete parsed.letter;
+            delete parsed.title;
+          } else {
+            letter =
+              typeof parsed.letter === "string"
+                ? parsed.letter
+                : JSON.stringify(parsed.letter || "");
+            delete parsed.letter;
+            suggestedTitle =
+              typeof parsed.title === "string" ? parsed.title : "";
+            delete parsed.title;
+          }
 
           const notStated = NOT_STATED[language];
           const sectionContents: Record<string, string> = {};
@@ -325,8 +401,10 @@ export async function POST(request: NextRequest) {
             userId,
             visitId,
             provider: "anthropic",
-            model: GENERATION_MODEL,
-            operation: "generate_template",
+            model: streamModel,
+            operation: reuseLetterFromVisit
+              ? "reformat_template"
+              : "generate_template",
             inputTokens,
             outputTokens,
           });

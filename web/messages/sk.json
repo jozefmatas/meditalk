@@ -127,6 +127,15 @@
       "patientName": "Meno",
       "personalId": "Rodné číslo",
       "codes": "Kódy",
+      "icdSelected": "Vybrané",
+      "icdSuggested": "Navrhované",
+      "icdSaved": "Uložené",
+      "icdSearchPlaceholder": "Hľadať...",
+      "icdSearching": "Hľadá sa...",
+      "icdNoResults": "Žiadne kódy nenájdené",
+      "icdNoSuggestions": "Vygenerujte správu pre návrhy",
+      "icdAllSelected": "Všetky navrhované kódy vybrané",
+      "icdSavedEmpty": "Zatiaľ žiadne uložené kódy",
       "transcribing": "Prepisuje sa..."
     },
     "delete": {

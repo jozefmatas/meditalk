@@ -1,1 +1,19 @@
-export { Input } from "@/components/generated/ui/input";
+"use client";
+
+import * as React from "react";
+import { Input as GeneratedInput } from "@/components/generated/ui/input";
+import { cn } from "@/lib/utils";
+
+function Input({
+  className,
+  ...props
+}: React.ComponentProps<typeof GeneratedInput>) {
+  return (
+    <GeneratedInput
+      className={cn("placeholder:text-foreground/65!", className)}
+      {...props}
+    />
+  );
+}
+
+export { Input };
