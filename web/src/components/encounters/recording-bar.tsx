@@ -62,8 +62,14 @@ function getSupportedMimeType(): string {
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
-    { disabled, onRecordingComplete, onRecordingStateChange, templateId, onTemplateChange },
-    ref
+    {
+      disabled,
+      onRecordingComplete,
+      onRecordingStateChange,
+      templateId,
+      onTemplateChange,
+    },
+    ref,
   ) {
     const t = useTranslations("encounters.detail");
 
@@ -98,7 +104,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
           const allDevices = await navigator.mediaDevices.enumerateDevices();
           const audioInputs = allDevices.filter(
-            (d) => d.kind === "audioinput" && d.deviceId !== ""
+            (d) => d.kind === "audioinput" && d.deviceId !== "",
           );
           setDevices(audioInputs);
           if (audioInputs.length > 0 && !selectedDeviceId) {
@@ -144,13 +150,16 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           },
         });
 
-        connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (msg: { text: string }) => {
-          if (msg.text) {
-            transcriptRef.current = transcriptRef.current
-              ? transcriptRef.current + " " + msg.text
-              : msg.text;
-          }
-        });
+        connection.on(
+          RealtimeEvents.COMMITTED_TRANSCRIPT,
+          (msg: { text: string }) => {
+            if (msg.text) {
+              transcriptRef.current = transcriptRef.current
+                ? transcriptRef.current + " " + msg.text
+                : msg.text;
+            }
+          },
+        );
 
         connection.on(RealtimeEvents.ERROR, (err: unknown) => {
           console.warn("[scribe] Streaming error:", err);
@@ -206,7 +215,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           return { blob, transcript };
         },
       }),
-      [buildBlob, stopScribe]
+      [buildBlob, stopScribe],
     );
 
     const startTimer = useCallback(() => {
@@ -280,7 +289,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       } catch {
         // Mic access denied — stay idle
       }
-    }, [selectedDeviceId, buildBlob, onRecordingComplete, startTimer, onRecordingStateChange, startScribe]);
+    }, [
+      selectedDeviceId,
+      buildBlob,
+      onRecordingComplete,
+      startTimer,
+      onRecordingStateChange,
+      startScribe,
+    ]);
 
     const handlePause = useCallback(() => {
       const recorder = mediaRecorderRef.current;
@@ -307,31 +323,39 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     }, [startTimer, onRecordingStateChange, startScribe, selectedDeviceId]);
 
     // Device selector element — shared between idle & paused states
-    const deviceSelector = devices.length > 1 ? (
-      <Select
-        value={selectedDeviceId}
-        onValueChange={setSelectedDeviceId}
-        disabled={state === "recording" || !!disabled}
-      >
-        <SelectTrigger variant="ghost" className="w-auto min-w-0 px-2">
-          <HugeiconsIcon icon={Mic01Icon} size={16} className="shrink-0 text-foreground" />
-          <SelectValue className="text-left truncate" />
-        </SelectTrigger>
-        <SelectContent>
-          {devices.map((device) => (
-            <SelectItem key={device.deviceId} value={device.deviceId}>
-              {device.label ||
-                `Microphone ${device.deviceId.slice(0, 5)}`}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    ) : devices.length === 1 ? (
-      <span className="truncate text-sm text-muted-foreground">
-        <HugeiconsIcon icon={Mic01Icon} size={16} className="mr-1.5 inline shrink-0 text-foreground" />
-        {devices[0].label || t("defaultMicrophone")}
-      </span>
-    ) : null;
+    const deviceSelector =
+      devices.length > 1 ? (
+        <Select
+          value={selectedDeviceId}
+          onValueChange={setSelectedDeviceId}
+          disabled={state === "recording" || !!disabled}
+        >
+          <SelectTrigger variant="ghost" className="w-auto min-w-0 px-2">
+            <HugeiconsIcon
+              icon={Mic01Icon}
+              size={16}
+              className="shrink-0 text-foreground"
+            />
+            <SelectValue className="text-left truncate" />
+          </SelectTrigger>
+          <SelectContent>
+            {devices.map((device) => (
+              <SelectItem key={device.deviceId} value={device.deviceId}>
+                {device.label || `Microphone ${device.deviceId.slice(0, 5)}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : devices.length === 1 ? (
+        <span className="truncate text-sm text-muted-foreground">
+          <HugeiconsIcon
+            icon={Mic01Icon}
+            size={16}
+            className="mr-1.5 inline shrink-0 text-foreground"
+          />
+          {devices[0].label || t("defaultMicrophone")}
+        </span>
+      ) : null;
 
     /* ── Idle: template selector (left) | mic + start button (right) ── */
     if (state === "idle") {
@@ -436,5 +460,5 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         </div>
       </div>
     );
-  }
+  },
 );

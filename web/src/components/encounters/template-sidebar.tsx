@@ -254,9 +254,10 @@ function ReviewSectionWithSubs({
 
   const isDocumented = documentedSections?.has(section.id) ?? false;
   const subCount = section.subsections?.length ?? 0;
-  const allSubsDocumented =
-    isDocumented &&
-    section.subsections?.every((sub) => documentedSections?.has(sub.id));
+  const documentedSubCount =
+    section.subsections?.filter((sub) => documentedSections?.has(sub.id))
+      .length ?? 0;
+  const allSubsDocumented = isDocumented && documentedSubCount === subCount;
 
   return (
     <div>
@@ -281,7 +282,7 @@ function ReviewSectionWithSubs({
             </span>
             <span className="section-label truncate">{sectionLabel}</span>
             <span className="ml-auto shrink-0 text-xs text-foreground/40">
-              {subCount}
+              {documentedSubCount}/{subCount}
             </span>
           </button>
         ) : (
@@ -298,7 +299,7 @@ function ReviewSectionWithSubs({
             </span>
             <span className="truncate">{sectionLabel}</span>
             <span className="ml-auto shrink-0 text-xs text-foreground/40">
-              {subCount}
+              {documentedSubCount}/{subCount}
             </span>
           </button>
         )}

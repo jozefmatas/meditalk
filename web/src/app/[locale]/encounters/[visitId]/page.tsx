@@ -1,74 +1,32 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, use, useMemo } from "react";
+import { use, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import { usePageTitle } from "@/components/nav/page-title-context";
 import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
-import { TemplateSidebar } from "@/components/encounters/template-sidebar";
-import {
-  FilesPanel,
-  type EncounterFile,
-} from "@/components/encounters/files-panel";
+import { FilesPanel } from "@/components/encounters/files-panel";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-  type TabOption,
-} from "@/components/shared/tabs";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/shared/dropdown-menu";
-import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { PatientPanel } from "@/components/encounters/patient-panel";
-import {
-  RecordingBar,
-  type RecordingBarRef,
-} from "@/components/encounters/recording-bar";
-import { Badge } from "@/components/shared/badge";
-import { Button } from "@/components/shared/button";
-import { Textarea } from "@/components/shared/textarea";
+import { DraftView } from "@/components/encounters/draft-view";
+import { ReviewView } from "@/components/encounters/review-view";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Skeleton } from "@/components/shared/skeleton";
-import { TextShimmer } from "@/components/shared/text-shimmer";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AlertCircleIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
-import {
-  TiptapEditor,
-  type Editor,
-  type SlashCommandItem,
-} from "@/components/editor/tiptap-editor";
-import {
-  getDefaultTemplate,
-  getTemplateById,
-  flattenTemplateSections,
-} from "@/lib/templates";
-import {
-  parseSoapSections,
-  parseNoteToSectionMap,
-  allSectionsToPlainText,
-  type SoapSection,
-} from "@/lib/parse-soap-sections";
-import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
-import type {
-  Encounter,
-  EncounterType,
-  EncounterStatus,
-  SupportedLanguage,
-} from "@/lib/types";
+import { AlertCircleIcon } from "@hugeicons/core-free-icons";
+import { getTemplateById } from "@/lib/templates";
+import { flattenSectionIds } from "@/lib/templates/html";
+import type { Encounter, EncounterStatus, EncounterType } from "@/lib/types";
+
+import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
+import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
+import { useEncounterGeneration } from "@/components/encounters/hooks/use-encounter-generation";
+import { useSectionEditing } from "@/components/encounters/hooks/use-section-editing";
 
 interface PageProps {
   params: Promise<{ visitId: string }>;
 }
-
-/** Module-level tracking of active generations so they survive component remounts. */
-const activeGenerations = new Set<string>();
 
 function formatVisitDate(dateString: string, locale: string) {
   const formatted = new Date(dateString).toLocaleDateString(locale, {
@@ -97,103 +55,58 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const router = useRouter();
   const { setPageTitle } = usePageTitle();
 
-  // Visit state
-  const [visit, setVisit] = useState<Encounter | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Refs to break circular dependency: data hook's onLoaded needs metadata
+  // setters, but metadata hook needs data hook's visit/setVisit.
+  // useState setters are stable so ref wiring is safe.
+  const metadataSettersRef = useRef({
+    setTitle: (_: string) => {},
+    setPatientName: (_: string) => {},
+    setPatientId: (_: string) => {},
+    setVisitType: (_: EncounterType) => {},
+  });
+  const updateTitleRef = useRef((_: string) => {});
+  const initGenerationRef = useRef((_: Encounter) => {});
 
-  // Metadata
-  const [title, setTitle] = useState("");
-  const [patientName, setPatientName] = useState("");
-  const [patientId, setPatientId] = useState("");
-  const [visitType, setEncounterType] = useState<EncounterType>("consultation");
+  // --- Data hook (fetch + event listeners) ---
+  const data = useEncounterData({
+    visitId,
+    locale,
+    router,
+    onLoaded: useCallback((visit: Encounter) => {
+      updateTitleRef.current(visit.title || "");
+      metadataSettersRef.current.setPatientName(visit.patient_name || "");
+      metadataSettersRef.current.setVisitType(
+        visit.visit_type || "consultation",
+      );
+      const meta = visit.metadata as Record<string, unknown>;
+      if (meta?.patient_personal_id) {
+        metadataSettersRef.current.setPatientId(
+          meta.patient_personal_id as string,
+        );
+      }
+      initGenerationRef.current(visit);
+    }, []),
+  });
 
-  // Generation language
-  const [generationLanguage, setGenerationLanguage] =
-    useState<SupportedLanguage>("sk");
+  // --- Metadata hook (single instance, with live visit) ---
+  const metadata = useEncounterMetadata({
+    visitId,
+    visit: data.visit,
+    setVisit: data.setVisit,
+  });
 
-  // Template + generation
-  const [selectedTemplateId, setSelectedTemplateId] = useState(
-    getDefaultTemplate().id,
-  );
-  const [doctorNotes, setDoctorNotes] = useState("");
-  const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
-  const [isGenerating, setIsGenerating] = useState(() =>
-    activeGenerations.has(visitId),
-  );
-  const [isRegenerating, setIsRegenerating] = useState(false);
-  const [streamedSections, setStreamedSections] = useState<SoapSection[]>([]);
-
-  // Editable section state (review mode)
-  const [sectionContents, setSectionContents] = useState<
-    Record<string, string>
-  >({});
-  const [removedSections, setRemovedSections] = useState<Set<string>>(
-    new Set(),
-  );
-  const [focusSectionId, setFocusSectionId] = useState<string | null>(null);
-  const sectionContentsRef = useRef<Record<string, string>>({});
-
-  // Files
-  const [files, setFilesState] = useState<EncounterFile[]>([]);
-
-  /** Update files state and keep visit.metadata.files in sync so auto-save doesn't overwrite */
-  const setFiles = useCallback((newFiles: EncounterFile[]) => {
-    setFilesState(newFiles);
-    setVisit((prev) => {
-      if (!prev) return prev;
-      const meta = (prev.metadata ?? {}) as Record<string, unknown>;
-      return { ...prev, metadata: { ...meta, files: newFiles } } as Encounter;
-    });
-  }, []);
-
-  // Audio recording — blob kept in memory until Generate
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  const recordingBarRef = useRef<RecordingBarRef>(null);
-
-  // Sticky header height — drives sidebar sticky offset
-  const stickyHeaderRef = useRef<HTMLDivElement>(null);
-  const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
-  useEffect(() => {
-    const el = stickyHeaderRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setStickyHeaderHeight(el.offsetHeight));
-    ro.observe(el);
-    setStickyHeaderHeight(el.offsetHeight);
-    return () => ro.disconnect();
-  }, [visit?.status]);
-
-  // Prevent accidental navigation during processing
-  useEffect(() => {
-    if (!isGenerating) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isGenerating]);
-
-  // TipTap editor instance (draft mode)
-  const editorRef = useRef<Editor | null>(null);
-  const handleEditorReady = useCallback((editor: Editor) => {
-    editorRef.current = editor;
-  }, []);
-
-  // Review state
-  const [activeTab, setActiveTab] = useState("note");
-  const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
-  const [noteCopied, setNoteCopied] = useState(false);
-
-  const initialDoctorNotesRef = useRef("");
-
-  const getLocalizedHref = (href: string) => {
-    const base = locale === "sk" ? "" : `/${locale}`;
-    return `${base}${href}`;
+  // Wire refs to actual setters
+  metadataSettersRef.current = {
+    setTitle: metadata.setTitle,
+    setPatientName: metadata.setPatientName,
+    setPatientId: metadata.setPatientId,
+    setVisitType: metadata.setVisitType,
   };
 
+  // --- updateTitle bridges metadata + page title + sidebar ---
   const updateTitle = useCallback(
     (newTitle: string) => {
-      setTitle(newTitle);
+      metadata.setTitle(newTitle);
       setPageTitle(newTitle || null);
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
@@ -201,536 +114,34 @@ export default function EncounterDetailPage({ params }: PageProps) {
         }),
       );
     },
-    [visitId, setPageTitle],
+    [visitId, setPageTitle, metadata.setTitle],
   );
+  updateTitleRef.current = updateTitle;
 
   useEffect(() => {
     return () => setPageTitle(null);
   }, [setPageTitle]);
 
-  // Fetch visit data
+  // --- Generation hook ---
+  const generation = useEncounterGeneration({
+    visitId,
+    visit: data.visit,
+    setVisit: data.setVisit,
+    setError: data.setError,
+    updateTitle,
+    setFiles: data.setFiles,
+  });
+
+  // Wire generation init ref
+  initGenerationRef.current = generation.initFromVisit;
+
+  // Keep generation's titleRef in sync
   useEffect(() => {
-    const fetchVisit = async () => {
-      setIsLoading(true);
-      setError(null);
+    generation.syncTitle(metadata.title);
+  }, [metadata.title, generation.syncTitle]);
 
-      try {
-        const res = await fetch(`/api/encounters/${visitId}`);
-        if (!res.ok) throw new Error("Visit not found");
-
-        const data: Encounter = await res.json();
-        // Recording state isn't persisted across page loads — reset to started
-        if (data.status === "recording") {
-          data.status = "started";
-          fetch(`/api/encounters/${visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "started" }),
-          }).catch(() => {});
-        }
-        setVisit(data);
-
-        updateTitle(data.title || "");
-        setPatientName(data.patient_name || "");
-        setEncounterType(data.visit_type || "consultation");
-        setGenerationLanguage((data.language as SupportedLanguage) || "sk");
-
-        const meta = data.metadata as Record<string, unknown>;
-        if (meta?.template_id) {
-          setSelectedTemplateId(meta.template_id as string);
-        }
-        if (meta?.doctor_notes) {
-          setDoctorNotes(meta.doctor_notes as string);
-          initialDoctorNotesRef.current = meta.doctor_notes as string;
-        }
-        if (meta?.files) {
-          setFiles(meta.files as EncounterFile[]);
-        }
-        if (meta?.patient_personal_id) {
-          setPatientId(meta.patient_personal_id as string);
-        }
-
-        if (data.soap_note) {
-          setGeneratedNoteHtml(data.soap_note);
-        }
-      } catch {
-        setError("Failed to load visit");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchVisit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visitId, updateTitle]);
-
-  // Re-fetch encounter when a background generation completes
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { visitId: doneId } = (e as CustomEvent).detail;
-      if (doneId !== visitId) return;
-      setIsGenerating(false);
-      // Re-fetch encounter to pick up generated note + updated status
-      (async () => {
-        try {
-          const res = await fetch(`/api/encounters/${visitId}`);
-          if (!res.ok) return;
-          const data: Encounter = await res.json();
-          setVisit(data);
-          if (data.title) updateTitle(data.title);
-          if (data.soap_note) setGeneratedNoteHtml(data.soap_note);
-        } catch {
-          /* silent */
-        }
-      })();
-    };
-    window.addEventListener("generation-done", handler);
-    return () => window.removeEventListener("generation-done", handler);
-  }, [visitId, updateTitle]);
-
-  // React to sidebar actions (delete, mark complete) on the current encounter
-  useEffect(() => {
-    const handleDelete = (e: Event) => {
-      const { id } = (e as CustomEvent<{ id: string }>).detail;
-      if (id === visitId) {
-        const base = locale === "sk" ? "" : `/${locale}`;
-        router.push(base || "/");
-      }
-    };
-    const handleUpdate = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{
-          id: string;
-          status?: EncounterStatus;
-        }>
-      ).detail;
-      if (detail.id !== visitId) return;
-      if (detail.status !== undefined) {
-        setVisit((prev) => (prev ? { ...prev, status: detail.status! } : prev));
-      }
-    };
-    window.addEventListener("encounter-delete", handleDelete);
-    window.addEventListener("encounter-update", handleUpdate);
-    return () => {
-      window.removeEventListener("encounter-delete", handleDelete);
-      window.removeEventListener("encounter-update", handleUpdate);
-    };
-  }, [visitId, router, locale]);
-
-  // Auto-save doctor notes (2s debounce)
-  useEffect(() => {
-    if (!visit || doctorNotes === initialDoctorNotesRef.current) return;
-
-    const timeout = setTimeout(async () => {
-      try {
-        await fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            metadata: { ...visit.metadata, doctor_notes: doctorNotes },
-          }),
-        });
-        initialDoctorNotesRef.current = doctorNotes;
-      } catch {
-        // Silent fail
-      }
-    }, 2000);
-
-    return () => clearTimeout(timeout);
-  }, [doctorNotes, visit, visitId]);
-
-  const handleMetadataBlur = async () => {
-    if (!visit) return;
-
-    const updates: Record<string, unknown> = {};
-    if (title !== (visit.title || "")) updates.title = title.trim() || null;
-    if (patientName !== (visit.patient_name || ""))
-      updates.patient_name = patientName.trim() || null;
-    if (visitType !== visit.visit_type) updates.visit_type = visitType;
-
-    if (Object.keys(updates).length === 0) return;
-
-    try {
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      setVisit((prev) =>
-        prev ? ({ ...prev, ...updates } as Encounter) : prev,
-      );
-    } catch {
-      // Silent fail
-    }
-  };
-
-  const handlePatientBlur = async () => {
-    if (!visit) return;
-
-    const updates: Record<string, unknown> = {};
-    if (patientName !== (visit.patient_name || ""))
-      updates.patient_name = patientName.trim() || null;
-
-    const meta = (visit.metadata || {}) as Record<string, unknown>;
-    const storedPersonalId = (meta.patient_personal_id as string) || "";
-    if (patientId !== storedPersonalId) {
-      updates.metadata = {
-        ...meta,
-        patient_personal_id: patientId.trim() || null,
-      };
-    }
-
-    if (Object.keys(updates).length === 0) return;
-
-    try {
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      setVisit((prev) =>
-        prev ? ({ ...prev, ...updates } as Encounter) : prev,
-      );
-    } catch {
-      // Silent fail
-    }
-  };
-
-  const handleRecordingComplete = useCallback(
-    async (blob: Blob) => {
-      setAudioBlob(blob);
-
-      // Also upload to storage so it persists across refresh
-      try {
-        const file = new File([blob], "recording.webm", {
-          type: blob.type || "audio/webm",
-        });
-        const formData = new FormData();
-        formData.append("files", file);
-
-        const res = await fetch(`/api/encounters/${visitId}/files`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          console.error("Audio upload failed:", res.status);
-          return;
-        }
-
-        const data = await res.json();
-        const newFiles = (data.files as EncounterFile[]).map((f) => ({
-          ...f,
-          source: "recording" as const,
-        }));
-        setFilesState((prev) => {
-          const merged = [...prev, ...newFiles];
-          // Sync visit.metadata.files
-          setVisit((v) => {
-            if (!v) return v;
-            const meta = (v.metadata ?? {}) as Record<string, unknown>;
-            return { ...v, metadata: { ...meta, files: merged } } as Encounter;
-          });
-          return merged;
-        });
-      } catch (err) {
-        console.error("Audio upload error:", err);
-      }
-    },
-    [visitId],
-  );
-
-  const handleRecordingStateChange = useCallback(
-    (recordingState: "idle" | "recording" | "paused") => {
-      const status = recordingState === "recording" ? "recording" : "started";
-      setVisit((prev) => (prev ? { ...prev, status } : prev));
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, status },
-        }),
-      );
-      // Persist to DB (fire-and-forget)
-      fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      }).catch(() => {});
-    },
-    [visitId],
-  );
-
-  const handleGenerate = async () => {
-    if (!visitId) return;
-    activeGenerations.add(visitId);
-    setIsGenerating(true);
-    setError(null);
-
-    // Reflect processing state in sidebar + persist to DB
-    window.dispatchEvent(
-      new CustomEvent("encounter-update", {
-        detail: { id: visitId, status: "processing" },
-      }),
-    );
-    fetch(`/api/encounters/${visitId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "processing" }),
-    }).catch(() => {});
-
-    // Capture values at call time so the chain works even after unmount
-    const capturedTemplateId = selectedTemplateId;
-    const capturedDoctorNotes = doctorNotes;
-    const capturedTitle = title;
-    const capturedLanguage = generationLanguage;
-    const finalized = recordingBarRef.current?.finalize();
-    const blobToProcess = finalized?.blob ?? audioBlob;
-    const streamingTranscript = finalized?.transcript ?? null;
-
-    try {
-      // Step 1: If there's a recorded audio blob, process it (chunk + embed)
-      // If we have a streaming transcript from Scribe, skip batch transcription
-      if (blobToProcess) {
-        const audioFile = new File([blobToProcess], "recording.webm", {
-          type: blobToProcess.type,
-        });
-        const formData = new FormData();
-        formData.append("file", audioFile);
-        formData.append("language", capturedLanguage);
-        formData.append("visitId", visitId);
-        if (streamingTranscript) {
-          formData.append("transcriptText", streamingTranscript);
-        }
-
-        const transcribeRes = await fetch("/api/process-audio", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!transcribeRes.ok) {
-          const data = await transcribeRes.json();
-          throw new Error(data.error || "Transcription failed");
-        }
-
-        const transcribeData = await transcribeRes.json();
-        setVisit((prev) =>
-          prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
-        );
-        setAudioBlob(null);
-      }
-
-      // Step 2: Generate note from transcript + doctor notes
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          visitId,
-          templateId: capturedTemplateId,
-          doctorNotes: capturedDoctorNotes || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Generation failed");
-      }
-
-      const data = await res.json();
-      setGeneratedNoteHtml(data.generatedNote);
-      setVisit((prev) =>
-        prev
-          ? {
-              ...prev,
-              soap_note: data.generatedNote,
-              patient_letter: data.letter,
-            }
-          : prev,
-      );
-
-      // Auto-set title if user hasn't provided one
-      const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
-      const patchBody: Record<string, string> = { status: "to_review" };
-      if (autoTitle) patchBody.title = autoTitle;
-
-      // Auto-transition to review (+ title if generated)
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody),
-      });
-      if (autoTitle) updateTitle(autoTitle);
-      setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: {
-            id: visitId,
-            status: "to_review",
-            ...(autoTitle ? { title: autoTitle } : {}),
-          },
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-    } finally {
-      activeGenerations.delete(visitId);
-      setIsGenerating(false);
-      // Notify any remounted instances that generation is done
-      window.dispatchEvent(
-        new CustomEvent("generation-done", { detail: { visitId } }),
-      );
-    }
-  };
-
-  const handleMarkComplete = async () => {
-    if (!visitId) return;
-
-    try {
-      const res = await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
-      });
-
-      if (!res.ok) throw new Error("Failed to update status");
-      setVisit((prev) => (prev ? { ...prev, status: "completed" } : prev));
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "completed" },
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update status");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!visitId) return;
-    if (!confirm(t("delete.message"))) return;
-
-    try {
-      const res = await fetch(`/api/encounters/${visitId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete visit");
-      router.push(getLocalizedHref(""));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete visit");
-    }
-  };
-
-  const handleLanguageChange = useCallback(
-    async (lang: SupportedLanguage) => {
-      setGenerationLanguage(lang);
-      try {
-        await fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language: lang }),
-        });
-        setVisit((prev) => (prev ? { ...prev, language: lang } : prev));
-      } catch {
-        // Silent fail
-      }
-    },
-    [visitId],
-  );
-
-  const handleCopyNote = useCallback(async () => {
-    // Rebuild HTML from current editable state
-    const currentHtml =
-      template && Object.keys(sectionContentsRef.current).length > 0
-        ? buildTemplateHtml(
-            template,
-            Object.fromEntries(
-              Object.entries(sectionContentsRef.current).filter(
-                ([id]) => !removedSections.has(id),
-              ),
-            ),
-            sectionLabels,
-          )
-        : generatedNoteHtml;
-    const parsed = parseSoapSections(currentHtml);
-    const plainText = allSectionsToPlainText(parsed);
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "text/html": new Blob([currentHtml], { type: "text/html" }),
-          "text/plain": new Blob([plainText], { type: "text/plain" }),
-        }),
-      ]);
-    } catch {
-      await navigator.clipboard.writeText(plainText);
-    }
-    setNoteCopied(true);
-    setTimeout(() => setNoteCopied(false), 2000);
-  }, [generatedNoteHtml]);
-
-  // Derived state
-  const canGenerate = !!(
-    visit?.raw_text ||
-    audioBlob ||
-    doctorNotes.trim() ||
-    files.length > 0
-  );
-  const isDraft = visit ? DRAFT_STATUSES.includes(visit.status) : true;
-
-  // Review tabs configuration
-  const allTabs: TabOption[] = useMemo(
-    () => [
-      { value: "transcript", label: t("detail.transcript") },
-      { value: "note", label: t("detail.note") },
-      { value: "add-document", label: t("detail.addDocument") },
-    ],
-    [t],
-  );
-
-  // Initialize visible tabs when transitioning out of draft
-  const defaultVisibleTabs = useMemo(
-    () => allTabs.filter((tab) => tab.value !== "add-document"),
-    [allTabs],
-  );
-
-  const currentVisibleTabs =
-    visibleTabs.length > 0 ? visibleTabs : defaultVisibleTabs;
-
-  const handleAddTab = useCallback(
-    (value: string) => {
-      const tab = allTabs.find((t) => t.value === value);
-      if (tab) {
-        setVisibleTabs((prev) => {
-          const base = prev.length > 0 ? prev : defaultVisibleTabs;
-          return [...base, tab];
-        });
-        setActiveTab(value);
-      }
-    },
-    [allTabs, defaultVisibleTabs],
-  );
-
-  const handleRemoveTab = useCallback(
-    (value: string) => {
-      setVisibleTabs((prev) => {
-        const next = prev.filter((t) => t.value !== value);
-        return next.length > 0 ? next : [];
-      });
-      if (activeTab === value) {
-        setActiveTab(defaultVisibleTabs[0]?.value ?? "transcript");
-      }
-    },
-    [activeTab, defaultVisibleTabs],
-  );
-
-  // Tabs added via dropdown (not in default set) are removable
-  const removableTabValues = useMemo(
-    () =>
-      currentVisibleTabs
-        .filter((t) => !defaultVisibleTabs.some((d) => d.value === t.value))
-        .map((t) => t.value),
-    [currentVisibleTabs, defaultVisibleTabs],
-  );
-
-  const template = getTemplateById(selectedTemplateId);
-
-  // Build section labels map from translations (for buildTemplateHtml)
+  // Template + section labels (shared between generation and section editing)
+  const template = getTemplateById(generation.selectedTemplateId);
   const sectionLabels = useMemo(() => {
     if (!template) return {};
     const labels: Record<string, string> = {};
@@ -740,406 +151,72 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return labels;
   }, [template, tTemplates]);
 
-  // Initialize sectionContents from generated HTML
-  useEffect(() => {
-    if (!template || !generatedNoteHtml) return;
-    const map = parseNoteToSectionMap(generatedNoteHtml, template);
-    setSectionContents(map);
-    sectionContentsRef.current = map;
+  // --- Section editing hook ---
+  const sections = useSectionEditing({
+    visitId,
+    template,
+    sectionLabels,
+    generatedNoteHtml: generation.generatedNoteHtml,
+    setGeneratedNoteHtml: generation.setGeneratedNoteHtml,
+    setVisit: data.setVisit,
+  });
 
-    // Auto-hide sections/subsections whose content was "Not stated" (now empty)
-    const removed = new Set<string>();
-    for (const section of template.sections) {
-      const hasContent = !!map[section.id]?.trim();
-      const hasSubContent = section.subsections?.some(
-        (sub) => !!map[sub.id]?.trim(),
-      );
+  // --- Derived state ---
+  const canGenerate = !!(
+    data.visit?.raw_text ||
+    generation.audioBlob ||
+    generation.doctorNotes.trim() ||
+    data.files.length > 0
+  );
+  const isDraft = data.visit
+    ? DRAFT_STATUSES.includes(data.visit.status)
+    : true;
+  const formattedDate = data.visit
+    ? formatVisitDate(data.visit.visit_date, locale)
+    : "";
 
-      if (!hasContent && !hasSubContent) {
-        // Entire section empty — hide card and all subsections
-        removed.add(section.id);
-        section.subsections?.forEach((sub) => removed.add(sub.id));
-      } else {
-        // Some content exists — only hide individual empty subsections
-        section.subsections?.forEach((sub) => {
-          if (!map[sub.id]?.trim()) removed.add(sub.id);
-        });
-      }
-    }
-    setRemovedSections(removed);
-  }, [generatedNoteHtml, template]);
-
-  // Persist template selection
-  const handleTemplateChange = useCallback(
-    (id: string) => {
-      setSelectedTemplateId(id);
-      if (!visit) return;
-      const meta = (visit.metadata || {}) as Record<string, unknown>;
-      fetch(`/api/encounters/${visitId}`, {
+  // --- Page-level handlers ---
+  const handleMarkComplete = async () => {
+    if (!visitId) return;
+    try {
+      const res = await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: { ...meta, template_id: id } }),
-      }).catch(() => {});
-    },
-    [visit, visitId],
-  );
-
-  // Re-generate note with a different template (to_review state) — streaming
-  const handleRegenerate = useCallback(
-    async (newTemplateId: string) => {
-      if (!visitId || newTemplateId === selectedTemplateId || isRegenerating)
-        return;
-
-      // Switch to note tab so user sees the streaming sections
-      if (activeTab !== "note") setActiveTab("note");
-
-      setIsRegenerating(true);
-      setStreamedSections([]);
-      setError(null);
-      setSelectedTemplateId(newTemplateId);
-
-      // Persist template choice
-      if (visit) {
-        const meta = (visit.metadata || {}) as Record<string, unknown>;
-        fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            metadata: { ...meta, template_id: newTemplateId },
-          }),
-        }).catch(() => {});
-      }
-
-      try {
-        const res = await fetch("/api/regenerate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            visitId,
-            templateId: newTemplateId,
-            doctorNotes: doctorNotes || undefined,
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Regeneration failed");
-        }
-
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response stream");
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE events from the buffer
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? ""; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6);
-            if (!jsonStr) continue;
-
-            try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === "section") {
-                setStreamedSections((prev) => [
-                  ...prev,
-                  { id: event.id, title: event.title, content: event.content },
-                ]);
-              } else if (event.type === "complete") {
-                setGeneratedNoteHtml(event.generatedNote);
-                setVisit((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        soap_note: event.generatedNote,
-                        patient_letter: event.letter,
-                      }
-                    : prev,
-                );
-              } else if (event.type === "error") {
-                throw new Error(event.error);
-              }
-            } catch (parseErr) {
-              // If it's a rethrown Error from the event handler, propagate it
-              if (
-                parseErr instanceof Error &&
-                parseErr.message !== "Unexpected end of JSON input"
-              ) {
-                throw parseErr;
-              }
-            }
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Regeneration failed");
-      } finally {
-        setIsRegenerating(false);
-      }
-    },
-    [
-      visitId,
-      selectedTemplateId,
-      isRegenerating,
-      activeTab,
-      visit,
-      doctorNotes,
-    ],
-  );
-
-  // Flatten template sections for # slash command and sidebar
-  const flatSections = useMemo(
-    () => (template ? flattenTemplateSections(template) : []),
-    [template],
-  );
-
-  // Detect which section headings already exist in the editor content
-  const usedSectionIds = useMemo(() => {
-    if (!doctorNotes || flatSections.length === 0) return new Set<string>();
-    const used = new Set<string>();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(doctorNotes, "text/html");
-    const headings = doc.querySelectorAll("h2, h3");
-    headings.forEach((h) => {
-      const text = h.textContent?.trim();
-      if (!text) return;
-      const match = flatSections.find(
-        (s) => tTemplates(`sections.${s.labelKey}`) === text,
+        body: JSON.stringify({ status: "completed" }),
+      });
+      if (!res.ok) throw new Error("Failed to update status");
+      data.setVisit((prev) => (prev ? { ...prev, status: "completed" } : prev));
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status: "completed" },
+        }),
       );
-      if (match) used.add(match.id);
-    });
-    return used;
-  }, [doctorNotes, flatSections, tTemplates]);
-
-  // Build slash command items (only unused sections)
-  const slashCommandItems: SlashCommandItem[] = useMemo(() => {
-    return flatSections
-      .filter((s) => !usedSectionIds.has(s.id))
-      .map((s) => ({
-        id: s.id,
-        label: tTemplates(`sections.${s.labelKey}`),
-        level: s.level,
-        parentLabel: s.parentId
-          ? tTemplates(
-              `sections.${flatSections.find((p) => p.id === s.parentId)?.labelKey ?? s.labelKey}`,
-            )
-          : undefined,
-        needsParentHeading: s.parentId
-          ? !usedSectionIds.has(s.parentId)
-          : false,
-      }));
-  }, [flatSections, usedSectionIds, tTemplates]);
-
-  // Insert a heading into the editor at cursor position.
-  // If inserting a subsection (h3) whose parent h2 is missing, insert the parent first.
-  const handleInsertSection = useCallback(
-    (sectionId: string, label: string, level: 2 | 3) => {
-      const editor = editorRef.current;
-      if (!editor) return;
-
-      const content: Record<string, unknown>[] = [];
-
-      // Auto-insert parent heading when adding a subsection whose parent isn't in the editor yet
-      if (level === 3) {
-        const section = flatSections.find((s) => s.id === sectionId);
-        if (section?.parentId && !usedSectionIds.has(section.parentId)) {
-          const parent = flatSections.find((s) => s.id === section.parentId);
-          if (parent) {
-            content.push({
-              type: "heading",
-              attrs: { level: 2 },
-              content: [
-                {
-                  type: "text",
-                  text: tTemplates(`sections.${parent.labelKey}`),
-                },
-              ],
-            });
-          }
-        }
-      }
-
-      content.push(
-        {
-          type: "heading",
-          attrs: { level },
-          content: [{ type: "text", text: label }],
-        },
-        { type: "paragraph" },
+    } catch (err) {
+      data.setError(
+        err instanceof Error ? err.message : "Failed to update status",
       );
-
-      editor.chain().focus().insertContent(content).run();
-    },
-    [flatSections, usedSectionIds, tTemplates],
-  );
-
-  // Scroll to an existing heading in the editor and place cursor at its end
-  const handleScrollToSection = useCallback((label: string) => {
-    const editor = editorRef.current;
-    if (!editor) return;
-
-    const { doc } = editor.state;
-    let headingNodePos: number | null = null;
-    let cursorPos: number | null = null;
-
-    doc.descendants((node, pos) => {
-      if (headingNodePos !== null) return false;
-      if (node.type.name === "heading" && node.textContent.trim() === label) {
-        headingNodePos = pos;
-        cursorPos = pos + node.nodeSize - 1;
-        return false;
-      }
-    });
-
-    if (headingNodePos === null || cursorPos === null) return;
-
-    // Get the heading DOM element directly from ProseMirror
-    const headingDom = editor.view.nodeDOM(
-      headingNodePos,
-    ) as HTMLElement | null;
-    if (!headingDom) return;
-
-    // Walk up from the editor DOM to find the scrollable ancestor
-    let scrollContainer: HTMLElement | null = editor.view.dom.parentElement;
-    while (scrollContainer) {
-      const { overflowY } = getComputedStyle(scrollContainer);
-      if (overflowY === "auto" || overflowY === "scroll") break;
-      scrollContainer = scrollContainer.parentElement;
     }
+  };
 
-    if (scrollContainer) {
-      const containerRect = scrollContainer.getBoundingClientRect();
-      const headingRect = headingDom.getBoundingClientRect();
-      const scrollTarget =
-        scrollContainer.scrollTop +
-        (headingRect.top - containerRect.top) -
-        containerRect.height / 2 +
-        headingRect.height / 2;
-
-      scrollContainer.scrollTo({ top: scrollTarget, behavior: "smooth" });
+  const handleDelete = async () => {
+    if (!visitId) return;
+    if (!confirm(t("delete.message"))) return;
+    try {
+      const res = await fetch(`/api/encounters/${visitId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete visit");
+      const base = locale === "sk" ? "" : `/${locale}`;
+      router.push(base || "/");
+    } catch (err) {
+      data.setError(
+        err instanceof Error ? err.message : "Failed to delete visit",
+      );
     }
+  };
 
-    // Focus and place cursor at end of heading after the scroll animation
-    const finalPos = cursorPos;
-    setTimeout(() => {
-      editor.chain().focus().setTextSelection(finalPos).run();
-    }, 300);
-  }, []);
-
-  /** Determine which section/subsection IDs have content and are not removed */
-  const documentedSectionIds = useMemo(() => {
-    if (!template) return new Set<string>();
-    const documented = new Set<string>();
-    for (const id of flattenSectionIds(template)) {
-      if (!removedSections.has(id) && sectionContents[id]?.trim()) {
-        documented.add(id);
-      }
-    }
-    return documented;
-  }, [template, sectionContents, removedSections]);
-
-  // Scroll to a note section card by its template section ID
-  const handleScrollToNoteSection = useCallback((sectionId: string) => {
-    const el = document.getElementById(`note-section-${sectionId}`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
-  // Rebuild HTML from current section state and save to DB
-  const saveNoteRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const saveNote = useCallback(
-    (contents: Record<string, string>, removed: Set<string>) => {
-      if (!template || !visitId) return;
-      clearTimeout(saveNoteRef.current);
-      saveNoteRef.current = setTimeout(async () => {
-        // Filter out removed sections
-        const filtered: Record<string, string> = {};
-        for (const [id, text] of Object.entries(contents)) {
-          if (!removed.has(id)) filtered[id] = text;
-        }
-        const html = buildTemplateHtml(template, filtered, sectionLabels);
-        try {
-          await fetch(`/api/encounters/${visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ soap_note: html }),
-          });
-          // Update local state so copy works with latest
-          setGeneratedNoteHtml(html);
-          setVisit((prev) => (prev ? { ...prev, soap_note: html } : prev));
-        } catch {
-          // Silent fail
-        }
-      }, 2000);
-    },
-    [template, visitId, sectionLabels],
-  );
-
-  // Handle section content edit
-  const handleSectionContentChange = useCallback(
-    (sectionId: string, newContent: string) => {
-      setSectionContents((prev) => {
-        const next = { ...prev, [sectionId]: newContent };
-        sectionContentsRef.current = next;
-        saveNote(next, removedSections);
-        return next;
-      });
-    },
-    [saveNote, removedSections],
-  );
-
-  // Handle section removal
-  const handleRemoveSection = useCallback(
-    (sectionId: string) => {
-      setRemovedSections((prev) => {
-        const next = new Set(prev);
-        next.add(sectionId);
-        saveNote(sectionContentsRef.current, next);
-        return next;
-      });
-    },
-    [saveNote],
-  );
-
-  // Handle re-adding a removed section from sidebar
-  const handleAddSection = useCallback(
-    (sectionId: string) => {
-      setRemovedSections((prev) => {
-        const next = new Set(prev);
-        next.delete(sectionId);
-        saveNote(sectionContentsRef.current, next);
-        return next;
-      });
-      // Ensure an empty content entry exists so the card renders with placeholder
-      setSectionContents((prev) => {
-        if (sectionId in prev) return prev;
-        const next = { ...prev, [sectionId]: "" };
-        sectionContentsRef.current = next;
-        return next;
-      });
-      // Scroll to the section and auto-focus its editor after render
-      setFocusSectionId(sectionId);
-      requestAnimationFrame(() => {
-        document
-          .getElementById(`note-section-${sectionId}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    },
-    [saveNote],
-  );
-
-  const handleAutoFocused = useCallback(() => setFocusSectionId(null), []);
-
-  // Loading state
-  if (isLoading) {
+  // --- Loading / error states ---
+  if (data.isLoading) {
     return (
       <AppShell contentClassName="flex flex-1 overflow-hidden">
         <div className="flex flex-1 justify-center p-6">
@@ -1165,40 +242,40 @@ export default function EncounterDetailPage({ params }: PageProps) {
     );
   }
 
-  if (error && !visit) {
+  if (data.error && !data.visit) {
     return (
       <AppShell>
         <div className="p-6">
           <Alert variant="destructive">
             <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{data.error}</AlertDescription>
           </Alert>
         </div>
       </AppShell>
     );
   }
 
-  if (!visit) return null;
+  if (!data.visit) return null;
 
   return (
     <AppShell contentClassName="flex flex-1 overflow-hidden">
       {/* Header actions (portaled into app header) */}
       <EncounterHeaderActions
-        status={visit.status}
-        generationLanguage={generationLanguage}
-        onLanguageChange={handleLanguageChange}
-        onGenerate={handleGenerate}
+        status={data.visit.status}
+        generationLanguage={generation.generationLanguage}
+        onLanguageChange={generation.handleLanguageChange}
+        onGenerate={generation.handleGenerate}
         onMarkComplete={handleMarkComplete}
         onDelete={handleDelete}
         canGenerate={canGenerate}
-        isGenerating={isGenerating}
+        isGenerating={generation.isGenerating}
       />
 
       {/* Processing overlay — takes over full content area */}
-      {isGenerating && <ProcessingOverlay />}
+      {generation.isGenerating && <ProcessingOverlay />}
 
       {/* Main content area — hidden during generation */}
-      {!isGenerating && (
+      {!generation.isGenerating && (
         <div
           className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
         >
@@ -1206,329 +283,51 @@ export default function EncounterDetailPage({ params }: PageProps) {
             className={`flex w-full max-w-[960px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
           >
             {isDraft ? (
-              <>
-                {/* Sticky header: title + recording bar */}
-                <div
-                  ref={stickyHeaderRef}
-                  className="shrink-0 flex flex-col gap-5 border-b border-border bg-background py-6"
-                >
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <Textarea
-                      value={title}
-                      onChange={(e) => updateTitle(e.target.value)}
-                      onBlur={handleMetadataBlur}
-                      placeholder={t("untitled")}
-                      rows={1}
-                      autoFocus
-                      className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                      onInput={(e) => {
-                        const target = e.currentTarget;
-                        target.style.height = "auto";
-                        target.style.height = `${target.scrollHeight}px`;
-                      }}
-                      ref={(el) => {
-                        if (el) {
-                          el.style.height = "auto";
-                          el.style.height = `${el.scrollHeight}px`;
-                        }
-                      }}
-                    />
-                    <div className="flex items-center gap-3">
-                      <Badge
-                        variant={`status-${visit.status}` as "status-started"}
-                      >
-                        {t(`status.${visit.status}`)}
-                      </Badge>
-                      <span className="text-sm text-foreground/65">
-                        {formatVisitDate(visit.visit_date, locale)}
-                      </span>
-                    </div>
-                  </div>
-                  <RecordingBar
-                    ref={recordingBarRef}
-                    disabled={isGenerating}
-                    onRecordingComplete={handleRecordingComplete}
-                    onRecordingStateChange={handleRecordingStateChange}
-                    templateId={selectedTemplateId}
-                    onTemplateChange={handleTemplateChange}
-                  />
-                </div>
-
-                {/* Error alert */}
-                {error && (
-                  <Alert variant="destructive">
-                    <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Draft: template sidebar + editor */}
-                <div className="flex flex-1 min-h-0 gap-6">
-                  <TemplateSidebar
-                    templateId={selectedTemplateId}
-                    onTemplateChange={handleTemplateChange}
-                    disabled={isGenerating}
-                    onInsertSection={handleInsertSection}
-                    usedSectionIds={usedSectionIds}
-                    onScrollToSection={handleScrollToSection}
-                  />
-                  <TiptapEditor
-                    content={doctorNotes}
-                    onChange={setDoctorNotes}
-                    placeholder={tTemplates("doctorNotesPlaceholder")}
-                    className="flex-1 overflow-y-auto rounded-2xl"
-                    onEditorReady={handleEditorReady}
-                    slashCommandItems={slashCommandItems}
-                  />
-                </div>
-              </>
+              <DraftView
+                visit={data.visit}
+                title={metadata.title}
+                onTitleChange={updateTitle}
+                onMetadataBlur={metadata.handleMetadataBlur}
+                formattedDate={formattedDate}
+                error={data.error}
+                recordingBarRef={generation.recordingBarRef}
+                isGenerating={generation.isGenerating}
+                onRecordingComplete={generation.handleRecordingComplete}
+                onRecordingStateChange={generation.handleRecordingStateChange}
+                selectedTemplateId={generation.selectedTemplateId}
+                onTemplateChange={generation.handleTemplateChange}
+                template={template}
+                doctorNotes={generation.doctorNotes}
+                onDoctorNotesChange={generation.setDoctorNotes}
+                t={t}
+                tTemplates={tTemplates}
+              />
             ) : (
-              <Tabs
-                value={activeTab}
-                onValueChange={setActiveTab}
-                className="gap-0"
-              >
-                {/* Sticky header: title + tab bar */}
-                <div
-                  ref={stickyHeaderRef}
-                  className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <Textarea
-                        value={title}
-                        onChange={(e) => updateTitle(e.target.value)}
-                        onBlur={handleMetadataBlur}
-                        placeholder={t("untitled")}
-                        rows={1}
-                        className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                        onInput={(e) => {
-                          const target = e.currentTarget;
-                          target.style.height = "auto";
-                          target.style.height = `${target.scrollHeight}px`;
-                        }}
-                        ref={(el) => {
-                          if (el) {
-                            el.style.height = "auto";
-                            el.style.height = `${el.scrollHeight}px`;
-                          }
-                        }}
-                      />
-                      <div className="flex items-center gap-3">
-                        <Badge
-                          variant={`status-${visit.status}` as "status-started"}
-                        >
-                          {t(`status.${visit.status}`)}
-                        </Badge>
-                        <span className="text-sm text-foreground/65">
-                          {formatVisitDate(visit.visit_date, locale)}
-                        </span>
-                      </div>
-                    </div>
-                    {visit.status === "to_review" && (
-                      <Button
-                        variant="outline"
-                        size="lg"
-                        className="shrink-0"
-                        onClick={handleMarkComplete}
-                        disabled={isRegenerating}
-                      >
-                        {t("detail.markComplete")}
-                      </Button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 border-b border-border">
-                    <TabsList variant="line">
-                      {currentVisibleTabs.map((tab) => (
-                        <TabsTrigger key={tab.value} value={tab.value}>
-                          {tab.label}
-                          {removableTabValues.includes(tab.value) && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveTab(tab.value);
-                              }}
-                              className="ml-1 rounded-sm opacity-50 hover:opacity-100"
-                            >
-                              <HugeiconsIcon
-                                icon={Cancel01Icon}
-                                className="size-3"
-                              />
-                            </button>
-                          )}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                    {allTabs.filter(
-                      (opt) =>
-                        !currentVisibleTabs.some((t) => t.value === opt.value),
-                    ).length > 0 && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            className="text-foreground/65 hover:text-foreground"
-                          >
-                            + {t("detail.addDocument")}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {allTabs
-                            .filter(
-                              (opt) =>
-                                !currentVisibleTabs.some(
-                                  (t) => t.value === opt.value,
-                                ),
-                            )
-                            .map((tab) => (
-                              <DropdownMenuItem
-                                key={tab.value}
-                                onClick={() => handleAddTab(tab.value)}
-                              >
-                                {tab.label}
-                              </DropdownMenuItem>
-                            ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                </div>
-
-                {/* Error alert */}
-                {error && (
-                  <Alert variant="destructive">
-                    <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                )}
-
-                {/* Tab content — outside sticky area */}
-                <TabsContent value="note">
-                  <div className="flex flex-1 gap-6">
-                    <div className="pt-6">
-                      <TemplateSidebar
-                        templateId={selectedTemplateId}
-                        onTemplateChange={handleRegenerate}
-                        documentedSections={documentedSectionIds}
-                        onScrollToSection={handleScrollToNoteSection}
-                        onAddSection={handleAddSection}
-                        stickyTop={stickyHeaderHeight + 24}
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col">
-                      <div
-                        className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
-                        style={{ top: stickyHeaderHeight }}
-                      >
-                        <h2 className="text-lg font-medium">
-                          {t("detail.note")}
-                        </h2>
-                        {isRegenerating ? (
-                          <TextShimmer className="text-sm" duration={3}>
-                            {t("detail.regenerating")}
-                          </TextShimmer>
-                        ) : (
-                          <Button
-                            variant="secondary"
-                            size="lg"
-                            onClick={handleCopyNote}
-                            disabled={!generatedNoteHtml}
-                          >
-                            {noteCopied
-                              ? t("detail.noteCopied")
-                              : t("detail.copyNote")}
-                          </Button>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-4">
-                        {isRegenerating ? (
-                          <>
-                            {streamedSections.map((section) => (
-                              <div
-                                key={section.id}
-                                className="animate-in fade-in duration-300"
-                              >
-                                <NoteSectionCard
-                                  sectionId={section.id}
-                                  title={section.title}
-                                  content={section.content}
-                                />
-                              </div>
-                            ))}
-                            {streamedSections.length === 0 && (
-                              <div className="flex flex-col gap-4">
-                                <Skeleton className="h-32 rounded-2xl" />
-                                <Skeleton className="h-32 rounded-2xl" />
-                                <Skeleton className="h-32 rounded-2xl" />
-                              </div>
-                            )}
-                          </>
-                        ) : template &&
-                          Object.keys(sectionContents).length > 0 ? (
-                          template.sections
-                            .filter((s) => !removedSections.has(s.id))
-                            .map((section) => (
-                              <NoteSectionCard
-                                key={section.id}
-                                id={`note-section-${section.id}`}
-                                sectionId={section.id}
-                                title={tTemplates(
-                                  `sections.${section.labelKey}`,
-                                )}
-                                content={sectionContents[section.id] ?? ""}
-                                subsections={section.subsections
-                                  ?.filter(
-                                    (sub) => !removedSections.has(sub.id),
-                                  )
-                                  .map((sub) => ({
-                                    id: sub.id,
-                                    title: tTemplates(
-                                      `sections.${sub.labelKey}`,
-                                    ),
-                                    content: sectionContents[sub.id] ?? "",
-                                  }))}
-                                onContentChange={handleSectionContentChange}
-                                onRemove={handleRemoveSection}
-                                autoFocusId={focusSectionId}
-                                onAutoFocused={handleAutoFocused}
-                              />
-                            ))
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {t("detail.noNote")}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="transcript">
-                  <div className="flex-1">
-                    {visit.raw_text ? (
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {visit.raw_text}
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        {t("detail.noTranscript")}
-                      </p>
-                    )}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="add-document">
-                  <div className="flex-1">
-                    <TiptapEditor
-                      content=""
-                      onChange={() => {}}
-                      placeholder={t("detail.addDocument")}
-                      className="flex-1 rounded-2xl"
-                    />
-                  </div>
-                </TabsContent>
-              </Tabs>
+              <ReviewView
+                visit={data.visit}
+                title={metadata.title}
+                onTitleChange={updateTitle}
+                onMetadataBlur={metadata.handleMetadataBlur}
+                formattedDate={formattedDate}
+                error={data.error}
+                isRegenerating={generation.isRegenerating}
+                selectedTemplateId={generation.selectedTemplateId}
+                onRegenerate={generation.handleRegenerate}
+                streamedSections={generation.streamedSections}
+                generatedNoteHtml={generation.generatedNoteHtml}
+                template={template}
+                sectionLabels={sectionLabels}
+                sectionContents={sections.sectionContents}
+                removedSections={sections.removedSections}
+                onSectionContentChange={sections.handleSectionContentChange}
+                onRemoveSection={sections.handleRemoveSection}
+                onAddSection={sections.handleAddSection}
+                focusSectionId={sections.focusSectionId}
+                onAutoFocused={sections.handleAutoFocused}
+                onMarkComplete={handleMarkComplete}
+                t={t}
+                tTemplates={tTemplates}
+              />
             )}
 
             {/* Bottom scroll inset (review mode only) */}
@@ -1538,21 +337,21 @@ export default function EncounterDetailPage({ params }: PageProps) {
       )}
 
       {/* Right panel — hidden during generation */}
-      {!isGenerating &&
+      {!generation.isGenerating &&
         (isDraft ? (
           <FilesPanel
             visitId={visitId}
-            files={files}
-            onFilesChange={setFiles}
-            onAudioBlobReady={(blob) => setAudioBlob(blob)}
+            files={data.files}
+            onFilesChange={data.setFiles}
+            onAudioBlobReady={(blob) => generation.setAudioBlob(blob)}
           />
         ) : (
           <PatientPanel
-            patientName={patientName}
-            patientId={patientId}
-            onPatientNameChange={setPatientName}
-            onPatientIdChange={setPatientId}
-            onBlur={handlePatientBlur}
+            patientName={metadata.patientName}
+            patientId={metadata.patientId}
+            onPatientNameChange={metadata.setPatientName}
+            onPatientIdChange={metadata.setPatientId}
+            onBlur={metadata.handlePatientBlur}
           />
         ))}
     </AppShell>

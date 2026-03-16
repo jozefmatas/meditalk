@@ -89,11 +89,13 @@ function InlineEditor({
     editor.commands.setContent(`<p>${content.replace(/\n/g, "</p><p>")}</p>`);
   }, [editor, content]);
 
-  // Auto-focus when section is re-added from sidebar
+  // Auto-focus when section is re-added from sidebar (without triggering scroll)
   useEffect(() => {
     if (!autoFocus || !editor) return;
     requestAnimationFrame(() => {
-      editor.commands.focus("end");
+      const { doc } = editor.state;
+      editor.commands.setTextSelection(doc.content.size - 1);
+      editor.view.dom.focus({ preventScroll: true });
       onAutoFocused?.();
     });
   }, [autoFocus, editor, onAutoFocused]);
@@ -142,7 +144,10 @@ export function NoteSectionCard({
   onAutoFocused,
 }: NoteSectionCardProps) {
   return (
-    <div id={id} className="rounded-2xl border p-6">
+    <div
+      id={id}
+      className="rounded-2xl border p-6 transition-colors hover:border-ring focus-within:border-ring focus-within:bg-accent"
+    >
       <div className="flex flex-col gap-3 text-foreground">
         <SectionHeader
           title={title}

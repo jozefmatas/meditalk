@@ -3,7 +3,13 @@
 import type { Variants } from "motion/react";
 import { motion, useAnimation } from "motion/react";
 import type { HTMLAttributes } from "react";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 import { cn } from "@/lib/utils";
 
 export interface AnimatedMagicWandHandle {
@@ -60,8 +66,21 @@ const PATH_3_VARIANTS: Variants = {
   },
 };
 
-const AnimatedMagicWand = forwardRef<AnimatedMagicWandHandle, AnimatedMagicWandProps>(
-  ({ onMouseEnter, onMouseLeave, className, size = 28, loop = false, ...props }, ref) => {
+const AnimatedMagicWand = forwardRef<
+  AnimatedMagicWandHandle,
+  AnimatedMagicWandProps
+>(
+  (
+    {
+      onMouseEnter,
+      onMouseLeave,
+      className,
+      size = 28,
+      loop = false,
+      ...props
+    },
+    ref,
+  ) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
 

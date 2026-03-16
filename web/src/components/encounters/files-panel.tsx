@@ -11,7 +11,12 @@ import {
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/shared/button";
-import { Table, TableBody, TableRow, TableCell } from "@/components/shared/table";
+import {
+  Table,
+  TableBody,
+  TableRow,
+  TableCell,
+} from "@/components/shared/table";
 import { cn } from "@/lib/utils";
 
 export interface EncounterFile {
@@ -193,7 +198,9 @@ export function FilesPanel({
                         size={14}
                         className="shrink-0 text-muted-foreground"
                       />
-                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {file.name}
+                      </span>
                       <Button
                         variant="outline"
                         size="icon-sm"
@@ -213,4 +220,3 @@ export function FilesPanel({
     </div>
   );
 }
-

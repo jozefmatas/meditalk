@@ -32,7 +32,7 @@ export function ReviewTabs({ activeTab, onTabChange }: ReviewTabsProps) {
             "flex h-12 items-center px-2 text-sm transition-colors",
             tab === activeTab
               ? "border-b-2 border-primary font-medium text-primary"
-              : "text-muted-foreground hover:text-foreground"
+              : "text-muted-foreground hover:text-foreground",
           )}
         >
           {labels[tab]}
