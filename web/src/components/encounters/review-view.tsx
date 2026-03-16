@@ -446,8 +446,8 @@ export function ReviewView({
         </div>
       </TabsContent>
 
-      <TabsContent value="transcript">
-        <div className="flex-1">
+      <TabsContent value="transcript" className="pt-6">
+        <div className="rounded-2xl border p-6">
           {visit.raw_text ? (
             <p className="whitespace-pre-wrap text-sm leading-relaxed">
               {visit.raw_text}
