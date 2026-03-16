@@ -1,19 +1,22 @@
-import { createAdminClient } from './supabase/admin';
+import { createAdminClient } from "./supabase/admin";
 
 const PRICING: Record<string, { input: number; output: number }> = {
-  'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0 },
-  'text-embedding-ada-002': { input: 0.1, output: 0 },
+  "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
+  "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
+  "text-embedding-ada-002": { input: 0.1, output: 0 },
 };
 
-const SCRIBE_PER_HOUR = 0.40;
+const SCRIBE_PER_HOUR = 0.4;
 
-type Provider = 'anthropic' | 'openai' | 'elevenlabs';
+type Provider = "anthropic" | "openai" | "elevenlabs";
 type Operation =
-  | 'generate_template'
-  | 'embed'
-  | 'transcribe'
-  | 'ocr_image'
-  | 'ocr_pdf';
+  | "generate_template"
+  | "clinical_analysis"
+  | "embed"
+  | "transcribe"
+  | "ocr_image"
+  | "ocr_pdf";
 
 export interface UsageContext {
   userId: string;
@@ -34,15 +37,17 @@ interface UsageParams {
 function calculateCost(params: UsageParams): number {
   const { model, inputTokens = 0, outputTokens = 0, durationSeconds } = params;
 
-  if (model === 'scribe_v2' && durationSeconds != null) {
+  if (model === "scribe_v2" && durationSeconds != null) {
     return (durationSeconds / 3600) * SCRIBE_PER_HOUR;
   }
 
   const pricing = PRICING[model];
   if (!pricing) return 0;
 
-  return (inputTokens / 1_000_000) * pricing.input +
-    (outputTokens / 1_000_000) * pricing.output;
+  return (
+    (inputTokens / 1_000_000) * pricing.input +
+    (outputTokens / 1_000_000) * pricing.output
+  );
 }
 
 /**
@@ -52,7 +57,7 @@ export function logUsage(params: UsageParams): void {
   const cost = calculateCost(params);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- api_usage not in generated types until migration is pushed
-  (createAdminClient().from('api_usage') as any)
+  (createAdminClient().from("api_usage") as any)
     .insert({
       user_id: params.userId,
       visit_id: params.visitId ?? null,
@@ -65,6 +70,6 @@ export function logUsage(params: UsageParams): void {
       duration_seconds: params.durationSeconds ?? null,
     })
     .then(({ error }: { error: { message: string } | null }) => {
-      if (error) console.error('[usage-log] Insert failed:', error.message);
+      if (error) console.error("[usage-log] Insert failed:", error.message);
     });
 }

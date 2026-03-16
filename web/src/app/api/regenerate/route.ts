@@ -1,15 +1,22 @@
-import { NextRequest } from 'next/server';
-import { requireAuth } from '@/lib/supabase/auth';
+import { NextRequest } from "next/server";
+import { requireAuth } from "@/lib/supabase/auth";
 import {
   anthropic,
+  GENERATION_MODEL,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
   NOT_STATED,
-} from '@/lib/anthropic';
-import { getTemplateById, getDefaultTemplate } from '@/lib/templates';
-import { buildTemplateHtml, flattenSectionIds } from '@/lib/templates/html';
-import { logUsage } from '@/lib/usage';
-import type { SupportedLanguage } from '@/lib/types';
+} from "@/lib/anthropic";
+import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
+import { logUsage } from "@/lib/usage";
+import {
+  runClinicalAnalysis,
+  buildEnrichedSystemPrompt,
+  extractJson,
+} from "@/lib/clinical";
+import type { ClinicalAnalysis } from "@/lib/clinical/types";
+import type { SupportedLanguage } from "@/lib/types";
 
 /**
  * Streaming regeneration endpoint.
@@ -19,7 +26,7 @@ import type { SupportedLanguage } from '@/lib/types';
  */
 export async function POST(request: NextRequest) {
   let userId: string;
-  let supabase: Awaited<ReturnType<typeof requireAuth>>['supabase'];
+  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
 
   try {
     const auth = await requireAuth();
@@ -27,9 +34,9 @@ export async function POST(request: NextRequest) {
     supabase = auth.supabase;
   } catch (err) {
     if (err instanceof Response) return err;
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { "Content-Type": "application/json" },
     });
   }
 
@@ -40,34 +47,34 @@ export async function POST(request: NextRequest) {
     const doctorNotes: string | undefined = body.doctorNotes;
 
     if (!visitId) {
-      return new Response(JSON.stringify({ error: 'Missing visitId' }), {
+      return new Response(JSON.stringify({ error: "Missing visitId" }), {
         status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       });
     }
 
     // Fetch visit metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase
-      .from('visits')
-      .select('id, language, metadata')
-      .eq('id', visitId)
+      .from("visits")
+      .select("id, language, metadata")
+      .eq("id", visitId)
       .single();
 
     if (visitError || !visit) {
-      return new Response(JSON.stringify({ error: 'Visit not found' }), {
+      return new Response(JSON.stringify({ error: "Visit not found" }), {
         status: 404,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       });
     }
 
-    const language = (visit.language as SupportedLanguage) || 'en';
+    const language = (visit.language as SupportedLanguage) || "en";
 
     // Fetch chunks directly by visit_id — skip embedding + vector search
     const { data: chunks, error: chunksError } = await supabase
-      .from('transcript_chunks')
-      .select('id, content')
-      .eq('visit_id', visitId)
-      .order('chunk_index', { ascending: true });
+      .from("transcript_chunks")
+      .select("id, content")
+      .eq("visit_id", visitId)
+      .order("chunk_index", { ascending: true });
 
     // Collect already-extracted file texts from metadata
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
@@ -83,15 +90,21 @@ export async function POST(request: NextRequest) {
     const chunkContents = chunks?.map((c) => c.content) ?? [];
     const usedChunkIds = chunks?.map((c) => c.id as string) ?? [];
 
-    if (chunkContents.length === 0 && !doctorNotes?.trim() && fileTexts.length === 0) {
+    if (
+      chunkContents.length === 0 &&
+      !doctorNotes?.trim() &&
+      fileTexts.length === 0
+    ) {
       return new Response(
-        JSON.stringify({ error: 'No transcript, doctor notes, or file content available' }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } },
+        JSON.stringify({
+          error: "No transcript, doctor notes, or file content available",
+        }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
       );
     }
 
     if (chunksError) {
-      console.error('Chunk fetch error:', chunksError);
+      console.error("Chunk fetch error:", chunksError);
     }
 
     // Resolve template
@@ -100,7 +113,8 @@ export async function POST(request: NextRequest) {
     const allIds = flattenSectionIds(template);
 
     // Load section labels from locale messages
-    const messages = (await import(`../../../../messages/${language}.json`)).default;
+    const messages = (await import(`../../../../messages/${language}.json`))
+      .default;
     const templateSections: Record<string, string> =
       messages.templates?.sections || {};
     const sectionLabels: Record<string, string> = {};
@@ -108,16 +122,44 @@ export async function POST(request: NextRequest) {
       sectionLabels[id] = templateSections[id] || id;
     }
 
-    // Build prompts
-    const systemPrompt = buildTemplateSystemPrompt(template, language, sectionLabels);
-    const userMessage = buildTemplateUserMessage(chunkContents, template, doctorNotes, fileTexts);
+    // Pass 1: Clinical analysis (non-fatal)
+    let clinicalAnalysis: ClinicalAnalysis | null = null;
+    if (chunkContents.length > 0) {
+      try {
+        clinicalAnalysis = await runClinicalAnalysis(chunkContents, language, {
+          userId,
+          visitId,
+        });
+      } catch (analysisErr) {
+        console.warn(
+          "Clinical analysis failed, proceeding without enrichment:",
+          analysisErr,
+        );
+      }
+    }
 
-    // Stream Anthropic response
+    // Build prompts (enriched with clinical analysis if available)
+    const baseSystemPrompt = buildTemplateSystemPrompt(
+      template,
+      language,
+      sectionLabels,
+    );
+    const systemPrompt = clinicalAnalysis
+      ? buildEnrichedSystemPrompt(baseSystemPrompt, clinicalAnalysis)
+      : baseSystemPrompt;
+    const userMessage = buildTemplateUserMessage(
+      chunkContents,
+      template,
+      doctorNotes,
+      fileTexts,
+    );
+
+    // Stream Anthropic response (Opus 4.6)
     const stream = anthropic().messages.stream({
-      model: 'claude-sonnet-4-5-20250929',
+      model: GENERATION_MODEL,
       max_tokens: 8192,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [{ role: "user", content: userMessage }],
     });
 
     const encoder = new TextEncoder();
@@ -127,12 +169,24 @@ export async function POST(request: NextRequest) {
 
     const readable = new ReadableStream({
       async start(controller) {
-        let accumulated = '';
+        let accumulated = "";
         let inputTokens = 0;
         let outputTokens = 0;
 
         function sendEvent(data: Record<string, unknown>) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          );
+        }
+
+        // Notify client that clinical analysis is complete
+        if (clinicalAnalysis) {
+          sendEvent({
+            type: "analysis_complete",
+            specialty: clinicalAnalysis.inferredSpecialty,
+            icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
+            conceptCount: clinicalAnalysis.matchedConcepts.length,
+          });
         }
 
         /**
@@ -154,7 +208,7 @@ export async function POST(request: NextRequest) {
             let pos = valueStart;
             let found = false;
             while (pos < accumulated.length) {
-              if (accumulated[pos] === '\\') {
+              if (accumulated[pos] === "\\") {
                 pos += 2; // skip escaped char
                 continue;
               }
@@ -178,7 +232,7 @@ export async function POST(request: NextRequest) {
 
             emittedSections.add(id);
             sendEvent({
-              type: 'section',
+              type: "section",
               id,
               title: sectionLabels[id] || id,
               content: value,
@@ -187,7 +241,7 @@ export async function POST(request: NextRequest) {
         }
 
         try {
-          stream.on('text', (delta) => {
+          stream.on("text", (delta) => {
             accumulated += delta;
             tryExtractSections();
           });
@@ -199,43 +253,47 @@ export async function POST(request: NextRequest) {
 
           // Parse the full JSON for the final result
           const fullText =
-            finalMessage.content[0].type === 'text'
+            finalMessage.content[0].type === "text"
               ? finalMessage.content[0].text
-              : '';
-          const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+              : "";
 
-          if (!jsonMatch) {
-            sendEvent({ type: 'error', error: 'Failed to parse response' });
+          let parsed: Record<string, string>;
+          try {
+            parsed = extractJson<Record<string, string>>(fullText);
+          } catch {
+            sendEvent({ type: "error", error: "Failed to parse response" });
             controller.close();
             return;
           }
 
-          const parsed = JSON.parse(jsonMatch[0]) as Record<string, string>;
-
           const letter =
-            typeof parsed.letter === 'string'
+            typeof parsed.letter === "string"
               ? parsed.letter
-              : JSON.stringify(parsed.letter || '');
+              : JSON.stringify(parsed.letter || "");
           delete parsed.letter;
 
           const suggestedTitle =
-            typeof parsed.title === 'string' ? parsed.title : '';
+            typeof parsed.title === "string" ? parsed.title : "";
           delete parsed.title;
 
           const notStated = NOT_STATED[language];
           const sectionContents: Record<string, string> = {};
           for (const id of allIds) {
             const value = parsed[id];
-            sectionContents[id] = typeof value === 'string' ? value : notStated;
+            sectionContents[id] = typeof value === "string" ? value : notStated;
           }
 
-          const generatedNote = buildTemplateHtml(template, sectionContents, sectionLabels);
+          const generatedNote = buildTemplateHtml(
+            template,
+            sectionContents,
+            sectionLabels,
+          );
 
-          // Save to DB
+          // Save to DB (with clinical analysis metadata)
           const existingMetadata =
             (visit.metadata as Record<string, unknown>) || {};
           supabase
-            .from('visits')
+            .from("visits")
             .update({
               soap_note: generatedNote,
               patient_letter: letter,
@@ -243,40 +301,63 @@ export async function POST(request: NextRequest) {
                 ...existingMetadata,
                 template_id: template.id,
                 ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+                ...(clinicalAnalysis
+                  ? {
+                      clinical_analysis: {
+                        inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                        secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                        matchedConcepts: clinicalAnalysis.matchedConcepts,
+                        candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                        problemClusters: clinicalAnalysis.problemClusters,
+                      },
+                    }
+                  : {}),
               },
             })
-            .eq('id', visitId)
+            .eq("id", visitId)
             .then(({ error }) => {
-              if (error) console.error('Failed to save regenerated content:', error);
+              if (error)
+                console.error("Failed to save regenerated content:", error);
             });
 
           // Log usage
           logUsage({
             userId,
             visitId,
-            provider: 'anthropic',
-            model: 'claude-sonnet-4-5-20250929',
-            operation: 'generate_template',
+            provider: "anthropic",
+            model: GENERATION_MODEL,
+            operation: "generate_template",
             inputTokens,
             outputTokens,
           });
 
           // Send final complete event
           sendEvent({
-            type: 'complete',
+            type: "complete",
             generatedNote,
             letter,
             suggestedTitle,
             usedChunks: usedChunkIds,
             templateId: template.id,
+            ...(clinicalAnalysis
+              ? {
+                  clinicalAnalysis: {
+                    inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                    secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                    candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                    matchedConcepts: clinicalAnalysis.matchedConcepts,
+                    problemClusters: clinicalAnalysis.problemClusters,
+                  },
+                }
+              : {}),
           });
 
           controller.close();
         } catch (err) {
-          console.error('Regenerate stream error:', err);
+          console.error("Regenerate stream error:", err);
           sendEvent({
-            type: 'error',
-            error: err instanceof Error ? err.message : 'Generation failed',
+            type: "error",
+            error: err instanceof Error ? err.message : "Generation failed",
           });
           controller.close();
         }
@@ -285,16 +366,16 @@ export async function POST(request: NextRequest) {
 
     return new Response(readable, {
       headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
       },
     });
   } catch (err) {
-    console.error('Regenerate route error:', err);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+    console.error("Regenerate route error:", err);
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { "Content-Type": "application/json" },
     });
   }
 }

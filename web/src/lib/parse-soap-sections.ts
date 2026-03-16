@@ -1,7 +1,11 @@
 import type { Template } from "./templates/types";
 
 /** Values the AI uses for sections with no relevant information — treat as empty. */
-const NOT_STATED_VALUES = new Set(["Not stated", "Neuvedené", "Neuvedeno"]);
+export const NOT_STATED_VALUES = new Set([
+  "Not stated",
+  "Neuvedené",
+  "Neuvedeno",
+]);
 
 export interface SoapSection {
   id: string;
@@ -57,6 +61,7 @@ export function parseSoapSections(html: string): SoapSection[] {
 /**
  * Convert a section's HTML content to markdown-style text for clipboard copy.
  * h2 titles are **bold**, h3 subheaders are *italic*.
+ * Numbered (1. / 2.) and bullet (- / •) lists get each item on its own line.
  */
 export function sectionToPlainText(section: SoapSection): string {
   const text = section.content
@@ -69,17 +74,38 @@ export function sectionToPlainText(section: SoapSection): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    // Ensure numbered items (1. / 2.) start on a new line
+    .replace(/([^\n])(\d+\.\s)/g, "$1\n$2")
+    // Ensure bullet items (- or •) start on a new line
+    .replace(/([^\n])([-•]\s)/g, "$1\n$2")
     .trim();
 
   return `**${section.title}**\n${text}`;
 }
 
 /**
+ * Check if a section's content is a "not stated" placeholder.
+ */
+function isSectionNotStated(section: SoapSection): boolean {
+  const text = section.content
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .trim();
+  return !text || NOT_STATED_VALUES.has(text);
+}
+
+/**
  * Convert all sections to a single markdown-style string for clipboard.
- * Sections are separated by blank lines.
+ * Sections with "Not stated" content are excluded.
  */
 export function allSectionsToPlainText(sections: SoapSection[]): string {
-  return sections.map(sectionToPlainText).join("\n\n");
+  return sections
+    .filter((s) => !isSectionNotStated(s))
+    .map(sectionToPlainText)
+    .join("\n\n");
 }
 
 /**

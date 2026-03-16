@@ -1,16 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/supabase/auth';
-import { embedText } from '@/lib/openai';
-import { generateFromTemplate } from '@/lib/anthropic';
-import { extractTextFromFile } from '@/lib/file-extraction';
-import { getTemplateById, getDefaultTemplate } from '@/lib/templates';
-import { flattenSectionIds } from '@/lib/templates/html';
-import type { GenerateResponse, SupportedLanguage } from '@/lib/types';
+import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { embedText } from "@/lib/openai";
+import { generateFromTemplate } from "@/lib/anthropic";
+import { extractTextFromFile } from "@/lib/file-extraction";
+import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import { flattenSectionIds } from "@/lib/templates/html";
+import { runClinicalAnalysis } from "@/lib/clinical";
+import type { ClinicalAnalysis } from "@/lib/clinical/types";
+import type { GenerateResponse, SupportedLanguage } from "@/lib/types";
 
 const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
-  en: 'Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up',
-  sk: 'Symptómy pacienta, diagnóza, vyšetrenie, plán liečby, lieky, kontrola',
-  cs: 'Symptomy pacienta, diagnóza, vyšetření, plán léčby, léky, kontrola',
+  en: "Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up",
+  sk: "Symptómy pacienta, diagnóza, vyšetrenie, plán liečby, lieky, kontrola",
+  cs: "Symptomy pacienta, diagnóza, vyšetření, plán léčby, léky, kontrola",
 };
 
 export async function POST(request: NextRequest) {
@@ -25,26 +27,23 @@ export async function POST(request: NextRequest) {
 
     if (!visitId) {
       return NextResponse.json(
-        { error: 'Missing required field: visitId' },
-        { status: 400 }
+        { error: "Missing required field: visitId" },
+        { status: 400 },
       );
     }
 
     // Fetch the visit to get its language and existing metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase
-      .from('visits')
-      .select('id, language, metadata')
-      .eq('id', visitId)
+      .from("visits")
+      .select("id, language, metadata")
+      .eq("id", visitId)
       .single();
 
     if (visitError || !visit) {
-      return NextResponse.json(
-        { error: 'Visit not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
-    const language = (visit.language as SupportedLanguage) || 'en';
+    const language = (visit.language as SupportedLanguage) || "en";
 
     // Process uploaded files — extract text from any that haven't been processed yet
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
@@ -59,14 +58,14 @@ export async function POST(request: NextRequest) {
 
     // Extract text from unprocessed files (skip recording files — handled by process-audio)
     const unprocessed = uploadedFiles.filter(
-      (f) => !f.extracted_text && f.source !== 'recording' && f.path
+      (f) => !f.extracted_text && f.source !== "recording" && f.path,
     );
 
     if (unprocessed.length > 0) {
       for (const file of unprocessed) {
         try {
           const { data: fileData, error: dlError } = await supabase.storage
-            .from('encounter-files')
+            .from("encounter-files")
             .download(file.path);
 
           if (dlError || !fileData) {
@@ -75,7 +74,13 @@ export async function POST(request: NextRequest) {
           }
 
           const buffer = Buffer.from(await fileData.arrayBuffer());
-          const text = await extractTextFromFile(buffer, file.name, file.type, language, { userId, visitId });
+          const text = await extractTextFromFile(
+            buffer,
+            file.name,
+            file.type,
+            language,
+            { userId, visitId },
+          );
           file.extracted_text = text;
         } catch (err) {
           console.error(`Text extraction failed for ${file.name}:`, err);
@@ -84,9 +89,9 @@ export async function POST(request: NextRequest) {
 
       // Persist extracted text back to metadata
       await supabase
-        .from('visits')
+        .from("visits")
         .update({ metadata: { ...visitMeta, files: uploadedFiles } })
-        .eq('id', visitId);
+        .eq("id", visitId);
     }
 
     const fileTexts = uploadedFiles
@@ -112,26 +117,29 @@ export async function POST(request: NextRequest) {
     let chunkContents: string[] = [];
     let usedChunks: string[] = [];
 
-    const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], { userId, visitId });
+    const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
+      userId,
+      visitId,
+    });
 
     const { data: matches, error: rpcError } = await supabase.rpc(
-      'match_chunks',
+      "match_chunks",
       {
         query_embedding: JSON.stringify(queryEmbedding),
         match_count: 16,
         p_visit_id: visitId,
-      }
+      },
     );
 
     const hasFileContent = fileTexts.length > 0;
 
     if (rpcError) {
-      console.error('match_chunks RPC error:', rpcError);
+      console.error("match_chunks RPC error:", rpcError);
       // Only fail if we also have no doctor notes or file content
       if (!doctorNotes?.trim() && !hasFileContent) {
         return NextResponse.json(
           { error: `Chunk retrieval failed: ${rpcError.message}` },
-          { status: 500 }
+          { status: 500 },
         );
       }
     }
@@ -139,27 +147,50 @@ export async function POST(request: NextRequest) {
     if (!matches || matches.length === 0) {
       if (!doctorNotes?.trim() && !hasFileContent) {
         return NextResponse.json(
-          { error: 'No transcript, doctor notes, or file content available for generation' },
-          { status: 404 }
+          {
+            error:
+              "No transcript, doctor notes, or file content available for generation",
+          },
+          { status: 404 },
         );
       }
     } else {
-      chunkContents = matches.map(
-        (m: { content: string }) => m.content
-      );
-      usedChunks = matches.map(
-        (m: { id: string }) => m.id as string
-      );
+      chunkContents = matches.map((m: { content: string }) => m.content);
+      usedChunks = matches.map((m: { id: string }) => m.id as string);
     }
 
-    // Generate note from template
+    // Pass 1: Clinical analysis (non-fatal — proceed without if it fails)
+    let clinicalAnalysis: ClinicalAnalysis | null = null;
+    if (chunkContents.length > 0) {
+      try {
+        clinicalAnalysis = await runClinicalAnalysis(chunkContents, language, {
+          userId,
+          visitId,
+        });
+        console.log(
+          "Clinical analysis complete — specialty:",
+          clinicalAnalysis.inferredSpecialty,
+          "concepts:",
+          clinicalAnalysis.matchedConcepts.length,
+          "ICD codes:",
+          clinicalAnalysis.candidateIcdCodes.length,
+        );
+      } catch (analysisErr) {
+        console.warn(
+          "Clinical analysis failed, proceeding without enrichment:",
+          analysisErr,
+        );
+      }
+    }
+
+    // Pass 2: Generate note from template (enriched with clinical analysis)
     console.log(
-      'Calling Anthropic with',
+      "Calling Anthropic with",
       chunkContents.length,
-      'chunks, language:',
+      "chunks, language:",
       language,
-      'template:',
-      template.id
+      "template:",
+      template.id,
     );
     let generatedNote: string;
     let letter: string;
@@ -172,26 +203,26 @@ export async function POST(request: NextRequest) {
         sectionLabels,
         doctorNotes,
         fileTexts,
-        { userId, visitId }
+        { userId, visitId },
+        clinicalAnalysis ?? undefined,
       );
       generatedNote = result.generatedNote;
       letter = result.letter;
       suggestedTitle = result.suggestedTitle;
     } catch (anthropicErr) {
-      console.error('Anthropic generation failed:', anthropicErr);
+      console.error("Anthropic generation failed:", anthropicErr);
       return NextResponse.json(
         {
           error: `Generation failed: ${anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr)}`,
         },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     // Save generated content to the visit (preserve existing metadata)
-    const existingMetadata =
-      (visit.metadata as Record<string, unknown>) || {};
+    const existingMetadata = (visit.metadata as Record<string, unknown>) || {};
     const { error: updateError } = await supabase
-      .from('visits')
+      .from("visits")
       .update({
         soap_note: generatedNote,
         patient_letter: letter,
@@ -199,12 +230,23 @@ export async function POST(request: NextRequest) {
           ...existingMetadata,
           template_id: template.id,
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          ...(clinicalAnalysis
+            ? {
+                clinical_analysis: {
+                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                  matchedConcepts: clinicalAnalysis.matchedConcepts,
+                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                  problemClusters: clinicalAnalysis.problemClusters,
+                },
+              }
+            : {}),
         },
       })
-      .eq('id', visitId);
+      .eq("id", visitId);
 
     if (updateError) {
-      console.error('Failed to save generated content:', updateError);
+      console.error("Failed to save generated content:", updateError);
     }
 
     const response: GenerateResponse = {
@@ -214,15 +256,26 @@ export async function POST(request: NextRequest) {
       usedChunks,
       templateId: template.id,
       soap: generatedNote,
+      ...(clinicalAnalysis
+        ? {
+            clinicalAnalysis: {
+              inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+              secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+              candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+              matchedConcepts: clinicalAnalysis.matchedConcepts,
+              problemClusters: clinicalAnalysis.problemClusters,
+            },
+          }
+        : {}),
     };
 
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error('Generate route error:', err);
+    console.error("Generate route error:", err);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }

@@ -1,8 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type { SupportedLanguage } from './types';
-import type { Template } from './templates/types';
-import { buildTemplateHtml, flattenSectionIds } from './templates/html';
-import { logUsage, type UsageContext } from './usage';
+import Anthropic from "@anthropic-ai/sdk";
+import type { SupportedLanguage } from "./types";
+import type { Template } from "./templates/types";
+import { buildTemplateHtml, flattenSectionIds } from "./templates/html";
+import { logUsage, type UsageContext } from "./usage";
+import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
+import { extractJson } from "./clinical/json-repair";
+import type { ClinicalAnalysis } from "./clinical/types";
 
 let _anthropic: Anthropic | null = null;
 export function anthropic() {
@@ -11,15 +14,15 @@ export function anthropic() {
 }
 
 export const NOT_STATED: Record<SupportedLanguage, string> = {
-  en: 'Not stated',
-  sk: 'Neuvedené',
-  cs: 'Neuvedeno',
+  en: "Not stated",
+  sk: "Neuvedené",
+  cs: "Neuvedeno",
 };
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
-  en: 'English',
-  sk: 'Slovak',
-  cs: 'Czech',
+  en: "English",
+  sk: "Slovak",
+  cs: "Czech",
 };
 
 function buildSystemPrompt(language: SupportedLanguage): string {
@@ -52,51 +55,45 @@ A clear, patient-friendly summary letter of the consultation in ${langLabel}. Us
  */
 export async function generateSOAPAndLetter(
   chunks: string[],
-  language: SupportedLanguage
+  language: SupportedLanguage,
 ): Promise<{ soap: string; letter: string }> {
   const numberedChunks = chunks
     .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
-    .join('\n\n');
+    .join("\n\n");
 
   const response = await anthropic().messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: "claude-sonnet-4-5-20250929",
     max_tokens: 4096,
     system: buildSystemPrompt(language),
     messages: [
       {
-        role: 'user',
+        role: "user",
         content: `Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}\n\nGenerate the SOAP note and patient letter based ONLY on the information above. Return valid JSON with keys "soap" and "letter".`,
       },
     ],
   });
 
   const text =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+    response.content[0].type === "text" ? response.content[0].text : "";
 
-  // Extract JSON from the response (handles markdown code blocks)
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Failed to parse structured response from Claude');
-  }
-
-  const parsed = JSON.parse(jsonMatch[0]) as {
+  const parsed = extractJson<{
     soap: string | Record<string, string>;
     letter: string;
-  };
+  }>(text);
 
   // Claude sometimes returns soap as {S, O, A, P} object — normalize to string
   let soap: string;
-  if (typeof parsed.soap === 'object' && parsed.soap !== null) {
+  if (typeof parsed.soap === "object" && parsed.soap !== null) {
     soap = Object.entries(parsed.soap)
       .map(([key, value]) => `${key}: ${value}`)
-      .join('\n\n');
+      .join("\n\n");
   } else {
     soap = parsed.soap;
   }
 
   // Same safety check for letter
   const letter =
-    typeof parsed.letter === 'string'
+    typeof parsed.letter === "string"
       ? parsed.letter
       : JSON.stringify(parsed.letter);
 
@@ -109,7 +106,7 @@ export async function generateSOAPAndLetter(
 export function buildTemplateSystemPrompt(
   template: Template,
   language: SupportedLanguage,
-  sectionLabels: Record<string, string>
+  sectionLabels: Record<string, string>,
 ): string {
   const notStated = NOT_STATED[language];
   const langLabel = LANGUAGE_LABELS[language];
@@ -117,7 +114,7 @@ export function buildTemplateSystemPrompt(
 
   const sectionList = allIds
     .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
-    .join('\n');
+    .join("\n");
 
   return `You are a medical documentation assistant. You MUST follow these rules strictly:
 
@@ -151,14 +148,16 @@ export function buildTemplateUserMessage(
   if (chunks.length > 0) {
     const numberedChunks = chunks
       .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
-      .join('\n\n');
-    parts.push(`Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}`);
+      .join("\n\n");
+    parts.push(
+      `Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}`,
+    );
   }
 
   if (fileTexts && fileTexts.length > 0) {
     const fileSection = fileTexts
       .map((f, i) => `[File ${i + 1}: ${f.name}]:\n${f.text}`)
-      .join('\n\n');
+      .join("\n\n");
     parts.push(`UPLOADED FILE CONTENTS:\n\n${fileSection}`);
   }
 
@@ -167,15 +166,17 @@ export function buildTemplateUserMessage(
   }
 
   parts.push(
-    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(', ')}, "letter", and "title".`
+    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}, "letter", and "title".`,
   );
 
-  return parts.join('\n\n');
+  return parts.join("\n\n");
 }
 
 /**
  * Generate a medical document from a template, transcript chunks, and optional doctor notes.
  */
+export const GENERATION_MODEL = "claude-opus-4-6";
+
 export async function generateFromTemplate(
   chunks: string[],
   template: Template,
@@ -183,18 +184,34 @@ export async function generateFromTemplate(
   sectionLabels: Record<string, string>,
   doctorNotes?: string,
   fileTexts?: { name: string; type: string; text: string }[],
-  ctx?: UsageContext
+  ctx?: UsageContext,
+  clinicalAnalysis?: ClinicalAnalysis,
 ): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
-  const userMessage = buildTemplateUserMessage(chunks, template, doctorNotes, fileTexts);
+  const userMessage = buildTemplateUserMessage(
+    chunks,
+    template,
+    doctorNotes,
+    fileTexts,
+  );
+
+  // Build system prompt, enriched with specialty context if analysis available
+  let systemPrompt = buildTemplateSystemPrompt(
+    template,
+    language,
+    sectionLabels,
+  );
+  if (clinicalAnalysis) {
+    systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
+  }
 
   const response = await anthropic().messages.create({
-    model: 'claude-sonnet-4-5-20250929',
+    model: GENERATION_MODEL,
     max_tokens: 8192,
-    system: buildTemplateSystemPrompt(template, language, sectionLabels),
+    system: systemPrompt,
     messages: [
       {
-        role: 'user',
+        role: "user",
         content: userMessage,
       },
     ],
@@ -204,33 +221,27 @@ export async function generateFromTemplate(
     logUsage({
       userId: ctx.userId,
       visitId: ctx.visitId,
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-5-20250929',
-      operation: 'generate_template',
+      provider: "anthropic",
+      model: GENERATION_MODEL,
+      operation: "generate_template",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
   }
 
   const text =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+    response.content[0].type === "text" ? response.content[0].text : "";
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Failed to parse structured response from Claude');
-  }
-
-  const parsed = JSON.parse(jsonMatch[0]) as Record<string, string>;
+  const parsed = extractJson<Record<string, string>>(text);
 
   // Extract letter and title, remove from section contents
   const letter =
-    typeof parsed.letter === 'string'
+    typeof parsed.letter === "string"
       ? parsed.letter
-      : JSON.stringify(parsed.letter || '');
+      : JSON.stringify(parsed.letter || "");
   delete parsed.letter;
 
-  const suggestedTitle =
-    typeof parsed.title === 'string' ? parsed.title : '';
+  const suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
   delete parsed.title;
 
   // Ensure all section IDs have content, fill missing with "Not stated"
@@ -238,10 +249,14 @@ export async function generateFromTemplate(
   const sectionContents: Record<string, string> = {};
   for (const id of allIds) {
     const value = parsed[id];
-    sectionContents[id] = typeof value === 'string' ? value : notStated;
+    sectionContents[id] = typeof value === "string" ? value : notStated;
   }
 
-  const generatedNote = buildTemplateHtml(template, sectionContents, sectionLabels);
+  const generatedNote = buildTemplateHtml(
+    template,
+    sectionContents,
+    sectionLabels,
+  );
 
   return { generatedNote, letter, suggestedTitle };
 }

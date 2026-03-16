@@ -211,7 +211,7 @@ export function ReviewView({
     [onRegenerate],
   );
 
-  // Copy note to clipboard
+  // Copy note to clipboard (excludes empty / "Not stated" sections)
   const handleCopyNote = useCallback(async () => {
     const currentHtml =
       template && Object.keys(sectionContents).length > 0
@@ -223,6 +223,7 @@ export function ReviewView({
               ),
             ),
             sectionLabels,
+            { skipEmpty: true },
           )
         : generatedNoteHtml;
     const parsed = parseSoapSections(currentHtml);

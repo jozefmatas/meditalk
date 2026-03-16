@@ -1,15 +1,21 @@
 // DB row types (matching supabase/migrations)
 
 // Encounter types
-export type EncounterStatus = 'started' | 'recording' | 'processing' | 'to_review' | 'completed' | 'archived';
+export type EncounterStatus =
+  | "started"
+  | "recording"
+  | "processing"
+  | "to_review"
+  | "completed"
+  | "archived";
 export type EncounterType =
-  | 'consultation'
-  | 'follow_up'
-  | 'preventive'
-  | 'acute'
-  | 'specialist_referral'
-  | 'telemedicine'
-  | 'home_visit';
+  | "consultation"
+  | "follow_up"
+  | "preventive"
+  | "acute"
+  | "specialist_referral"
+  | "telemedicine"
+  | "home_visit";
 
 export interface Encounter {
   id: string;
@@ -89,6 +95,25 @@ export interface GenerateResponse {
   suggestedTitle?: string;
   usedChunks: string[];
   templateId: string;
+  /** Clinical analysis results from Pass 1 */
+  clinicalAnalysis?: {
+    inferredSpecialty: string;
+    secondarySpecialty?: string;
+    candidateIcdCodes: Array<{
+      code: string;
+      description: string;
+      confidence: string;
+    }>;
+    matchedConcepts: Array<{
+      conceptId: string;
+      canonicalName: string;
+      confidence: string;
+    }>;
+    problemClusters: Array<{
+      label: string;
+      conceptIds: string[];
+    }>;
+  };
   /** @deprecated Use generatedNote instead */
   soap?: string;
 }
@@ -101,7 +126,7 @@ export interface EncounterListResponse {
 }
 
 // Utility types
-export type SupportedLanguage = 'en' | 'sk' | 'cs';
+export type SupportedLanguage = "en" | "sk" | "cs";
 
 // Encounter list query params
 export interface EncounterListParams {
@@ -109,6 +134,6 @@ export interface EncounterListParams {
   limit?: number;
   status?: EncounterStatus;
   search?: string;
-  sortBy?: 'visit_date' | 'created_at' | 'patient_name';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: "visit_date" | "created_at" | "patient_name";
+  sortOrder?: "asc" | "desc";
 }
