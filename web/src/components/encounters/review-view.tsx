@@ -162,9 +162,13 @@ export function ReviewView({
     [currentVisibleTabs, defaultVisibleTabs],
   );
 
-  /** Determine which section/subsection IDs have content and are not removed */
+  /** Determine which section/subsection IDs have content and are not removed.
+   *  During regeneration, derive from streamed sections instead of stale sectionContents. */
   const documentedSectionIds = useMemo(() => {
     if (!template) return new Set<string>();
+    if (isRegenerating) {
+      return new Set(streamedSections.map((s) => s.id));
+    }
     const documented = new Set<string>();
     for (const id of flattenSectionIds(template)) {
       if (!removedSections.has(id) && sectionContents[id]?.trim()) {
@@ -172,7 +176,13 @@ export function ReviewView({
       }
     }
     return documented;
-  }, [template, sectionContents, removedSections]);
+  }, [
+    template,
+    sectionContents,
+    removedSections,
+    isRegenerating,
+    streamedSections,
+  ]);
 
   // Scroll to a note section card by its template section ID (centered in scroll container)
   const handleScrollToNoteSection = useCallback((sectionId: string) => {
@@ -364,9 +374,10 @@ export function ReviewView({
             <TemplateSidebar
               templateId={selectedTemplateId}
               onTemplateChange={handleRegenerateWithTabSwitch}
+              disabled={isRegenerating}
               documentedSections={documentedSectionIds}
               onScrollToSection={handleScrollToNoteSection}
-              onAddSection={onAddSection}
+              onAddSection={isRegenerating ? undefined : onAddSection}
               stickyTop={stickyHeaderHeight + 24}
             />
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -16,6 +16,15 @@ import { cn } from "@/lib/utils";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { useSidebarEncounters } from "@/hooks/use-sidebar-encounters";
 import type { Encounter } from "@/lib/types";
+import { Button } from "@/components/shared/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/shared/dialog";
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -152,6 +161,14 @@ export function NavEncounters() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Delete confirmation dialog
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const requestDelete = (id: string) => setDeleteTarget(id);
+  const confirmDelete = () => {
+    if (deleteTarget) deleteVisit(deleteTarget);
+    setDeleteTarget(null);
+  };
+
   const ongoing = useMemo(
     () => visits.filter((v) => ONGOING_STATUSES.has(v.status)),
     [visits],
@@ -189,7 +206,7 @@ export function NavEncounters() {
           href={visitHref}
           t={t}
           tNav={tNav}
-          onDelete={deleteVisit}
+          onDelete={requestDelete}
           onMarkComplete={markComplete}
         />
       );
@@ -238,6 +255,26 @@ export function NavEncounters() {
           {hasMore && <div ref={sentinelRef} className="h-1 shrink-0" />}
         </>
       )}
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("delete.title")}</DialogTitle>
+            <DialogDescription>{t("delete.message")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              {t("delete.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              {t("delete.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

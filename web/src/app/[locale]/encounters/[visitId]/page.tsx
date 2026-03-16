@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useCallback, useMemo, useRef } from "react";
+import { use, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
@@ -12,6 +12,15 @@ import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
 import { ReviewView } from "@/components/encounters/review-view";
 import { Alert, AlertDescription } from "@/components/shared/alert";
+import { Button } from "@/components/shared/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/shared/dialog";
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
@@ -205,9 +214,13 @@ export default function EncounterDetailPage({ params }: PageProps) {
     }
   };
 
-  const handleDelete = async () => {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  const handleDelete = () => setDeleteDialogOpen(true);
+
+  const confirmDelete = async () => {
     if (!visitId) return;
-    if (!confirm(t("delete.message"))) return;
+    setDeleteDialogOpen(false);
     try {
       const res = await fetch(`/api/encounters/${visitId}`, {
         method: "DELETE",
@@ -353,11 +366,29 @@ export default function EncounterDetailPage({ params }: PageProps) {
             onAudioBlobReady={(blob) => generation.setAudioBlob(blob)}
           />
         ) : (
-          <IcdPanel
-            visit={data.visit}
-            setVisit={data.setVisit}
-          />
+          <IcdPanel visit={data.visit} setVisit={data.setVisit} />
         ))}
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("delete.title")}</DialogTitle>
+            <DialogDescription>{t("delete.message")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+            >
+              {t("delete.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              {t("delete.confirm")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }

@@ -231,30 +231,32 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
       {selectedCodes.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-xs foreground/65">{t("icdSelected")}</p>
-          {selectedCodes.filter((c) => locale === "en" || localizedMap.has(c.code)).map((code) => (
-            <div
-              key={code.code}
-              className="group flex items-center justify-between rounded-xl bg-accent p-3"
-            >
-              <div className="flex min-w-0 flex-col gap-1">
-                <span className="text-sm font-normal text-primary">
-                  {codeFor(code)}
-                </span>
-                <span className="truncate text-xs text-foreground">
-                  {descFor(code)}
-                </span>
-              </div>
-              <button
-                onClick={() => removeCode(code.code)}
-                className="flex shrink-0 items-center justify-center rounded-lg opacity-0 transition-opacity size-8 hover:bg-background/50 group-hover:opacity-100"
+          {selectedCodes
+            .filter((c) => locale === "en" || localizedMap.has(c.code))
+            .map((code) => (
+              <div
+                key={code.code}
+                className="group flex items-center justify-between rounded-xl bg-accent p-3"
               >
-                <HugeiconsIcon
-                  icon={Cancel01Icon}
-                  className="size-4 text-muted-foreground"
-                />
-              </button>
-            </div>
-          ))}
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="text-sm font-normal text-primary">
+                    {codeFor(code)}
+                  </span>
+                  <span className="truncate text-xs text-foreground">
+                    {descFor(code)}
+                  </span>
+                </div>
+                <button
+                  onClick={() => removeCode(code.code)}
+                  className="flex shrink-0 items-center justify-center rounded-lg opacity-0 transition-opacity size-8 hover:bg-background/50 group-hover:opacity-100"
+                >
+                  <HugeiconsIcon
+                    icon={Cancel01Icon}
+                    className="size-4 text-muted-foreground"
+                  />
+                </button>
+              </div>
+            ))}
         </div>
       )}
 
@@ -291,7 +293,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
         )}
 
         {!isSearching && listCodes.length === 0 && (
-          <p className="py-4 text-center text-xs text-muted-foreground">
+          <p className="py-4 text-center text-xs foreground">
             {searchQuery.length >= 2
               ? t("icdNoResults")
               : activeTab === "suggested"
@@ -310,7 +312,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
               className="flex w-full flex-col gap-1 rounded-xl border border-border p-3 text-left transition-colors hover:border-ring"
             >
               <span className="text-sm text-foreground">{code.code}</span>
-              <span className="text-xs leading-snug text-muted-foreground">
+              <span className="text-xs leading-snug foreground/65">
                 {code.description}
               </span>
             </button>
