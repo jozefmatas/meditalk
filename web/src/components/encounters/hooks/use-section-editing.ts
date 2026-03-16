@@ -33,10 +33,12 @@ export function useSectionEditing({
   const [focusSectionId, setFocusSectionId] = useState<string | null>(null);
   const sectionContentsRef = useRef<Record<string, string>>({});
 
-  // Initialize sectionContents from generated HTML
+  // Initialize sectionContents from generated HTML — setState is intentional here
+  // because we're syncing local editing state from externally-generated HTML.
   useEffect(() => {
     if (!template || !generatedNoteHtml) return;
     const map = parseNoteToSectionMap(generatedNoteHtml, template);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from external data
     setSectionContents(map);
     sectionContentsRef.current = map;
 

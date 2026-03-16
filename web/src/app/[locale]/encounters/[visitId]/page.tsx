@@ -58,14 +58,19 @@ export default function EncounterDetailPage({ params }: PageProps) {
   // Refs to break circular dependency: data hook's onLoaded needs metadata
   // setters, but metadata hook needs data hook's visit/setVisit.
   // useState setters are stable so ref wiring is safe.
-  const metadataSettersRef = useRef({
-    setTitle: (_: string) => {},
-    setPatientName: (_: string) => {},
-    setPatientId: (_: string) => {},
-    setVisitType: (_: EncounterType) => {},
+  const metadataSettersRef = useRef<{
+    setTitle: (v: string) => void;
+    setPatientName: (v: string) => void;
+    setPatientId: (v: string) => void;
+    setVisitType: (v: EncounterType) => void;
+  }>({
+    setTitle: () => {},
+    setPatientName: () => {},
+    setPatientId: () => {},
+    setVisitType: () => {},
   });
-  const updateTitleRef = useRef((_: string) => {});
-  const initGenerationRef = useRef((_: Encounter) => {});
+  const updateTitleRef = useRef<(v: string) => void>(() => {});
+  const initGenerationRef = useRef<(v: Encounter) => void>(() => {});
 
   // --- Data hook (fetch + event listeners) ---
   const data = useEncounterData({
@@ -104,9 +109,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
   };
 
   // --- updateTitle bridges metadata + page title + sidebar ---
+  const { setTitle: setMetadataTitle } = metadata;
   const updateTitle = useCallback(
     (newTitle: string) => {
-      metadata.setTitle(newTitle);
+      setMetadataTitle(newTitle);
       setPageTitle(newTitle || null);
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
@@ -114,7 +120,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         }),
       );
     },
-    [visitId, setPageTitle, metadata.setTitle],
+    [visitId, setPageTitle, setMetadataTitle],
   );
   updateTitleRef.current = updateTitle;
 
@@ -136,9 +142,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
   initGenerationRef.current = generation.initFromVisit;
 
   // Keep generation's titleRef in sync
+  const { syncTitle } = generation;
   useEffect(() => {
-    generation.syncTitle(metadata.title);
-  }, [metadata.title, generation.syncTitle]);
+    syncTitle(metadata.title);
+  }, [metadata.title, syncTitle]);
 
   // Template + section labels (shared between generation and section editing)
   const template = getTemplateById(generation.selectedTemplateId);

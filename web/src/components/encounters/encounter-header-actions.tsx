@@ -122,6 +122,7 @@ export function EncounterHeaderActions({
     return () => setHeaderActions(null);
   }, [
     status,
+    isDraft,
     generationLanguage,
     canGenerate,
     isGenerating,

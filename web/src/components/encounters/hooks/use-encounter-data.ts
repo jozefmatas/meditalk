@@ -82,7 +82,6 @@ export function useEncounterData({
     };
 
     fetchVisit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visitId]);
 
   // React to sidebar actions (delete, mark complete) on the current encounter
