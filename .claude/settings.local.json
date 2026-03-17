@@ -109,7 +109,16 @@
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk show:*)",
       "Bash(npx eslint:*)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk rev-parse --show-toplevel:*)",
-      "WebFetch(domain:elevenlabs.io)"
+      "WebFetch(domain:elevenlabs.io)",
+      "Bash(sips:*)",
+      "Bash(npx jest)",
+      "Bash(npx vercel logs:*)",
+      "Bash(gh api:*)",
+      "Bash(head:*)",
+      "Bash(git diff:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log --oneline --all)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk remote -v:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk status --short)"
     ],
     "deny": [],
     "ask": []
