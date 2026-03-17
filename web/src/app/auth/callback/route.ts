@@ -32,7 +32,9 @@ export async function GET(request: Request) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      // Redirect to app domain if configured (handles marketing → app flow)
+      const redirectOrigin = process.env.NEXT_PUBLIC_APP_URL || origin;
+      return NextResponse.redirect(`${redirectOrigin}${next}`);
     }
   }
 

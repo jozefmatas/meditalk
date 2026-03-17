@@ -317,5 +317,20 @@
     "errorNoFile": "Vyberte zvukový soubor",
     "successProcess": "Audio úspěšně zpracováno",
     "chunks": "částí"
+  },
+  "marketing": {
+    "nav": {
+      "login": "Přihlásit se",
+      "features": "Funkce",
+      "pricing": "Ceník"
+    },
+    "hero": {
+      "title": "AI dokumentace pro lékaře",
+      "subtitle": "MediTalk automaticky přepíše a zdokumentuje vaše setkání s pacienty. Šetřete čas a soustřeďte se na to, co je důležité.",
+      "cta": "Začít zdarma"
+    },
+    "footer": {
+      "copyright": "© {year} MediTalk. Všechna práva vyhrazena."
+    }
   }
 }

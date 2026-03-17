@@ -6,11 +6,30 @@ import { routing } from "./i18n/routing";
 // Create next-intl middleware handler
 const handleI18nRouting = createIntlMiddleware(routing);
 
+// App-only route segments (after stripping locale prefix)
+const APP_ROUTE_PREFIXES = ["/encounters", "/settings", "/templates"];
+
+function isAppRoute(pathname: string): boolean {
+  // Strip locale prefix if present (e.g. /cs/encounters → /encounters)
+  const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
+  return APP_ROUTE_PREFIXES.some(
+    (prefix) =>
+      withoutLocale === prefix || withoutLocale.startsWith(`${prefix}/`),
+  );
+}
+
 export async function proxy(request: NextRequest) {
   const url = new URL(request.url);
   const pathname = url.pathname;
 
-  // STEP 1: Check for language query parameter from Framer marketing site
+  // ── Domain detection ──
+  const host = request.headers.get("host") || "";
+  const isAppDomain = host.startsWith("app.");
+  const isProductionDomain =
+    host.endsWith(".meditalk.ai") || host === "meditalk.ai";
+  const isMarketingDomain = isProductionDomain && !isAppDomain;
+
+  // STEP 1: Check for language query parameter from marketing site
   const langParam =
     url.searchParams.get("lang") || url.searchParams.get("locale");
 
@@ -28,6 +47,8 @@ export async function proxy(request: NextRequest) {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
       path: "/",
+      // Share cookie across subdomains when on production domain
+      ...(isProductionDomain ? { domain: ".meditalk.ai" } : {}),
     });
 
     return response;
@@ -41,7 +62,27 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // STEP 3: Handle i18n routing
+  // STEP 3: Marketing domain — redirect app routes to app subdomain
+  if (isMarketingDomain && isAppRoute(pathname)) {
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
+    return NextResponse.redirect(new URL(`${pathname}${url.search}`, appUrl));
+  }
+
+  // STEP 3b: Marketing domain — rewrite root path to /landing
+  // (Next.js can't have two page.tsx at the same path, so we use an internal route)
+  if (isMarketingDomain) {
+    const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
+    if (withoutLocale === "/") {
+      const rewriteUrl = request.nextUrl.clone();
+      const localeMatch = pathname.match(/^\/(sk|cs|en)/);
+      rewriteUrl.pathname = localeMatch
+        ? `/${localeMatch[1]}/landing`
+        : "/landing";
+      return NextResponse.rewrite(rewriteUrl);
+    }
+  }
+
+  // STEP 4: Handle i18n routing
   const i18nResponse = handleI18nRouting(request);
 
   // If i18n middleware wants to redirect (e.g. locale detection/switch), return immediately.
@@ -50,7 +91,13 @@ export async function proxy(request: NextRequest) {
     return i18nResponse;
   }
 
-  // STEP 4: Handle Supabase auth — refresh session, protect routes
+  // STEP 5: Marketing domain — skip auth, serve public pages
+  if (isMarketingDomain) {
+    return i18nResponse;
+  }
+
+  // STEP 6: Handle Supabase auth — refresh session, protect routes
+  // (app domain, localhost, preview deploys)
   let supabaseResponse = i18nResponse;
 
   try {
@@ -79,7 +126,11 @@ export async function proxy(request: NextRequest) {
               supabaseResponse.cookies.set(name, value);
             });
             cookiesToSet.forEach(({ name, value, options }) =>
-              supabaseResponse.cookies.set(name, value, options),
+              supabaseResponse.cookies.set(name, value, {
+                ...options,
+                // Share auth cookies across subdomains when on production domain
+                ...(isProductionDomain ? { domain: ".meditalk.ai" } : {}),
+              }),
             );
           },
         },

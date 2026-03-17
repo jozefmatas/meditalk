@@ -317,5 +317,20 @@
     "errorNoFile": "Please select an audio file",
     "successProcess": "Audio processed successfully",
     "chunks": "chunks"
+  },
+  "marketing": {
+    "nav": {
+      "login": "Sign In",
+      "features": "Features",
+      "pricing": "Pricing"
+    },
+    "hero": {
+      "title": "AI documentation for doctors",
+      "subtitle": "MediTalk automatically transcribes and documents your patient encounters. Save time and focus on what matters.",
+      "cta": "Get started free"
+    },
+    "footer": {
+      "copyright": "© {year} MediTalk. All rights reserved."
+    }
   }
 }
