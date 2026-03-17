@@ -194,13 +194,23 @@ export async function POST(request: NextRequest) {
     }
 
     // Pass 1: Clinical analysis (non-fatal — proceed without if it fails)
+    // Combine all available content: transcript chunks + file texts + doctor notes
+    const clinicalInputParts = [...chunkContents];
+    for (const ft of fileTexts) {
+      clinicalInputParts.push(`[File: ${ft.name}]\n${ft.text}`);
+    }
+    if (doctorNotes?.trim()) {
+      clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
+    }
+
     let clinicalAnalysis: ClinicalAnalysis | null = null;
-    if (chunkContents.length > 0) {
+    if (clinicalInputParts.length > 0) {
       try {
-        clinicalAnalysis = await runClinicalAnalysis(chunkContents, language, {
-          userId,
-          visitId,
-        });
+        clinicalAnalysis = await runClinicalAnalysis(
+          clinicalInputParts,
+          language,
+          { userId, visitId },
+        );
         console.log(
           "Clinical analysis complete — specialty:",
           clinicalAnalysis.inferredSpecialty,
