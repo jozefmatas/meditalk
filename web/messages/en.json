@@ -190,10 +190,14 @@
     "description": "Sign in to access your medical transcription workspace",
     "emailLabel": "Email address",
     "emailPlaceholder": "you@example.com",
-    "sendLink": "Send magic link",
-    "checkEmail": "Check your email for a magic link to sign in.",
-    "errorSending": "Failed to send magic link. Please try again.",
-    "errorAuth": "Authentication failed. Please try again."
+    "sendCode": "Send login code",
+    "enterCode": "We sent a 6-digit code to {email}",
+    "errorSending": "Failed to send code. Please try again.",
+    "errorInvalidCode": "Invalid code. Please try again.",
+    "errorAuth": "Authentication failed. Please try again.",
+    "resendCode": "Resend code",
+    "resending": "Sending...",
+    "changeEmail": "Use a different email"
   },
   "templates": {
     "title": "Templates",

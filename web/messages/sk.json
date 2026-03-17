@@ -190,10 +190,14 @@
     "description": "Prihláste sa pre prístup k pracovnému priestoru pre medicínske prepisy",
     "emailLabel": "E-mailová adresa",
     "emailPlaceholder": "vas@email.com",
-    "sendLink": "Odoslať magický odkaz",
-    "checkEmail": "Skontrolujte svoju e-mailovú schránku pre prihlasovací odkaz.",
-    "errorSending": "Nepodarilo sa odoslať odkaz. Skúste to znova.",
-    "errorAuth": "Autentifikácia zlyhala. Skúste to znova."
+    "sendCode": "Odoslať prihlasovací kód",
+    "enterCode": "Poslali sme 6-miestny kód na {email}",
+    "errorSending": "Nepodarilo sa odoslať kód. Skúste to znova.",
+    "errorInvalidCode": "Neplatný kód. Skúste to znova.",
+    "errorAuth": "Autentifikácia zlyhala. Skúste to znova.",
+    "resendCode": "Odoslať znova",
+    "resending": "Odosielam...",
+    "changeEmail": "Použiť iný e-mail"
   },
   "templates": {
     "title": "Šablóny",
