@@ -287,13 +287,13 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
       {/* Code list */}
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
         {isSearching && (
-          <p className="py-4 text-center text-xs text-muted-foreground">
+          <p className="py-4 text-center text-xs text-foreground">
             {t("icdSearching")}
           </p>
         )}
 
         {!isSearching && listCodes.length === 0 && (
-          <p className="py-4 text-center text-xs text-foreground">
+          <p className="py-4 text-center text-xs text-foreground/65">
             {searchQuery.length >= 2
               ? t("icdNoResults")
               : activeTab === "suggested"
