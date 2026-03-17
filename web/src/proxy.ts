@@ -75,9 +75,10 @@ export async function proxy(request: NextRequest) {
     if (withoutLocale === "/") {
       const rewriteUrl = request.nextUrl.clone();
       const localeMatch = pathname.match(/^\/(sk|cs|en)/);
-      rewriteUrl.pathname = localeMatch
-        ? `/${localeMatch[1]}/landing`
-        : "/landing";
+      const locale = localeMatch
+        ? localeMatch[1]
+        : (routing.defaultLocale || "sk");
+      rewriteUrl.pathname = `/${locale}/landing`;
       return NextResponse.rewrite(rewriteUrl);
     }
   }
