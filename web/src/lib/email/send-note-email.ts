@@ -37,7 +37,7 @@ function ctaButton(viewUrl: string, label: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0">
                     <tr>
                       <td style="background-color:#4444ff;border-radius:8px;">
-                        <a href="${viewUrl}" target="_blank" style="display:inline-block;padding:10px 24px;color:#ffffff;font-size:14px;font-weight:500;text-decoration:none;">
+                        <a href="${viewUrl}" target="_blank" style="display:inline-block;padding:10px 24px;color:#ffffff;font-size:14px;font-weight:500;text-decoration:none;width:132px;text-align:center;">
                           ${label}
                         </a>
                       </td>
@@ -71,7 +71,7 @@ function buildEmailHtml({
             <td style="padding:24px 32px;border-bottom:1px solid #e6e3db;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;">
                 <tr>
-                  <td style="vertical-align:middle;white-space:nowrap;">
+                  <td style="vertical-align:middle;white-space:nowrap;width:100%;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>
                         <td style="vertical-align:middle;padding-right:12px;">

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Figtree } from "next/font/google";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
@@ -17,6 +17,20 @@ export const metadata: Metadata = {
   title: "MediTalk - Medical Communication Platform",
   description:
     "Healthcare communication platform for Slovak and Czech medical professionals",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "MediTalk",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#4945ff",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default async function LocaleLayout({

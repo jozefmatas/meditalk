@@ -82,6 +82,10 @@
     },
     "detail": {
       "transcript": "Prepis",
+      "resources": "Zdroje",
+      "recordingTranscript": "Prepis nahrávky",
+      "doctorNotes": "Poznámky lekára",
+      "noResources": "Žiadne zdroje k dispozícii",
       "search": "Hľadať",
       "searchPlaceholder": "Hľadať v návšteve...",
       "noteLanguage": "Jazyk správy",

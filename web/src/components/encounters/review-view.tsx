@@ -20,8 +20,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/shared/dropdown-menu";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/shared/collapsible";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
@@ -111,7 +116,7 @@ export function ReviewView({
   // Tab configuration
   const allTabs: TabOption[] = useMemo(
     () => [
-      { value: "transcript", label: t("detail.transcript") },
+      { value: "resources", label: t("detail.resources") },
       { value: "note", label: t("detail.note") },
       { value: "add-document", label: t("detail.addDocument") },
     ],
@@ -459,18 +464,8 @@ export function ReviewView({
         </div>
       </TabsContent>
 
-      <TabsContent value="transcript" className="pt-6">
-        <div className="rounded-2xl border p-6">
-          {visit.raw_text ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {visit.raw_text}
-            </p>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {t("detail.noTranscript")}
-            </p>
-          )}
-        </div>
+      <TabsContent value="resources" className="pt-6">
+        <ResourcesPanel visit={visit} t={t} />
       </TabsContent>
 
       <TabsContent value="add-document">
@@ -484,5 +479,136 @@ export function ReviewView({
         </div>
       </TabsContent>
     </Tabs>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ResourcesPanel                                                     */
+/* ------------------------------------------------------------------ */
+
+interface ResourcesPanelProps {
+  visit: Encounter;
+  t: (key: string) => string;
+}
+
+interface EncounterFile {
+  name: string;
+  type: string;
+  extracted_text?: string | null;
+}
+
+function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
+  const meta = visit.metadata as Record<string, unknown> | undefined;
+  const doctorNotes = (meta?.doctor_notes as string) || "";
+  const files = ((meta?.files as EncounterFile[]) || []).filter(
+    (f) => f.extracted_text?.trim(),
+  );
+  const transcript = visit.raw_text || "";
+
+  const hasTranscript = transcript.trim().length > 0;
+  const hasDoctorNotes = doctorNotes.trim().length > 0;
+  const hasFiles = files.length > 0;
+  const hasAnything = hasTranscript || hasDoctorNotes || hasFiles;
+
+  // First non-empty section starts open
+  const firstOpen = hasTranscript
+    ? "transcript"
+    : hasDoctorNotes
+      ? "notes"
+      : hasFiles
+        ? "files"
+        : null;
+
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(firstOpen ? [firstOpen] : []),
+  );
+
+  const toggle = useCallback((id: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  if (!hasAnything) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t("detail.noResources")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {hasTranscript && (
+        <ResourceCollapsible
+          id="transcript"
+          label={t("detail.recordingTranscript")}
+          content={transcript}
+          open={openSections.has("transcript")}
+          onToggle={toggle}
+        />
+      )}
+      {hasDoctorNotes && (
+        <ResourceCollapsible
+          id="notes"
+          label={t("detail.doctorNotes")}
+          content={doctorNotes}
+          open={openSections.has("notes")}
+          onToggle={toggle}
+        />
+      )}
+      {files.map((file, i) => (
+        <ResourceCollapsible
+          key={file.name + i}
+          id={`file-${i}`}
+          label={file.name}
+          content={file.extracted_text!}
+          open={openSections.has(`file-${i}`)}
+          onToggle={toggle}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ResourceCollapsible                                                */
+/* ------------------------------------------------------------------ */
+
+interface ResourceCollapsibleProps {
+  id: string;
+  label: string;
+  content: string;
+  open: boolean;
+  onToggle: (id: string) => void;
+}
+
+function ResourceCollapsible({
+  id,
+  label,
+  content,
+  open,
+  onToggle,
+}: ResourceCollapsibleProps) {
+  return (
+    <Collapsible open={open} onOpenChange={() => onToggle(id)}>
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-medium hover:bg-accent/50 transition-colors">
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          className={`size-4 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+        />
+        <span className="truncate">{label}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="rounded-b-lg border border-t-0 border-border bg-card px-4 py-3">
+          <pre className="whitespace-pre-wrap text-sm text-foreground/80 font-sans">
+            {content}
+          </pre>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

@@ -82,6 +82,10 @@
     },
     "detail": {
       "transcript": "Transcript",
+      "resources": "Resources",
+      "recordingTranscript": "Recording transcript",
+      "doctorNotes": "Doctor notes",
+      "noResources": "No resources available",
       "search": "Search",
       "searchPlaceholder": "Search within encounter...",
       "noteLanguage": "Note language",
