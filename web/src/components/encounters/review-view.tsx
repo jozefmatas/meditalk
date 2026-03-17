@@ -2,8 +2,8 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Textarea } from "@/components/shared/textarea";
-import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Badge } from "@/components/shared/badge";
+import { ErrorAlert } from "@/components/shared/error-alert";
 import { Button } from "@/components/shared/button";
 import { Skeleton } from "@/components/shared/skeleton";
 import { TextShimmer } from "@/components/shared/text-shimmer";
@@ -21,7 +21,7 @@ import {
   DropdownMenuItem,
 } from "@/components/shared/dropdown-menu";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { AlertCircleIcon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
@@ -361,14 +361,13 @@ export function ReviewView({
 
       {/* Error alert */}
       {error && (
-        <Alert variant="destructive">
-          <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-          <AlertDescription>
-            {error === "insufficient_context"
+        <ErrorAlert
+          message={
+            error === "insufficient_context"
               ? t("insufficientContext")
-              : error}
-          </AlertDescription>
-        </Alert>
+              : error
+          }
+        />
       )}
 
       {/* Tab content — outside sticky area */}

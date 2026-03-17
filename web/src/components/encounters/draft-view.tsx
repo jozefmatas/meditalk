@@ -2,10 +2,8 @@
 
 import { useRef, useCallback, useMemo } from "react";
 import { Textarea } from "@/components/shared/textarea";
-import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Badge } from "@/components/shared/badge";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { AlertCircleIcon } from "@hugeicons/core-free-icons";
+import { ErrorAlert } from "@/components/shared/error-alert";
 import {
   RecordingBar,
   type RecordingBarRef,
@@ -250,14 +248,13 @@ export function DraftView({
 
       {/* Error alert */}
       {error && (
-        <Alert variant="destructive">
-          <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-          <AlertDescription>
-            {error === "insufficient_context"
+        <ErrorAlert
+          message={
+            error === "insufficient_context"
               ? t("insufficientContext")
-              : error}
-          </AlertDescription>
-        </Alert>
+              : error
+          }
+        />
       )}
 
       {/* Draft: template sidebar + editor */}
