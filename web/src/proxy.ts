@@ -73,6 +73,18 @@ export async function proxy(request: NextRequest) {
   if (isMarketingDomain) {
     const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
     if (withoutLocale === "/") {
+      // Authenticated users → redirect to app domain instead of landing
+      const hasAuthCookie = request.cookies
+        .getAll()
+        .some(
+          (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token"),
+        );
+      if (hasAuthCookie) {
+        const appUrl =
+          process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
+        return NextResponse.redirect(new URL("/", appUrl));
+      }
+
       const rewriteUrl = request.nextUrl.clone();
       const localeMatch = pathname.match(/^\/(sk|cs|en)/);
       const locale = localeMatch
