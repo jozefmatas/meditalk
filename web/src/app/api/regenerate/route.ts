@@ -75,7 +75,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const language = (visit.language as SupportedLanguage) || "en";
+    const language =
+      ((visit.language as string)?.trim() as SupportedLanguage) || "en";
 
     // Fetch chunks directly by visit_id — skip embedding + vector search
     const { data: chunks, error: chunksError } = await supabase

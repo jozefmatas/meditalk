@@ -230,7 +230,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
       {/* Selected codes — hide unresolved codes for non-EN locales */}
       {selectedCodes.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs foreground/65">{t("icdSelected")}</p>
+          <p className="text-xs text-foreground/65">{t("icdSelected")}</p>
           {selectedCodes
             .filter((c) => locale === "en" || localizedMap.has(c.code))
             .map((code) => (
@@ -293,7 +293,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
         )}
 
         {!isSearching && listCodes.length === 0 && (
-          <p className="py-4 text-center text-xs foreground">
+          <p className="py-4 text-center text-xs text-foreground">
             {searchQuery.length >= 2
               ? t("icdNoResults")
               : activeTab === "suggested"
@@ -312,7 +312,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
               className="flex w-full flex-col gap-1 rounded-xl border border-border p-3 text-left transition-colors hover:border-ring"
             >
               <span className="text-sm text-foreground">{code.code}</span>
-              <span className="text-xs leading-snug foreground/65">
+              <span className="text-xs leading-snug text-foreground/65">
                 {code.description}
               </span>
             </button>

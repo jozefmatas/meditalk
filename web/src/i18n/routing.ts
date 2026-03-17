@@ -5,7 +5,7 @@ export const routing = defineRouting({
   locales: ["sk", "cs", "en"],
 
   // Default locale - can be changed via environment variable
-  defaultLocale: (process.env.NEXT_PUBLIC_DEFAULT_LOCALE || "sk") as
+  defaultLocale: (process.env.NEXT_PUBLIC_DEFAULT_LOCALE?.trim() || "sk") as
     | "sk"
     | "cs"
     | "en",
