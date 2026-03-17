@@ -6,6 +6,9 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
+  const host = request.headers.get("host") || "";
+  const isProductionDomain =
+    host.endsWith(".meditalk.ai") || host === "meditalk.ai";
 
   if (code) {
     const cookieStore = await cookies();
@@ -20,7 +23,11 @@ export async function GET(request: Request) {
           setAll(cookiesToSet) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options),
+                cookieStore.set(name, value, {
+                  ...options,
+                  // Share auth cookies across subdomains on production
+                  ...(isProductionDomain ? { domain: ".meditalk.ai" } : {}),
+                }),
               );
             } catch {
               // Ignore - cookie setting may fail in some contexts
