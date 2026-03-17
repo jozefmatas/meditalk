@@ -12,6 +12,8 @@ import { runClinicalAnalysis } from "@/lib/clinical";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { GenerateResponse, SupportedLanguage } from "@/lib/types";
 
+export const maxDuration = 300;
+
 const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
   en: "Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up",
   sk: "Symptómy pacienta, diagnóza, vyšetrenie, plán liečby, lieky, kontrola",

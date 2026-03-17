@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
-import { PDFParse } from "pdf-parse";
 import { transcribeAudio } from "./elevenlabs";
 import type { SupportedLanguage } from "./types";
 import { logUsage, type UsageContext } from "./usage";
@@ -20,7 +19,7 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 /**
  * Extract text content from a file buffer based on its MIME type.
  *
- * - PDF: text extraction via pdf-parse, fallback to Claude document API for scanned PDFs
+ * - PDF: text extraction via Claude document API
  * - Image (PNG/JPEG): OCR via Claude Vision
  * - Audio: transcription via Whisper
  *
@@ -54,24 +53,14 @@ export async function extractTextFromFile(
 }
 
 /**
- * Extract text from PDF. Uses pdf-parse for text-based PDFs.
- * Falls back to Claude document API if pdf-parse returns negligible text.
+ * Extract text from PDF using Claude document API.
+ * Works for both text-based and scanned PDFs without native dependencies.
  */
 async function extractFromPdf(
   buffer: Buffer,
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  const pdf = new PDFParse({ data: new Uint8Array(buffer) });
-  const result = await pdf.getText();
-  const text = result.text?.trim();
-
-  // If pdf-parse extracted meaningful text, use it
-  if (text && text.length > 50) {
-    return text;
-  }
-
-  // Scanned PDF — fall back to Claude document API
   const base64 = buffer.toString("base64");
   return await ocrPdfWithClaude(base64, language, ctx);
 }
