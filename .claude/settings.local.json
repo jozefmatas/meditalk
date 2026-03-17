@@ -118,7 +118,8 @@
       "Bash(git diff:*)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log --oneline --all)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk remote -v:*)",
-      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk status --short)"
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk status --short)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

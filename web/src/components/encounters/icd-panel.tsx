@@ -218,7 +218,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
         : [];
 
   return (
-    <div className="flex h-full w-[280px] shrink-0 flex-col gap-2 border-l bg-background p-6">
+    <div className="flex h-full w-[280px] shrink-0 flex-col gap-2 border-l bg-background p-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium text-foreground">{t("codes")}</h3>
