@@ -303,15 +303,24 @@ export function useEncounterGeneration({
 
         const data = await res.json();
         setGeneratedNoteHtml(data.generatedNote);
-        setVisit((prev) =>
-          prev
-            ? {
-                ...prev,
-                soap_note: data.generatedNote,
-                patient_letter: data.letter,
-              }
-            : prev,
-        );
+        setVisit((prev) => {
+          if (!prev) return prev;
+          const existingMeta = (prev.metadata ?? {}) as Record<
+            string,
+            unknown
+          >;
+          return {
+            ...prev,
+            soap_note: data.generatedNote,
+            patient_letter: data.letter,
+            metadata: {
+              ...existingMeta,
+              ...(data.clinicalAnalysis
+                ? { clinical_analysis: data.clinicalAnalysis }
+                : {}),
+            },
+          };
+        });
 
         // Auto-set title if user hasn't provided one
         const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
