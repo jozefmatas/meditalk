@@ -14,36 +14,89 @@ function isAudioMime(type: string): boolean {
 
 const VALID_LANGUAGES: SupportedLanguage[] = ["en", "sk", "cs"];
 
+/**
+ * POST /api/process-audio
+ * Accepts JSON (audio already in storage) or FormData (legacy fallback).
+ * Transcribes, chunks, and embeds audio. Cleans up storage after extraction.
+ */
 export async function POST(request: NextRequest) {
   try {
     const { userId, supabase } = await requireAuth();
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const title = (formData.get("title") as string) || null;
-    const language = (formData.get("language") as string) || "en";
-    const existingVisitId = (formData.get("visitId") as string) || null;
-    const preTranscript = (formData.get("transcriptText") as string) || null;
+    const contentType = request.headers.get("content-type") || "";
 
-    if (!file) {
-      return NextResponse.json(
-        { error: "No audio file provided" },
-        { status: 400 },
-      );
-    }
+    let audioPath: string;
+    let language: string;
+    let existingVisitId: string | null;
+    let preTranscript: string | null;
+    let title: string | null = null;
 
-    if (!isAudioMime(file.type)) {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${file.type}` },
-        { status: 400 },
-      );
-    }
+    if (contentType.includes("application/json")) {
+      // New path: audio already uploaded to Supabase Storage by the client
+      const body = await request.json();
+      audioPath = body.audioPath;
+      language = body.language || "en";
+      existingVisitId = body.visitId || null;
+      preTranscript = body.transcriptText || null;
 
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: "File exceeds 50 MB limit" },
-        { status: 400 },
-      );
+      if (!audioPath) {
+        return NextResponse.json(
+          { error: "No audioPath provided" },
+          { status: 400 },
+        );
+      }
+
+      // Validate path belongs to authenticated user
+      if (!audioPath.startsWith(`${userId}/`)) {
+        return NextResponse.json(
+          { error: "Invalid audio path" },
+          { status: 403 },
+        );
+      }
+    } else {
+      // Legacy FormData path (fallback)
+      const formData = await request.formData();
+      const file = formData.get("file") as File | null;
+      title = (formData.get("title") as string) || null;
+      language = (formData.get("language") as string) || "en";
+      existingVisitId = (formData.get("visitId") as string) || null;
+      preTranscript = (formData.get("transcriptText") as string) || null;
+
+      if (!file) {
+        return NextResponse.json(
+          { error: "No audio file provided" },
+          { status: 400 },
+        );
+      }
+
+      if (!isAudioMime(file.type)) {
+        return NextResponse.json(
+          { error: `Unsupported file type: ${file.type}` },
+          { status: 400 },
+        );
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: "File exceeds 50 MB limit" },
+          { status: 400 },
+        );
+      }
+
+      // Upload to storage (legacy path)
+      const fileId = crypto.randomUUID();
+      audioPath = `${userId}/${fileId}-${file.name}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("encounter-files")
+        .upload(audioPath, file, { contentType: file.type });
+
+      if (uploadError) {
+        return NextResponse.json(
+          { error: "Failed to upload audio file" },
+          { status: 500 },
+        );
+      }
     }
 
     if (!VALID_LANGUAGES.includes(language as SupportedLanguage)) {
@@ -53,25 +106,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Upload to Supabase Storage
-    const fileId = crypto.randomUUID();
-    const audioPath = `${userId}/${fileId}-${file.name}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("encounter-files")
-      .upload(audioPath, file, { contentType: file.type });
-
-    if (uploadError) {
-      return NextResponse.json(
-        { error: "Failed to upload audio file" },
-        { status: 500 },
-      );
-    }
-
-    // Use pre-transcribed text from real-time streaming, or fall back to batch
+    // Transcription: use pre-transcript if available, else download + batch transcribe
+    let rawText: string;
     const usageCtx = { userId, visitId: existingVisitId || undefined };
-    const rawText =
-      preTranscript || (await transcribeAudio(file, file.name, usageCtx));
+
+    if (preTranscript) {
+      rawText = preTranscript;
+    } else {
+      // Download from storage for batch transcription
+      const { data: fileData, error: dlError } = await supabase.storage
+        .from("encounter-files")
+        .download(audioPath);
+
+      if (dlError || !fileData) {
+        return NextResponse.json(
+          { error: "Failed to download audio for transcription" },
+          { status: 500 },
+        );
+      }
+
+      const filename = audioPath.split("/").pop() || "audio.webm";
+      const file = new File([fileData], filename, {
+        type: fileData.type || "audio/webm",
+      });
+      rawText = await transcribeAudio(file, filename, usageCtx);
+    }
 
     let visitId: string;
 
@@ -90,7 +149,7 @@ export async function POST(request: NextRequest) {
 
       const { error: updateError } = await supabase
         .from("visits")
-        .update({ audio_path: audioPath, raw_text: rawText })
+        .update({ raw_text: rawText })
         .eq("id", existingVisitId);
 
       if (updateError) {
@@ -114,7 +173,6 @@ export async function POST(request: NextRequest) {
         .insert({
           user_id: userId,
           title,
-          audio_path: audioPath,
           raw_text: rawText,
           language,
           visit_date: new Date().toISOString(),
@@ -155,9 +213,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Cleanup: delete audio from storage (text already extracted)
+    await supabase.storage
+      .from("encounter-files")
+      .remove([audioPath])
+      .catch(() => {});
+
     const response: ProcessAudioResponse = {
       visitId,
-      audioPath,
+      audioPath: "",
       chunkCount: chunks.length,
       transcriptText: rawText,
     };

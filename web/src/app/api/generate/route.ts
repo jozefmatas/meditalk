@@ -90,7 +90,36 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Persist extracted text back to metadata
+      // Cleanup: delete all processed files from storage (text already extracted)
+      const pathsToDelete = uploadedFiles
+        .filter((f) => f.extracted_text && f.path)
+        .map((f) => f.path);
+      if (pathsToDelete.length > 0) {
+        await supabase.storage
+          .from("encounter-files")
+          .remove(pathsToDelete)
+          .catch(() => {});
+        // Clear paths in metadata (extracted text remains)
+        for (const f of uploadedFiles) {
+          if (f.extracted_text) f.path = "";
+        }
+      }
+
+      // Also cleanup recording files that were just staging artifacts
+      const recordingPaths = uploadedFiles
+        .filter((f) => f.source === "recording" && f.path)
+        .map((f) => f.path);
+      if (recordingPaths.length > 0) {
+        await supabase.storage
+          .from("encounter-files")
+          .remove(recordingPaths)
+          .catch(() => {});
+        for (const f of uploadedFiles) {
+          if (f.source === "recording") f.path = "";
+        }
+      }
+
+      // Persist extracted text + cleared paths back to metadata
       await supabase
         .from("visits")
         .update({ metadata: { ...visitMeta, files: uploadedFiles } })

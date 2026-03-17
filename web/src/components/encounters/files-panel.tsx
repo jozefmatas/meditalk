@@ -18,6 +18,7 @@ import {
   TableCell,
 } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
+import { uploadToStorage } from "@/lib/supabase/upload";
 
 export interface EncounterFile {
   id: string;
@@ -33,7 +34,7 @@ interface FilesPanelProps {
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
   /** Called when audio blob is available (recording or file drop) — kept for Generate */
-  onAudioBlobReady?: (blob: Blob) => void;
+  onAudioBlobReady?: (blob: Blob, storagePath: string) => void;
 }
 
 function isAudioFile(file: File): boolean {
@@ -60,27 +61,67 @@ export function FilesPanel({
       const allFiles = Array.from(fileList);
       if (allFiles.length === 0) return;
 
-      // For audio files, also pass the blob to the parent for Generate transcription
-      for (const file of allFiles) {
-        if (isAudioFile(file)) {
-          onAudioBlobReady?.(file);
-        }
-      }
-
-      // Upload ALL files (audio + docs) to storage so they persist
       setIsUploading(true);
       try {
-        const formData = new FormData();
-        allFiles.forEach((f) => formData.append("files", f));
+        // Upload all files directly to Supabase Storage (bypasses Vercel limit)
+        const results = await Promise.allSettled(
+          allFiles.map(async (file) => {
+            const { path, fileId } = await uploadToStorage(file, file.name, {
+              encounterId: visitId,
+            });
+            return {
+              id: fileId,
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              path,
+            };
+          }),
+        );
 
+        const uploadResults = results
+          .filter(
+            (
+              r,
+            ): r is PromiseFulfilledResult<{
+              id: string;
+              name: string;
+              size: number;
+              type: string;
+              path: string;
+            }> => r.status === "fulfilled",
+          )
+          .map((r) => r.value);
+
+        if (uploadResults.length === 0) {
+          console.error("All file uploads failed");
+          return;
+        }
+
+        // For audio files, also pass the blob + storage path to the parent for Generate
+        for (const file of allFiles) {
+          if (isAudioFile(file)) {
+            const result = uploadResults.find((r) => r.name === file.name);
+            if (result) {
+              onAudioBlobReady?.(file, result.path);
+            }
+          }
+        }
+
+        // Register file metadata with the API (small JSON, no file bytes)
         const res = await fetch(`/api/encounters/${visitId}/files`, {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ files: uploadResults }),
         });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          console.error("File upload failed:", res.status, errData);
+          console.error(
+            "File metadata registration failed:",
+            res.status,
+            errData,
+          );
           return;
         }
 

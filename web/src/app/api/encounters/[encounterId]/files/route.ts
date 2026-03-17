@@ -40,7 +40,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
 /**
  * POST /api/encounters/[encounterId]/files
- * Upload file(s) to Supabase Storage, store metadata in visit.metadata.files[]
+ * Register file metadata in visit.metadata.files[].
+ * Accepts JSON (files already uploaded to storage by client) or FormData (legacy).
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
@@ -59,47 +60,88 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const formData = await request.formData();
-    const uploadedFiles = formData.getAll("files") as File[];
+    const contentType = request.headers.get("content-type") || "";
+    let newFiles: Record<string, unknown>[];
 
-    if (uploadedFiles.length === 0) {
-      return NextResponse.json({ error: "No files provided" }, { status: 400 });
-    }
+    if (contentType.includes("application/json")) {
+      // New path: files already in Supabase Storage, just register metadata
+      const body = await request.json();
+      const preUploaded = body.files as Array<{
+        id: string;
+        name: string;
+        size: number;
+        type: string;
+        path: string;
+      }>;
 
-    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const existingFiles = (meta.files ?? []) as Record<string, unknown>[];
-    const newFiles: Record<string, unknown>[] = [];
-
-    for (const file of uploadedFiles) {
-      const fileId = crypto.randomUUID();
-      const storagePath = `${userId}/${encounterId}/${fileId}-${file.name}`;
-
-      // Upload to Supabase Storage
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const { error: uploadError } = await supabase.storage
-        .from("encounter-files")
-        .upload(storagePath, buffer, {
-          contentType: file.type,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error("File upload error:", uploadError);
-        continue;
+      if (!preUploaded?.length) {
+        return NextResponse.json(
+          { error: "No files provided" },
+          { status: 400 },
+        );
       }
 
-      const fileMeta: Record<string, unknown> = {
-        id: fileId,
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        path: storagePath,
-      };
+      // Validate each path belongs to the authenticated user
+      for (const f of preUploaded) {
+        if (!f.path.startsWith(`${userId}/`)) {
+          return NextResponse.json(
+            { error: "Invalid file path" },
+            { status: 403 },
+          );
+        }
+      }
 
-      newFiles.push(fileMeta);
+      newFiles = preUploaded.map((f) => ({
+        id: f.id,
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        path: f.path,
+      }));
+    } else {
+      // Legacy FormData path (fallback)
+      const formData = await request.formData();
+      const uploadedFiles = formData.getAll("files") as File[];
+
+      if (uploadedFiles.length === 0) {
+        return NextResponse.json(
+          { error: "No files provided" },
+          { status: 400 },
+        );
+      }
+
+      newFiles = [];
+
+      for (const file of uploadedFiles) {
+        const fileId = crypto.randomUUID();
+        const storagePath = `${userId}/${encounterId}/${fileId}-${file.name}`;
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const { error: uploadError } = await supabase.storage
+          .from("encounter-files")
+          .upload(storagePath, buffer, {
+            contentType: file.type,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error("File upload error:", uploadError);
+          continue;
+        }
+
+        newFiles.push({
+          id: fileId,
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          path: storagePath,
+        });
+      }
     }
 
     // Update visit metadata with new files
+    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
+    const existingFiles = (meta.files ?? []) as Record<string, unknown>[];
     const updatedFiles = [...existingFiles, ...newFiles];
     const { error: updateError } = await supabase
       .from("visits")

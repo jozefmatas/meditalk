@@ -6,6 +6,7 @@ import type { EncounterFile } from "@/components/encounters/files-panel";
 import type { RecordingBarRef } from "@/components/encounters/recording-bar";
 import type { SoapSection } from "@/lib/parse-soap-sections";
 import { getDefaultTemplate } from "@/lib/templates";
+import { uploadToStorage } from "@/lib/supabase/upload";
 
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
@@ -45,8 +46,10 @@ export function useEncounterGeneration({
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [streamedSections, setStreamedSections] = useState<SoapSection[]>([]);
 
-  // Audio recording — blob kept in memory until Generate
+  // Audio recording — blob kept in memory for canGenerate check
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  // Storage path of the uploaded audio (set by handleRecordingComplete or FilesPanel)
+  const [audioStoragePath, setAudioStoragePath] = useState<string | null>(null);
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
@@ -129,21 +132,36 @@ export function useEncounterGeneration({
     async (blob: Blob) => {
       setAudioBlob(blob);
 
-      // Also upload to storage so it persists across refresh
+      // Upload directly to Supabase Storage (bypasses Vercel 4.5 MB limit)
       try {
-        const file = new File([blob], "recording.webm", {
-          type: blob.type || "audio/webm",
-        });
-        const formData = new FormData();
-        formData.append("files", file);
+        const fileName = "recording.webm";
+        const contentType = blob.type || "audio/webm";
 
+        const { path, fileId } = await uploadToStorage(blob, fileName, {
+          encounterId: visitId,
+        });
+
+        setAudioStoragePath(path);
+
+        // Register file metadata with the API (small JSON, no file bytes)
         const res = await fetch(`/api/encounters/${visitId}/files`, {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            files: [
+              {
+                id: fileId,
+                name: fileName,
+                size: blob.size,
+                type: contentType,
+                path,
+              },
+            ],
+          }),
         });
 
         if (!res.ok) {
-          console.error("Audio upload failed:", res.status);
+          console.error("Audio metadata registration failed:", res.status);
           return;
         }
 
@@ -204,39 +222,61 @@ export function useEncounterGeneration({
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
       const capturedLanguage = generationLanguage;
+      const capturedAudioStoragePath = audioStoragePath;
       const finalized = recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
 
       try {
         // Step 1: If there's a recorded audio blob, process it (chunk + embed)
-        if (blobToProcess) {
-          const audioFile = new File([blobToProcess], "recording.webm", {
-            type: blobToProcess.type,
-          });
-          const formData = new FormData();
-          formData.append("file", audioFile);
-          formData.append("language", capturedLanguage);
-          formData.append("visitId", visitId);
-          if (streamingTranscript) {
-            formData.append("transcriptText", streamingTranscript);
+        if (blobToProcess || capturedAudioStoragePath) {
+          // Ensure audio is in storage — it may already be there from
+          // handleRecordingComplete; if not, upload now (bypasses Vercel limit)
+          let audioPath = capturedAudioStoragePath;
+          if (!audioPath && blobToProcess) {
+            const result = await uploadToStorage(
+              blobToProcess,
+              "recording.webm",
+              { encounterId: visitId },
+            );
+            audioPath = result.path;
           }
 
-          const transcribeRes = await fetch("/api/process-audio", {
-            method: "POST",
-            body: formData,
-          });
+          if (audioPath) {
+            // Send small JSON payload instead of FormData with file bytes
+            const transcribeRes = await fetch("/api/process-audio", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                audioPath,
+                language: capturedLanguage,
+                visitId,
+                transcriptText: streamingTranscript || undefined,
+              }),
+            });
 
-          if (!transcribeRes.ok) {
-            const data = await transcribeRes.json();
-            throw new Error(data.error || "Transcription failed");
+            if (!transcribeRes.ok) {
+              let message = "Transcription failed";
+              try {
+                const data = await transcribeRes.json();
+                message = data.error || message;
+              } catch {
+                if (transcribeRes.status === 413)
+                  message = "Audio file is too large";
+              }
+              throw new Error(message);
+            }
+
+            const transcribeData = await transcribeRes.json();
+            setVisit((prev) =>
+              prev
+                ? { ...prev, raw_text: transcribeData.transcriptText }
+                : prev,
+            );
           }
 
-          const transcribeData = await transcribeRes.json();
-          setVisit((prev) =>
-            prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
-          );
           setAudioBlob(null);
+          setAudioStoragePath(null);
         }
 
         // Step 2: Generate note from transcript + doctor notes
@@ -251,8 +291,14 @@ export function useEncounterGeneration({
         });
 
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Generation failed");
+          let message = "Generation failed";
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            /* non-JSON response */
+          }
+          throw new Error(message);
         }
 
         const data = await res.json();
@@ -327,6 +373,7 @@ export function useEncounterGeneration({
       doctorNotes,
       generationLanguage,
       audioBlob,
+      audioStoragePath,
       setVisit,
       setError,
     ],
@@ -550,6 +597,7 @@ export function useEncounterGeneration({
     streamedSections,
     audioBlob,
     setAudioBlob,
+    setAudioStoragePath,
     hasActiveRecording,
     recordingBarRef,
     syncTitle,
