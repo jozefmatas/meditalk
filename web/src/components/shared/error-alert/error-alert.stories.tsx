@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react";
 import { ErrorAlert } from "./ErrorAlert";
 
 const meta: Meta<typeof ErrorAlert> = {
-  title: "Shared/ErrorAlert",
+  title: "UI/Alert/ErrorAlert",
   component: ErrorAlert,
   parameters: {
     layout: "padded",
