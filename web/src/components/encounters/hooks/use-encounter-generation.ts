@@ -47,6 +47,7 @@ export function useEncounterGeneration({
 
   // Audio recording — blob kept in memory until Generate
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
   const initialDoctorNotesRef = useRef("");
@@ -161,6 +162,7 @@ export function useEncounterGeneration({
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
+      setHasActiveRecording(recordingState !== "idle");
       const status = recordingState === "recording" ? "recording" : "started";
       setVisit((prev) => (prev ? { ...prev, status } : prev));
       window.dispatchEvent(
@@ -536,6 +538,7 @@ export function useEncounterGeneration({
     streamedSections,
     audioBlob,
     setAudioBlob,
+    hasActiveRecording,
     recordingBarRef,
     syncTitle,
     initFromVisit,

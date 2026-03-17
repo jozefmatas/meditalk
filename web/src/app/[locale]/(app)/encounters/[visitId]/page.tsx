@@ -182,7 +182,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
     data.visit?.raw_text ||
     generation.audioBlob ||
     generation.doctorNotes.trim() ||
-    data.files.length > 0
+    data.files.length > 0 ||
+    generation.hasActiveRecording
   );
   const isDraft = data.visit
     ? DRAFT_STATUSES.includes(data.visit.status)

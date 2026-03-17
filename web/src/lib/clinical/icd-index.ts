@@ -101,7 +101,11 @@ export function getIcdDescription(
  * Search ICD-10 codes by code prefix or description text.
  * Prioritizes code prefix matches, then description substring matches.
  */
-export function searchIcd(query: string, limit = 20, locale = "en"): IcdEntry[] {
+export function searchIcd(
+  query: string,
+  limit = 20,
+  locale = "en",
+): IcdEntry[] {
   const { byCode } = loadIndex(locale);
   const q = query.toLowerCase().trim();
   if (!q) return [];
@@ -148,7 +152,11 @@ function findCode(
   if (!code.includes(".") && code.length > 3) {
     const dotted = code.substring(0, 3) + "." + code.substring(3);
     if (byCode.has(dotted)) {
-      return { matchedCode: dotted, description: byCode.get(dotted)!, found: true };
+      return {
+        matchedCode: dotted,
+        description: byCode.get(dotted)!,
+        found: true,
+      };
     }
   }
 
@@ -157,11 +165,13 @@ function findCode(
   const entries = byCategory.get(catKey);
   if (entries) {
     // Try to find a code whose digits match exactly (ignoring dots)
-    const match = entries.find(
-      (e) => e.code.replace(".", "") === noDot,
-    );
+    const match = entries.find((e) => e.code.replace(".", "") === noDot);
     if (match) {
-      return { matchedCode: match.code, description: match.description, found: true };
+      return {
+        matchedCode: match.code,
+        description: match.description,
+        found: true,
+      };
     }
 
     // Try prefix: M259 → find first entry starting with M25.9 (e.g. M25.90)
@@ -169,21 +179,31 @@ function findCode(
       (e) => e.code.replace(".", "").startsWith(noDot) && e.code !== catKey,
     );
     if (prefixMatch) {
-      return { matchedCode: prefixMatch.code, description: prefixMatch.description, found: true };
+      return {
+        matchedCode: prefixMatch.code,
+        description: prefixMatch.description,
+        found: true,
+      };
     }
 
     // Fall back to the category-level entry
-    const catEntry = entries.find(
-      (e) => e.code.replace(".", "") === catKey,
-    );
+    const catEntry = entries.find((e) => e.code.replace(".", "") === catKey);
     if (catEntry) {
-      return { matchedCode: catEntry.code, description: catEntry.description, found: true };
+      return {
+        matchedCode: catEntry.code,
+        description: catEntry.description,
+        found: true,
+      };
     }
   }
 
   // 5. Category-level lookup (e.g., G63 might be a standalone category)
   if (byCode.has(catKey)) {
-    return { matchedCode: catKey, description: byCode.get(catKey)!, found: true };
+    return {
+      matchedCode: catKey,
+      description: byCode.get(catKey)!,
+      found: true,
+    };
   }
 
   return { matchedCode: code, description: "", found: false };

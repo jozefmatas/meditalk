@@ -363,9 +363,7 @@ export function ReviewView({
       {error && (
         <ErrorAlert
           message={
-            error === "insufficient_context"
-              ? t("insufficientContext")
-              : error
+            error === "insufficient_context" ? t("insufficientContext") : error
           }
         />
       )}

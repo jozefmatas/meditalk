@@ -80,8 +80,7 @@ export async function proxy(request: NextRequest) {
           (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token"),
         );
       if (hasAuthCookie) {
-        const appUrl =
-          process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
         return NextResponse.redirect(new URL("/", appUrl));
       }
 
@@ -89,7 +88,7 @@ export async function proxy(request: NextRequest) {
       const localeMatch = pathname.match(/^\/(sk|cs|en)/);
       const locale = localeMatch
         ? localeMatch[1]
-        : (routing.defaultLocale || "sk");
+        : routing.defaultLocale || "sk";
       rewriteUrl.pathname = `/${locale}/landing`;
       return NextResponse.rewrite(rewriteUrl);
     }

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
-import { generateFromTemplate, InsufficientContextError } from "@/lib/anthropic";
+import {
+  generateFromTemplate,
+  InsufficientContextError,
+} from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
