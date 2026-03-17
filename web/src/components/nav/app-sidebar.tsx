@@ -12,6 +12,7 @@ import { ClinicSwitcher } from "./clinic-switcher";
 import { NavMain } from "./nav-main";
 import { NavEncounters } from "./nav-encounters";
 import { SearchCommand } from "./search-command";
+import { ImpersonationBanner } from "@/components/admin/impersonation-banner";
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -41,6 +42,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {/* Latest visits — scrolls independently */}
           <NavEncounters />
         </SidebarContent>
+
+        <ImpersonationBanner />
 
         {/* Figma node 100:1690 — footer has p-2 */}
         <SidebarFooter className="p-0">

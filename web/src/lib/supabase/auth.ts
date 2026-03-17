@@ -1,9 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { createAdminClient } from "./admin";
+import { isAdminEmail, IMPERSONATE_COOKIE } from "../admin";
 
 /**
  * Verify authentication in API routes.
  * Returns the authenticated user ID and a user-scoped Supabase client.
+ * When an admin is impersonating, returns the target userId and the
+ * admin client (bypasses RLS) so all data queries work transparently.
  * Throws a Response with 401 if not authenticated.
  */
 export async function requireAuth() {
@@ -42,5 +46,24 @@ export async function requireAuth() {
     });
   }
 
-  return { userId: user.id, supabase };
+  // Check for admin impersonation
+  const impersonateUserId = cookieStore.get(IMPERSONATE_COOKIE)?.value;
+
+  if (impersonateUserId && isAdminEmail(user.email)) {
+    return {
+      userId: impersonateUserId,
+      supabase: createAdminClient(),
+      isImpersonating: true,
+      realUserId: user.id,
+      realUserEmail: user.email,
+    };
+  }
+
+  return {
+    userId: user.id,
+    supabase,
+    isImpersonating: false,
+    realUserId: user.id,
+    realUserEmail: user.email,
+  };
 }
