@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNoteEmail } from "@/lib/email/send-note-email";
+import { filterEmptySectionsHtml } from "@/lib/parse-soap-sections";
 
 export async function POST(request: Request) {
   try {
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
     await sendNoteEmail({
       to: user.email,
       title: encounter.title || "Untitled",
-      noteHtml: encounter.soap_note,
+      noteHtml: filterEmptySectionsHtml(encounter.soap_note),
       viewUrl,
       language,
     });

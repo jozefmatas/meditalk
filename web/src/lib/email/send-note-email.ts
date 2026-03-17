@@ -33,6 +33,18 @@ export function buildSubject(language: string, title: string): string {
   return `${prefix} — ${title}`;
 }
 
+function ctaButton(viewUrl: string, label: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td style="background-color:#4444ff;border-radius:8px;">
+                        <a href="${viewUrl}" target="_blank" style="display:inline-block;padding:10px 24px;color:#ffffff;font-size:14px;font-weight:500;text-decoration:none;">
+                          ${label}
+                        </a>
+                      </td>
+                    </tr>
+                  </table>`;
+}
+
 function buildEmailHtml({
   noteHtml,
   viewUrl,
@@ -40,6 +52,7 @@ function buildEmailHtml({
 }: Pick<SendNoteEmailOptions, "noteHtml" | "viewUrl" | "language">): string {
   const buttonLabel = VIEW_BUTTON_LABEL[language] || VIEW_BUTTON_LABEL.en;
   const footer = FOOTER_TEXT[language] || FOOTER_TEXT.en;
+  const cta = ctaButton(viewUrl, buttonLabel);
 
   return `<!DOCTYPE html>
 <html lang="${language}">
@@ -53,10 +66,28 @@ function buildEmailHtml({
     <tr>
       <td align="center" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
-          <!-- Header -->
+          <!-- Header: logo + CTA -->
           <tr>
             <td style="padding:24px 32px;border-bottom:1px solid #e6e3db;">
-              <span style="font-size:18px;font-weight:600;color:#232334;">MediTalk</span>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="vertical-align:middle;">
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="vertical-align:middle;padding-right:12px;">
+                          <img src="https://app.meditalk.ai/app-icon.png" alt="MediTalk" width="40" height="40" style="border-radius:8px;display:block;" />
+                        </td>
+                        <td style="vertical-align:middle;">
+                          <span style="font-size:18px;font-weight:600;color:#232334;">MediTalk</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td style="vertical-align:middle;text-align:right;">
+                    ${cta}
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <!-- Note content -->
@@ -67,18 +98,10 @@ function buildEmailHtml({
               </div>
             </td>
           </tr>
-          <!-- CTA button -->
+          <!-- Bottom CTA -->
           <tr>
             <td style="padding:8px 32px 32px;">
-              <table role="presentation" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="background-color:#4444ff;border-radius:8px;">
-                    <a href="${viewUrl}" target="_blank" style="display:inline-block;padding:10px 24px;color:#ffffff;font-size:14px;font-weight:500;text-decoration:none;">
-                      ${buttonLabel}
-                    </a>
-                  </td>
-                </tr>
-              </table>
+              ${cta}
             </td>
           </tr>
           <!-- Footer -->

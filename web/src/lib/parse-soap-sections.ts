@@ -128,6 +128,32 @@ function htmlToText(html: string): string {
 }
 
 /**
+ * Filter out empty / "Not stated" sections from generated HTML.
+ * Returns the same HTML with those sections removed.
+ */
+export function filterEmptySectionsHtml(html: string): string {
+  if (!html) return "";
+  const parts = html.split(/(?=<h2[^>]*>)/i);
+  return parts
+    .filter((part) => {
+      const trimmed = part.trim();
+      if (!trimmed || !/<h2[^>]*>/i.test(trimmed)) return false;
+      const contentStart = trimmed.indexOf("</h2>");
+      if (contentStart === -1) return false;
+      const content = trimmed.slice(contentStart + 5);
+      const text = content
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .trim();
+      return text.length > 0 && !NOT_STATED_VALUES.has(text);
+    })
+    .join("");
+}
+
+/**
  * Parse generated note HTML into a map of { sectionId → text content }
  * keyed by template section/subsection IDs.
  *

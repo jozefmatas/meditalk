@@ -64,7 +64,16 @@ export function EncounterHeaderActions({
   const tNav = useTranslations("nav");
   const { setHeaderActions } = useHeaderActions();
   const isDraft = DRAFT_STATUSES.includes(status);
-  const [sendAsEmail, setSendAsEmail] = useState(false);
+  const [sendAsEmail, setSendAsEmail] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = localStorage.getItem("meditalk:sendAsEmail");
+    return stored === null ? true : stored === "true";
+  });
+
+  const handleSendAsEmailChange = (checked: boolean) => {
+    setSendAsEmail(checked);
+    localStorage.setItem("meditalk:sendAsEmail", String(checked));
+  };
 
   useEffect(() => {
     setHeaderActions(
@@ -108,7 +117,7 @@ export function EncounterHeaderActions({
           <LabeledSwitch
             label={t("detail.sendAsEmail")}
             checked={sendAsEmail}
-            onCheckedChange={setSendAsEmail}
+            onCheckedChange={handleSendAsEmailChange}
           />
         )}
 
