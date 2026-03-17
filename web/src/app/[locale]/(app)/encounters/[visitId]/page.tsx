@@ -364,10 +364,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
             visitId={visitId}
             files={data.files}
             onFilesChange={data.setFiles}
-            onAudioBlobReady={(blob, storagePath) => {
-              generation.setAudioBlob(blob);
-              generation.setAudioStoragePath(storagePath);
-            }}
           />
         ) : (
           <IcdPanel visit={data.visit} setVisit={data.setVisit} />

@@ -596,8 +596,6 @@ export function useEncounterGeneration({
     isRegenerating,
     streamedSections,
     audioBlob,
-    setAudioBlob,
-    setAudioStoragePath,
     hasActiveRecording,
     recordingBarRef,
     syncTitle,

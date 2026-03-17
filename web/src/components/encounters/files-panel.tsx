@@ -33,24 +33,13 @@ interface FilesPanelProps {
   visitId: string;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
-  /** Called when audio blob is available (recording or file drop) — kept for Generate */
-  onAudioBlobReady?: (blob: Blob, storagePath: string) => void;
-}
-
-function isAudioFile(file: File): boolean {
-  return file.type.startsWith("audio/");
 }
 
 function iconForType(type: string) {
   return type.startsWith("audio/") ? Mic01Icon : File01Icon;
 }
 
-export function FilesPanel({
-  visitId,
-  files,
-  onFilesChange,
-  onAudioBlobReady,
-}: FilesPanelProps) {
+export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
   const t = useTranslations("encounters.detail");
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -98,16 +87,6 @@ export function FilesPanel({
           return;
         }
 
-        // For audio files, also pass the blob + storage path to the parent for Generate
-        for (const file of allFiles) {
-          if (isAudioFile(file)) {
-            const result = uploadResults.find((r) => r.name === file.name);
-            if (result) {
-              onAudioBlobReady?.(file, result.path);
-            }
-          }
-        }
-
         // Register file metadata with the API (small JSON, no file bytes)
         const res = await fetch(`/api/encounters/${visitId}/files`, {
           method: "POST",
@@ -133,7 +112,7 @@ export function FilesPanel({
         setIsUploading(false);
       }
     },
-    [visitId, files, onFilesChange, onAudioBlobReady],
+    [visitId, files, onFilesChange],
   );
 
   const handleDelete = useCallback(

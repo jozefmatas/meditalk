@@ -229,6 +229,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
+    console.error("Process audio error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
