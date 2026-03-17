@@ -128,12 +128,34 @@ function htmlToText(html: string): string {
 }
 
 /**
- * Filter out empty / "Not stated" sections from generated HTML.
- * Returns the same HTML with those sections removed.
+ * Filter out empty / "Not stated" sections and subsections from generated HTML.
+ * Removes both <h2> sections and <h3> subsections whose content is empty or "Neuvedené".
  */
 export function filterEmptySectionsHtml(html: string): string {
   if (!html) return "";
-  const parts = html.split(/(?=<h2[^>]*>)/i);
+
+  // First pass: remove <h3> subsections with "Not stated" content
+  // Each subsection is <h3>...</h3> followed by content until the next <h2>/<h3> or end
+  let filtered = html.replace(
+    /<h3[^>]*>.*?<\/h3>[\s\S]*?(?=<h[23][^>]*>|$)/gi,
+    (match) => {
+      const contentStart = match.indexOf("</h3>");
+      if (contentStart === -1) return match;
+      const content = match.slice(contentStart + 5);
+      const text = content
+        .replace(/<[^>]+>/g, "")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .trim();
+      if (!text || NOT_STATED_VALUES.has(text)) return "";
+      return match;
+    },
+  );
+
+  // Second pass: remove <h2> sections that are now entirely empty
+  const parts = filtered.split(/(?=<h2[^>]*>)/i);
   return parts
     .filter((part) => {
       const trimmed = part.trim();

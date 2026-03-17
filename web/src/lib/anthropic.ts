@@ -16,7 +16,7 @@ export class InsufficientContextError extends Error {
 
 let _anthropic: Anthropic | null = null;
 export function anthropic() {
-  if (!_anthropic) _anthropic = new Anthropic();
+  if (!_anthropic) _anthropic = new Anthropic({ maxRetries: 4 });
   return _anthropic;
 }
 
