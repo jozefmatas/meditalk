@@ -7,6 +7,13 @@ import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
 import { extractJson } from "./clinical/json-repair";
 import type { ClinicalAnalysis } from "./clinical/types";
 
+export class InsufficientContextError extends Error {
+  constructor() {
+    super("insufficient_context");
+    this.name = "InsufficientContextError";
+  }
+}
+
 let _anthropic: Anthropic | null = null;
 export function anthropic() {
   if (!_anthropic) _anthropic = new Anthropic();
@@ -118,10 +125,11 @@ export function buildTemplateSystemPrompt(
 
   return `You are a medical documentation assistant. You MUST follow these rules strictly:
 
-1. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
-2. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
-3. MISSING INFORMATION: If a section has no relevant information, write "${notStated}".
-4. FORMAT: Return valid JSON with the following keys:
+1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
+2. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
+3. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
+4. MISSING INFORMATION: If a section has no relevant information, write "${notStated}".
+5. FORMAT: Return valid JSON with the following keys:
    - One key for each section ID listed below, with the section content as a string value.
    - A "letter" key with a patient-friendly summary letter.
    - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in ${langLabel}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
@@ -232,7 +240,12 @@ export async function generateFromTemplate(
   const text =
     response.content[0].type === "text" ? response.content[0].text : "";
 
-  const parsed = extractJson<Record<string, string>>(text);
+  const parsed = extractJson<Record<string, string | boolean>>(text);
+
+  // Check if Claude determined there's insufficient context
+  if (parsed.insufficient_context === true) {
+    throw new InsufficientContextError();
+  }
 
   // Extract letter and title, remove from section contents
   const letter =

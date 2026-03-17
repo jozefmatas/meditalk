@@ -138,6 +138,7 @@
       "icdSavedEmpty": "No saved codes yet",
       "transcribing": "Transcribing..."
     },
+    "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",
     "delete": {
       "title": "Delete Encounter",
       "message": "Are you sure you want to delete this encounter? This action cannot be undone.",

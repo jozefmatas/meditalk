@@ -138,6 +138,7 @@
       "icdSavedEmpty": "Zatiaľ žiadne uložené kódy",
       "transcribing": "Prepisuje sa..."
     },
+    "insufficientContext": "Nedostatok klinických informácií na vygenerovanie záznamu. Nahrajte konzultáciu, pridajte poznámky s klinickými detailmi alebo nahrajte relevantné súbory.",
     "delete": {
       "title": "Vymazať návštevu",
       "message": "Naozaj chcete vymazať túto návštevu? Táto akcia sa nedá vrátiť späť.",

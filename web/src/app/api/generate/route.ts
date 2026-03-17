@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
-import { generateFromTemplate } from "@/lib/anthropic";
+import { generateFromTemplate, InsufficientContextError } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
@@ -210,6 +210,14 @@ export async function POST(request: NextRequest) {
       letter = result.letter;
       suggestedTitle = result.suggestedTitle;
     } catch (anthropicErr) {
+      if (anthropicErr instanceof InsufficientContextError) {
+        return NextResponse.json(
+          {
+            error: "insufficient_context",
+          },
+          { status: 422 },
+        );
+      }
       console.error("Anthropic generation failed:", anthropicErr);
       return NextResponse.json(
         {

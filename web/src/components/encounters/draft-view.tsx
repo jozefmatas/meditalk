@@ -252,7 +252,11 @@ export function DraftView({
       {error && (
         <Alert variant="destructive">
           <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error === "insufficient_context"
+              ? t("insufficientContext")
+              : error}
+          </AlertDescription>
         </Alert>
       )}
 

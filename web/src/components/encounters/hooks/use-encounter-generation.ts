@@ -288,6 +288,18 @@ export function useEncounterGeneration({
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
+      // Revert status back from "processing" on failure
+      setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status: "started" },
+        }),
+      );
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "started" }),
+      }).catch(() => {});
     } finally {
       activeGenerations.delete(visitId);
       setIsGenerating(false);
