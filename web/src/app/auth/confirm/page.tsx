@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -80,7 +81,7 @@ function AuthConfirmContent() {
         >
           This magic link has already been used or has expired.
         </p>
-        <a
+        <Link
           href="/login"
           style={{
             display: "inline-block",
@@ -93,7 +94,7 @@ function AuthConfirmContent() {
           }}
         >
           Back to login
-        </a>
+        </Link>
       </div>
     );
   }

@@ -305,10 +305,7 @@ export function useEncounterGeneration({
         setGeneratedNoteHtml(data.generatedNote);
         setVisit((prev) => {
           if (!prev) return prev;
-          const existingMeta = (prev.metadata ?? {}) as Record<
-            string,
-            unknown
-          >;
+          const existingMeta = (prev.metadata ?? {}) as Record<string, unknown>;
           return {
             ...prev,
             soap_note: data.generatedNote,

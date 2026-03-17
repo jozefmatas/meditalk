@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
 import {
@@ -25,17 +25,15 @@ export default function SettingsPage() {
   const t = useTranslations("nav");
   const { isAdmin, isImpersonating, target, startImpersonating } =
     useImpersonation();
-  const [users, setUsers] = useState<UserEntry[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [users, setUsers] = useState<UserEntry[] | null>(null);
+  const loadingUsers = isAdmin && users === null;
 
   useEffect(() => {
     if (!isAdmin) return;
-    setLoadingUsers(true);
     fetch("/api/admin/impersonate")
       .then((r) => r.json())
       .then((data) => setUsers(data.users || []))
-      .catch(() => {})
-      .finally(() => setLoadingUsers(false));
+      .catch(() => setUsers([]));
   }, [isAdmin]);
 
   return (
@@ -73,7 +71,7 @@ export default function SettingsPage() {
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {users.map((user) => (
+                  {(users ?? []).map((user) => (
                     <div
                       key={user.id}
                       className="flex items-center justify-between rounded-lg border p-3"
@@ -93,7 +91,7 @@ export default function SettingsPage() {
                       </Button>
                     </div>
                   ))}
-                  {users.length === 0 && (
+                  {(users ?? []).length === 0 && (
                     <p className="text-sm text-muted-foreground">
                       No users found.
                     </p>

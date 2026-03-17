@@ -52,6 +52,8 @@ export function ImpersonationProvider({
   }, []);
 
   useEffect(() => {
+    // All setState calls in fetchStatus happen asynchronously (after await)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStatus();
   }, [fetchStatus]);
 
