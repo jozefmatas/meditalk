@@ -71,7 +71,7 @@ function buildEmailHtml({
             <td style="padding:24px 32px;border-bottom:1px solid #e6e3db;">
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;">
                 <tr>
-                  <td width="50%" style="vertical-align:middle;">
+                  <td style="vertical-align:middle;white-space:nowrap;">
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>
                         <td style="vertical-align:middle;padding-right:12px;">
@@ -83,7 +83,7 @@ function buildEmailHtml({
                       </tr>
                     </table>
                   </td>
-                  <td width="50%" style="vertical-align:middle;text-align:right;">
+                  <td style="vertical-align:middle;text-align:right;">
                     ${cta}
                   </td>
                 </tr>
