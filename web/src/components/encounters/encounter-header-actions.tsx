@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -24,6 +24,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/shared/select";
+import { LabeledSwitch } from "@/components/shared/switch";
 import type { EncounterStatus, SupportedLanguage } from "@/lib/types";
 
 const GENERATION_LANGUAGES: { value: SupportedLanguage; label: string }[] = [
@@ -36,7 +37,7 @@ interface EncounterHeaderActionsProps {
   status: EncounterStatus;
   generationLanguage: SupportedLanguage;
   onLanguageChange: (lang: SupportedLanguage) => void;
-  onGenerate: () => void;
+  onGenerate: (options?: { sendAsEmail?: boolean }) => void;
   onMarkComplete: () => void;
   onDelete: () => void;
   canGenerate: boolean;
@@ -63,6 +64,7 @@ export function EncounterHeaderActions({
   const tNav = useTranslations("nav");
   const { setHeaderActions } = useHeaderActions();
   const isDraft = DRAFT_STATUSES.includes(status);
+  const [sendAsEmail, setSendAsEmail] = useState(false);
 
   useEffect(() => {
     setHeaderActions(
@@ -101,11 +103,20 @@ export function EncounterHeaderActions({
           </Select>
         )}
 
+        {/* Send as email switch — draft only */}
+        {isDraft && (
+          <LabeledSwitch
+            label={t("detail.sendAsEmail")}
+            checked={sendAsEmail}
+            onCheckedChange={setSendAsEmail}
+          />
+        )}
+
         {/* Generate button — draft only */}
         {isDraft && (
           <Button
             size="lg"
-            onClick={onGenerate}
+            onClick={() => onGenerate({ sendAsEmail })}
             disabled={isGenerating || !canGenerate}
           >
             <HugeiconsIcon
@@ -126,6 +137,7 @@ export function EncounterHeaderActions({
     generationLanguage,
     canGenerate,
     isGenerating,
+    sendAsEmail,
     onLanguageChange,
     onGenerate,
     onMarkComplete,

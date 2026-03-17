@@ -120,6 +120,7 @@
       "note": "Zpráva",
       "addDocument": "Přidat dokument",
       "copyNote": "Kopírovat zprávu",
+      "sendAsEmail": "Odeslat zprávu emailem",
       "noteCopied": "Zkopírováno!",
       "addTemplateHeader": "Přidat hlavičku šablony",
       "markComplete": "Označit jako dokončenou",

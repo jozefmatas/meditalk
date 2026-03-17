@@ -120,6 +120,7 @@
       "note": "Note",
       "addDocument": "Add document",
       "copyNote": "Copy note",
+      "sendAsEmail": "Send note as email",
       "noteCopied": "Copied!",
       "addTemplateHeader": "Add template header",
       "markComplete": "Mark complete",

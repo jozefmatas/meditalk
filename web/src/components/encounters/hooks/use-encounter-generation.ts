@@ -180,145 +180,157 @@ export function useEncounterGeneration({
     [visitId, setVisit],
   );
 
-  const handleGenerate = useCallback(async () => {
-    if (!visitId) return;
-    activeGenerations.add(visitId);
-    setIsGenerating(true);
-    setError(null);
+  const handleGenerate = useCallback(
+    async (options?: { sendAsEmail?: boolean }) => {
+      if (!visitId) return;
+      activeGenerations.add(visitId);
+      setIsGenerating(true);
+      setError(null);
 
-    // Reflect processing state in sidebar + persist to DB
-    window.dispatchEvent(
-      new CustomEvent("encounter-update", {
-        detail: { id: visitId, status: "processing" },
-      }),
-    );
-    fetch(`/api/encounters/${visitId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "processing" }),
-    }).catch(() => {});
-
-    // Capture values at call time so the chain works even after unmount
-    const capturedTemplateId = selectedTemplateId;
-    const capturedDoctorNotes = doctorNotes;
-    const capturedTitle = titleRef.current;
-    const capturedLanguage = generationLanguage;
-    const finalized = recordingBarRef.current?.finalize();
-    const blobToProcess = finalized?.blob ?? audioBlob;
-    const streamingTranscript = finalized?.transcript ?? null;
-
-    try {
-      // Step 1: If there's a recorded audio blob, process it (chunk + embed)
-      if (blobToProcess) {
-        const audioFile = new File([blobToProcess], "recording.webm", {
-          type: blobToProcess.type,
-        });
-        const formData = new FormData();
-        formData.append("file", audioFile);
-        formData.append("language", capturedLanguage);
-        formData.append("visitId", visitId);
-        if (streamingTranscript) {
-          formData.append("transcriptText", streamingTranscript);
-        }
-
-        const transcribeRes = await fetch("/api/process-audio", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!transcribeRes.ok) {
-          const data = await transcribeRes.json();
-          throw new Error(data.error || "Transcription failed");
-        }
-
-        const transcribeData = await transcribeRes.json();
-        setVisit((prev) =>
-          prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
-        );
-        setAudioBlob(null);
-      }
-
-      // Step 2: Generate note from transcript + doctor notes
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          visitId,
-          templateId: capturedTemplateId,
-          doctorNotes: capturedDoctorNotes || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Generation failed");
-      }
-
-      const data = await res.json();
-      setGeneratedNoteHtml(data.generatedNote);
-      setVisit((prev) =>
-        prev
-          ? {
-              ...prev,
-              soap_note: data.generatedNote,
-              patient_letter: data.letter,
-            }
-          : prev,
-      );
-
-      // Auto-set title if user hasn't provided one
-      const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
-      const patchBody: Record<string, string> = { status: "to_review" };
-      if (autoTitle) patchBody.title = autoTitle;
-
-      // Auto-transition to review (+ title if generated)
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patchBody),
-      });
-      if (autoTitle) updateTitleRef.current(autoTitle);
-      setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+      // Reflect processing state in sidebar + persist to DB
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
-          detail: {
-            id: visitId,
-            status: "to_review",
-            ...(autoTitle ? { title: autoTitle } : {}),
-          },
-        }),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Generation failed");
-      // Revert status back from "processing" on failure
-      setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "started" },
+          detail: { id: visitId, status: "processing" },
         }),
       );
       fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "started" }),
+        body: JSON.stringify({ status: "processing" }),
       }).catch(() => {});
-    } finally {
-      activeGenerations.delete(visitId);
-      setIsGenerating(false);
-      // Notify any remounted instances that generation is done
-      window.dispatchEvent(
-        new CustomEvent("generation-done", { detail: { visitId } }),
-      );
-    }
-  }, [
-    visitId,
-    selectedTemplateId,
-    doctorNotes,
-    generationLanguage,
-    audioBlob,
-    setVisit,
-    setError,
-  ]);
+
+      // Capture values at call time so the chain works even after unmount
+      const capturedTemplateId = selectedTemplateId;
+      const capturedDoctorNotes = doctorNotes;
+      const capturedTitle = titleRef.current;
+      const capturedLanguage = generationLanguage;
+      const finalized = recordingBarRef.current?.finalize();
+      const blobToProcess = finalized?.blob ?? audioBlob;
+      const streamingTranscript = finalized?.transcript ?? null;
+
+      try {
+        // Step 1: If there's a recorded audio blob, process it (chunk + embed)
+        if (blobToProcess) {
+          const audioFile = new File([blobToProcess], "recording.webm", {
+            type: blobToProcess.type,
+          });
+          const formData = new FormData();
+          formData.append("file", audioFile);
+          formData.append("language", capturedLanguage);
+          formData.append("visitId", visitId);
+          if (streamingTranscript) {
+            formData.append("transcriptText", streamingTranscript);
+          }
+
+          const transcribeRes = await fetch("/api/process-audio", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!transcribeRes.ok) {
+            const data = await transcribeRes.json();
+            throw new Error(data.error || "Transcription failed");
+          }
+
+          const transcribeData = await transcribeRes.json();
+          setVisit((prev) =>
+            prev ? { ...prev, raw_text: transcribeData.transcriptText } : prev,
+          );
+          setAudioBlob(null);
+        }
+
+        // Step 2: Generate note from transcript + doctor notes
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visitId,
+            templateId: capturedTemplateId,
+            doctorNotes: capturedDoctorNotes || undefined,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Generation failed");
+        }
+
+        const data = await res.json();
+        setGeneratedNoteHtml(data.generatedNote);
+        setVisit((prev) =>
+          prev
+            ? {
+                ...prev,
+                soap_note: data.generatedNote,
+                patient_letter: data.letter,
+              }
+            : prev,
+        );
+
+        // Auto-set title if user hasn't provided one
+        const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
+        const patchBody: Record<string, string> = { status: "to_review" };
+        if (autoTitle) patchBody.title = autoTitle;
+
+        // Auto-transition to review (+ title if generated)
+        await fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patchBody),
+        });
+        if (autoTitle) updateTitleRef.current(autoTitle);
+        setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+        window.dispatchEvent(
+          new CustomEvent("encounter-update", {
+            detail: {
+              id: visitId,
+              status: "to_review",
+              ...(autoTitle ? { title: autoTitle } : {}),
+            },
+          }),
+        );
+
+        // Send note as email if toggled on (fire-and-forget)
+        if (options?.sendAsEmail) {
+          fetch("/api/send-note-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ visitId }),
+          }).catch(() => {});
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Generation failed");
+        // Revert status back from "processing" on failure
+        setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
+        window.dispatchEvent(
+          new CustomEvent("encounter-update", {
+            detail: { id: visitId, status: "started" },
+          }),
+        );
+        fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "started" }),
+        }).catch(() => {});
+      } finally {
+        activeGenerations.delete(visitId);
+        setIsGenerating(false);
+        // Notify any remounted instances that generation is done
+        window.dispatchEvent(
+          new CustomEvent("generation-done", { detail: { visitId } }),
+        );
+      }
+    },
+    [
+      visitId,
+      selectedTemplateId,
+      doctorNotes,
+      generationLanguage,
+      audioBlob,
+      setVisit,
+      setError,
+    ],
+  );
 
   const handleLanguageChange = useCallback(
     async (lang: SupportedLanguage) => {

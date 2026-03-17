@@ -120,6 +120,7 @@
       "note": "Správa",
       "addDocument": "Pridať dokument",
       "copyNote": "Kopírovať správu",
+      "sendAsEmail": "Odoslať správu emailom",
       "noteCopied": "Skopírované!",
       "addTemplateHeader": "Pridať hlavičku šablóny",
       "markComplete": "Označiť ako dokončenú",
