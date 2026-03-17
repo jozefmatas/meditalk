@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function AuthConfirmPage() {
+function AuthConfirmContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [status, setStatus] = useState<"idle" | "verifying" | "error">("idle");
@@ -86,5 +86,24 @@ export default function AuthConfirmPage() {
         </button>
       )}
     </div>
+  );
+}
+
+export default function AuthConfirmPage() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ maxWidth: 480, margin: "0 auto", padding: "80px 24px", textAlign: "center", fontFamily: "'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
+          <h2 style={{ fontSize: 22, fontWeight: 600, color: "#232334", marginBottom: 8 }}>
+            Signing you in...
+          </h2>
+          <p style={{ fontSize: 15, color: "#232334", opacity: 0.65 }}>
+            Please wait a moment.
+          </p>
+        </div>
+      }
+    >
+      <AuthConfirmContent />
+    </Suspense>
   );
 }
