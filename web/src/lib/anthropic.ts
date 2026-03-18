@@ -213,9 +213,13 @@ export async function generateFromTemplate(
     systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
   }
 
+  console.log(
+    `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+  );
+
   const response = await anthropic().messages.create({
     model: GENERATION_MODEL,
-    max_tokens: 8192,
+    max_tokens: 4096,
     system: systemPrompt,
     messages: [
       {
@@ -224,6 +228,10 @@ export async function generateFromTemplate(
       },
     ],
   });
+
+  console.log(
+    `[generate] Anthropic usage — input: ${response.usage.input_tokens}, output: ${response.usage.output_tokens}, stop: ${response.stop_reason}`,
+  );
 
   if (ctx) {
     logUsage({
