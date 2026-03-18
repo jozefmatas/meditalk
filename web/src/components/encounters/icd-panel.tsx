@@ -27,7 +27,8 @@ interface IcdPanelProps {
 
 type Tab = "suggested" | "saved";
 
-export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
+/** Inner content of the ICD panel — reusable without the desktop sidebar wrapper. */
+export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   const t = useTranslations("encounters.detail");
   const locale = useLocale();
 
@@ -218,7 +219,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
         : [];
 
   return (
-    <div className="flex h-full w-[280px] shrink-0 flex-col gap-2 border-l bg-background p-4">
+    <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium text-foreground">{t("codes")}</h3>
@@ -318,6 +319,15 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
             </button>
           ))}
       </div>
+    </>
+  );
+}
+
+/** Desktop sidebar wrapper for IcdPanelContent. */
+export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
+  return (
+    <div className="hidden h-full w-[280px] shrink-0 flex-col gap-2 border-l bg-background p-4 desktop:flex">
+      <IcdPanelContent visit={visit} setVisit={setVisit} />
     </div>
   );
 }

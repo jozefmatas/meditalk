@@ -247,7 +247,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             <Skeleton className="h-9 w-48" />
             <div className="h-px bg-border" />
             <div className="flex gap-6">
-              <div className="w-60 space-y-2">
+              <div className="hidden w-60 space-y-2 desktop:block">
                 <Skeleton className="h-9 w-full" />
                 <Skeleton className="h-8 w-full" />
                 <Skeleton className="h-8 w-full" />
@@ -256,7 +256,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             </div>
           </div>
         </div>
-        <div className="flex h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-background p-6">
+        <div className="hidden h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-background p-6 desktop:flex">
           <Skeleton className="h-6 w-16" />
           <Skeleton className="h-[72px] w-full rounded-xl" />
         </div>
@@ -330,6 +330,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             ) : (
               <ReviewView
                 visit={data.visit}
+                setVisit={data.setVisit}
                 title={metadata.title}
                 onTitleChange={updateTitle}
                 onMetadataBlur={metadata.handleMetadataBlur}

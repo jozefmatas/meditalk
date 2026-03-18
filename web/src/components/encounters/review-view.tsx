@@ -29,6 +29,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
+import { TemplateSelector } from "@/components/templates/template-selector";
+import { IcdPanelContent } from "@/components/encounters/icd-panel";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import type { Template } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
@@ -42,6 +44,7 @@ import type { Encounter } from "@/lib/types";
 
 interface ReviewViewProps {
   visit: Encounter;
+  setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
   title: string;
   onTitleChange: (value: string) => void;
   onMetadataBlur: () => void;
@@ -73,6 +76,7 @@ interface ReviewViewProps {
 
 export function ReviewView({
   visit,
+  setVisit,
   title,
   onTitleChange,
   onMetadataBlur,
@@ -96,8 +100,9 @@ export function ReviewView({
   t,
   tTemplates,
 }: ReviewViewProps) {
-  // Tab state
+  // Tab state — desktop uses "resources" | "note" | "add-document", mobile uses "note" | "codes"
   const [activeTab, setActiveTab] = useState("note");
+  const [mobileTab, setMobileTab] = useState<"note" | "codes">("note");
   const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
   const [noteCopied, setNoteCopied] = useState(false);
 
@@ -263,15 +268,60 @@ export function ReviewView({
     generatedNoteHtml,
   ]);
 
+  // Note section cards — shared between desktop note tab and mobile note tab
+  const noteSectionCards = isRegenerating ? (
+    <>
+      {streamedSections.map((section) => (
+        <div key={section.id} className="animate-in fade-in duration-300">
+          <NoteSectionCard
+            sectionId={section.id}
+            title={section.title}
+            content={section.content}
+          />
+        </div>
+      ))}
+      {streamedSections.length === 0 && (
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+        </div>
+      )}
+    </>
+  ) : template && Object.keys(sectionContents).length > 0 ? (
+    template.sections
+      .filter((s) => !removedSections.has(s.id))
+      .map((section) => (
+        <NoteSectionCard
+          key={section.id}
+          id={`note-section-${section.id}`}
+          sectionId={section.id}
+          title={tTemplates(`sections.${section.labelKey}`)}
+          content={sectionContents[section.id] ?? ""}
+          subsections={section.subsections
+            ?.filter((sub) => !removedSections.has(sub.id))
+            .map((sub) => ({
+              id: sub.id,
+              title: tTemplates(`sections.${sub.labelKey}`),
+              content: sectionContents[sub.id] ?? "",
+            }))}
+          onContentChange={onSectionContentChange}
+          onRemove={onRemoveSection}
+          autoFocusId={focusSectionId}
+          onAutoFocused={onAutoFocused}
+        />
+      ))
+  ) : (
+    <p className="text-sm text-muted-foreground">{t("detail.noNote")}</p>
+  );
+
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-0">
-      {/* Sticky header: title + tab bar */}
-      <div
-        ref={stickyHeaderRef}
-        className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6"
-      >
-        <div className="flex items-center gap-4">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+    <>
+      {/* ── MOBILE LAYOUT (< desktop breakpoint) ── */}
+      <div className="flex flex-col gap-0 desktop:hidden">
+        {/* Sticky header */}
+        <div className="sticky top-0 z-10 flex flex-col gap-4 bg-background pt-6">
+          <div className="flex min-w-0 flex-col gap-1">
             <Textarea
               value={title}
               onChange={(e) => onTitleChange(e.target.value)}
@@ -300,185 +350,260 @@ export function ReviewView({
               </span>
             </div>
           </div>
+
+          {/* Mark complete — full width on mobile */}
           {visit.status === "to_review" && (
             <Button
               variant="outline"
               size="lg"
-              className="shrink-0"
+              className="w-full"
               onClick={onMarkComplete}
               disabled={isRegenerating}
             >
               {t("detail.markComplete")}
             </Button>
           )}
-        </div>
-        <div className="flex items-center gap-1 border-b border-border">
-          <TabsList variant="line">
-            {currentVisibleTabs.map((tab) => (
-              <TabsTrigger key={tab.value} value={tab.value}>
-                {tab.label}
-                {removableTabValues.includes(tab.value) && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveTab(tab.value);
-                    }}
-                    className="ml-1 rounded-sm opacity-50 hover:opacity-100"
-                  >
-                    <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
-                  </button>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {allTabs.filter(
-            (opt) => !currentVisibleTabs.some((t) => t.value === opt.value),
-          ).length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="text-foreground/65 hover:text-foreground"
-                >
-                  + {t("detail.addDocument")}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {allTabs
-                  .filter(
-                    (opt) =>
-                      !currentVisibleTabs.some((t) => t.value === opt.value),
-                  )
-                  .map((tab) => (
-                    <DropdownMenuItem
-                      key={tab.value}
-                      onClick={() => handleAddTab(tab.value)}
-                    >
-                      {tab.label}
-                    </DropdownMenuItem>
-                  ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </div>
 
-      {/* Error alert */}
-      {error && (
-        <ErrorAlert
-          message={
-            error === "insufficient_context" ? t("insufficientContext") : error
-          }
-        />
-      )}
+          {/* Mobile tabs: Note | Codes */}
+          <div className="border-b border-border">
+            <Tabs
+              value={mobileTab}
+              onValueChange={(v) => setMobileTab(v as "note" | "codes")}
+            >
+              <TabsList variant="line">
+                <TabsTrigger value="note">{t("detail.note")}</TabsTrigger>
+                <TabsTrigger value="codes">{t("detail.codes")}</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+        </div>
 
-      {/* Tab content — outside sticky area */}
-      <TabsContent value="note">
-        <div className="flex flex-1 gap-6">
-          <div className="pt-6">
-            <TemplateSidebar
-              templateId={selectedTemplateId}
-              onTemplateChange={handleRegenerateWithTabSwitch}
+        {/* Error alert */}
+        {error && (
+          <ErrorAlert
+            message={
+              error === "insufficient_context"
+                ? t("insufficientContext")
+                : error
+            }
+          />
+        )}
+
+        {/* Mobile Note content */}
+        {mobileTab === "note" && (
+          <div className="flex flex-col gap-4 pb-28 pt-4">
+            <div className="flex flex-col gap-4">{noteSectionCards}</div>
+          </div>
+        )}
+
+        {/* Mobile Codes content */}
+        {mobileTab === "codes" && (
+          <div className="flex flex-col gap-2 pt-4">
+            <IcdPanelContent visit={visit} setVisit={setVisit} />
+          </div>
+        )}
+
+        {/* Mobile bottom bar — note tab only */}
+        {mobileTab === "note" && (
+          <div className="fixed bottom-0 left-0 z-10 flex w-full flex-col gap-2 border-t border-border bg-background px-4 py-3">
+            {isRegenerating ? (
+              <TextShimmer className="py-2 text-center text-sm" duration={3}>
+                {t("detail.regenerating")}
+              </TextShimmer>
+            ) : (
+              <Button
+                variant="secondary"
+                size="lg"
+                className="w-full"
+                onClick={handleCopyNote}
+                disabled={!generatedNoteHtml}
+              >
+                {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
+              </Button>
+            )}
+            <TemplateSelector
+              value={selectedTemplateId}
+              onChange={handleRegenerateWithTabSwitch}
               disabled={isRegenerating}
-              documentedSections={documentedSectionIds}
-              onScrollToSection={handleScrollToNoteSection}
-              onAddSection={isRegenerating ? undefined : onAddSection}
-              stickyTop={stickyHeaderHeight + 24}
+              size="lg"
+              label={t("detail.templateLabel")}
             />
           </div>
-          <div className="flex flex-1 flex-col">
-            <div
-              className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
-              style={{ top: stickyHeaderHeight }}
-            >
-              <h2 className="text-lg font-medium">{t("detail.note")}</h2>
-              {isRegenerating ? (
-                <TextShimmer className="text-sm" duration={3}>
-                  {t("detail.regenerating")}
-                </TextShimmer>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  onClick={handleCopyNote}
-                  disabled={!generatedNoteHtml}
-                >
-                  {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
-                </Button>
-              )}
+        )}
+      </div>
+
+      {/* ── DESKTOP LAYOUT (>= desktop breakpoint) ── */}
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className="hidden gap-0 desktop:flex desktop:flex-col"
+      >
+        {/* Sticky header: title + tab bar */}
+        <div
+          ref={stickyHeaderRef}
+          className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6"
+        >
+          <div className="flex items-center gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <Textarea
+                value={title}
+                onChange={(e) => onTitleChange(e.target.value)}
+                onBlur={onMetadataBlur}
+                placeholder={t("untitled")}
+                rows={1}
+                className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                onInput={(e) => {
+                  const target = e.currentTarget;
+                  target.style.height = "auto";
+                  target.style.height = `${target.scrollHeight}px`;
+                }}
+                ref={(el) => {
+                  if (el) {
+                    el.style.height = "auto";
+                    el.style.height = `${el.scrollHeight}px`;
+                  }
+                }}
+              />
+              <div className="flex items-center gap-3">
+                <Badge variant={`status-${visit.status}` as "status-started"}>
+                  {t(`status.${visit.status}`)}
+                </Badge>
+                <span className="text-sm text-foreground/65">
+                  {formattedDate}
+                </span>
+              </div>
             </div>
-            <div className="flex flex-col gap-4">
-              {isRegenerating ? (
-                <>
-                  {streamedSections.map((section) => (
-                    <div
-                      key={section.id}
-                      className="animate-in fade-in duration-300"
+            {visit.status === "to_review" && (
+              <Button
+                variant="outline"
+                size="lg"
+                className="shrink-0"
+                onClick={onMarkComplete}
+                disabled={isRegenerating}
+              >
+                {t("detail.markComplete")}
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-1 border-b border-border">
+            <TabsList variant="line">
+              {currentVisibleTabs.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value}>
+                  {tab.label}
+                  {removableTabValues.includes(tab.value) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveTab(tab.value);
+                      }}
+                      className="ml-1 rounded-sm opacity-50 hover:opacity-100"
                     >
-                      <NoteSectionCard
-                        sectionId={section.id}
-                        title={section.title}
-                        content={section.content}
-                      />
-                    </div>
-                  ))}
-                  {streamedSections.length === 0 && (
-                    <div className="flex flex-col gap-4">
-                      <Skeleton className="h-32 rounded-2xl" />
-                      <Skeleton className="h-32 rounded-2xl" />
-                      <Skeleton className="h-32 rounded-2xl" />
-                    </div>
+                      <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+                    </button>
                   )}
-                </>
-              ) : template && Object.keys(sectionContents).length > 0 ? (
-                template.sections
-                  .filter((s) => !removedSections.has(s.id))
-                  .map((section) => (
-                    <NoteSectionCard
-                      key={section.id}
-                      id={`note-section-${section.id}`}
-                      sectionId={section.id}
-                      title={tTemplates(`sections.${section.labelKey}`)}
-                      content={sectionContents[section.id] ?? ""}
-                      subsections={section.subsections
-                        ?.filter((sub) => !removedSections.has(sub.id))
-                        .map((sub) => ({
-                          id: sub.id,
-                          title: tTemplates(`sections.${sub.labelKey}`),
-                          content: sectionContents[sub.id] ?? "",
-                        }))}
-                      onContentChange={onSectionContentChange}
-                      onRemove={onRemoveSection}
-                      autoFocusId={focusSectionId}
-                      onAutoFocused={onAutoFocused}
-                    />
-                  ))
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("detail.noNote")}
-                </p>
-              )}
-            </div>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {allTabs.filter(
+              (opt) => !currentVisibleTabs.some((t) => t.value === opt.value),
+            ).length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="text-foreground/65 hover:text-foreground"
+                  >
+                    + {t("detail.addDocument")}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {allTabs
+                    .filter(
+                      (opt) =>
+                        !currentVisibleTabs.some((t) => t.value === opt.value),
+                    )
+                    .map((tab) => (
+                      <DropdownMenuItem
+                        key={tab.value}
+                        onClick={() => handleAddTab(tab.value)}
+                      >
+                        {tab.label}
+                      </DropdownMenuItem>
+                    ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
-      </TabsContent>
 
-      <TabsContent value="resources" className="pt-6">
-        <ResourcesPanel visit={visit} t={t} />
-      </TabsContent>
-
-      <TabsContent value="add-document">
-        <div className="flex-1">
-          <TiptapEditor
-            content=""
-            onChange={() => {}}
-            placeholder={t("detail.addDocument")}
-            className="flex-1 rounded-2xl"
+        {/* Error alert */}
+        {error && (
+          <ErrorAlert
+            message={
+              error === "insufficient_context"
+                ? t("insufficientContext")
+                : error
+            }
           />
-        </div>
-      </TabsContent>
-    </Tabs>
+        )}
+
+        {/* Tab content — outside sticky area */}
+        <TabsContent value="note">
+          <div className="flex flex-1 gap-6">
+            <div className="pt-6">
+              <TemplateSidebar
+                templateId={selectedTemplateId}
+                onTemplateChange={handleRegenerateWithTabSwitch}
+                disabled={isRegenerating}
+                documentedSections={documentedSectionIds}
+                onScrollToSection={handleScrollToNoteSection}
+                onAddSection={isRegenerating ? undefined : onAddSection}
+                stickyTop={stickyHeaderHeight + 24}
+              />
+            </div>
+            <div className="flex flex-1 flex-col">
+              <div
+                className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
+                style={{ top: stickyHeaderHeight }}
+              >
+                <h2 className="text-lg font-medium">{t("detail.note")}</h2>
+                {isRegenerating ? (
+                  <TextShimmer className="text-sm" duration={3}>
+                    {t("detail.regenerating")}
+                  </TextShimmer>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    onClick={handleCopyNote}
+                    disabled={!generatedNoteHtml}
+                  >
+                    {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-col gap-4">{noteSectionCards}</div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="resources" className="pt-6">
+          <ResourcesPanel visit={visit} t={t} />
+        </TabsContent>
+
+        <TabsContent value="add-document">
+          <div className="flex-1">
+            <TiptapEditor
+              content=""
+              onChange={() => {}}
+              placeholder={t("detail.addDocument")}
+              className="flex-1 rounded-2xl"
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
+    </>
   );
 }
 

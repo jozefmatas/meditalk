@@ -10,7 +10,7 @@ function Switch({ className, ...props }: SwitchProps) {
   return (
     <SwitchBase
       className={cn(
-        "data-checked:bg-secondary data-unchecked:border-border p-0.5 data-[size=default]:h-5 data-[size=default]:w-9 **:data-[slot=switch-thumb]:data-checked:translate-x-full!",
+        "data-unchecked:border-input data-checked:border-secondary data-checked:bg-secondary! data-[size=default]:h-auto! data-[size=sm]:h-auto! **:data-[slot=switch-thumb]:data-checked:translate-x-[calc(100%-4px)]!",
         className,
       )}
       {...props}

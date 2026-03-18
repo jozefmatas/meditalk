@@ -126,6 +126,7 @@ export function EncounterHeaderActions({
               checked={sendAsEmail}
               onCheckedChange={handleSendAsEmailChange}
               disabled={isGenerating}
+              className="**:data-[slot=switch-thumb]:data-checked:translate-x-[calc(100%-2px)]!"
             />
           </div>
         )}
