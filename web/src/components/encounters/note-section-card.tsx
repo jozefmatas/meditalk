@@ -6,6 +6,7 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Delete01Icon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/shared/button";
 import { cn } from "@/lib/utils";
 
 interface SubsectionData {
@@ -146,13 +147,22 @@ export function NoteSectionCard({
   return (
     <div
       id={id}
-      className="rounded-2xl border p-6 transition-colors hover:border-ring focus-within:border-ring focus-within:bg-accent"
+      className="group relative rounded-2xl border p-6 transition-colors hover:border-ring focus-within:border-ring focus-within:bg-accent"
     >
+      {onRemove && (
+        <Button
+          variant="destructive"
+          size="icon-lg"
+          className="absolute top-3 right-3 opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={() => onRemove(sectionId)}
+        >
+          <HugeiconsIcon icon={Delete01Icon} />
+        </Button>
+      )}
       <div className="flex flex-col gap-3 text-foreground">
         <SectionHeader
           title={title}
           sectionId={sectionId}
-          onRemove={onRemove}
         />
 
         <InlineEditor

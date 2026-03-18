@@ -242,7 +242,7 @@ export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
                   <span className="text-sm font-normal text-primary">
                     {codeFor(code)}
                   </span>
-                  <span className="truncate text-xs text-foreground">
+                  <span className="line-clamp-2 text-xs text-foreground">
                     {descFor(code)}
                   </span>
                 </div>
