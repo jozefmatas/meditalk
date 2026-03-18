@@ -125,7 +125,8 @@
       "Bash(brew list:*)",
       "Bash(vercel ls:*)",
       "Bash(npm test:*)",
-      "WebFetch(domain:deepwiki.com)"
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(npm audit:*)"
     ],
     "deny": [],
     "ask": []

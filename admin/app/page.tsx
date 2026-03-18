@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { getDashboardStats, getUsers } from '@/lib/queries';
-import { formatCost, formatTokens, modelLabel } from '@/lib/pricing';
+import { getDashboardStats, getUsers, getEncounters } from '@/lib/queries';
+import { formatCost, formatDuration, formatTokens, modelLabel } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,9 +19,12 @@ export default async function DashboardPage({
       <div className="mb-6 flex gap-2">
         <TabLink label="Dashboard" value="dashboard" active={tab} />
         <TabLink label="Users" value="users" active={tab} />
+        <TabLink label="Encounters" value="encounters" active={tab} />
       </div>
 
-      {tab === 'dashboard' ? <DashboardTab /> : <UsersTab />}
+      {tab === 'dashboard' && <DashboardTab />}
+      {tab === 'users' && <UsersTab />}
+      {tab === 'encounters' && <EncountersTab />}
     </div>
   );
 }
@@ -68,16 +71,23 @@ async function DashboardTab() {
             </tr>
           </thead>
           <tbody>
-            {stats.byModel.map((m) => (
-              <tr key={`${m.provider}:${m.model}`} className="border-b border-border last:border-0">
-                <td className="px-4 py-3 capitalize">{m.provider}</td>
-                <td className="px-4 py-3">{modelLabel(m.model)}</td>
-                <td className="px-4 py-3 text-right">{m.requests.toLocaleString()}</td>
-                <td className="px-4 py-3 text-right">{formatTokens(m.input_tokens)}</td>
-                <td className="px-4 py-3 text-right">{formatTokens(m.output_tokens)}</td>
-                <td className="px-4 py-3 text-right font-medium">{formatCost(m.total_cost)}</td>
-              </tr>
-            ))}
+            {stats.byModel.map((m) => {
+              const isDuration = m.total_duration_seconds > 0;
+              return (
+                <tr key={`${m.provider}:${m.model}`} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 capitalize">{m.provider}</td>
+                  <td className="px-4 py-3">{modelLabel(m.model)}</td>
+                  <td className="px-4 py-3 text-right">{m.requests.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">
+                    {isDuration ? formatDuration(m.total_duration_seconds) : formatTokens(m.input_tokens)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {isDuration ? '—' : formatTokens(m.output_tokens)}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium">{formatCost(m.total_cost)}</td>
+                </tr>
+              );
+            })}
             {stats.byModel.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
@@ -129,6 +139,58 @@ async function UsersTab() {
             <tr>
               <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                 No users found
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+async function EncountersTab() {
+  const encounters = await getEncounters();
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">User</th>
+            <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Requests</th>
+            <th className="px-4 py-3 text-right font-medium text-muted-foreground">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {encounters.map((e) => (
+            <tr key={e.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+              <td className="px-4 py-3">
+                <Link href={`/encounters/${e.id}`} className="text-primary underline-offset-4 hover:underline">
+                  {e.title || 'Untitled'}
+                </Link>
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">{e.patient_name || '—'}</td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {new Date(e.visit_date).toLocaleDateString()}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">{e.user_email}</td>
+              <td className="px-4 py-3">
+                <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
+                  {e.status}
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right">{e.requests.toLocaleString()}</td>
+              <td className="px-4 py-3 text-right font-medium">{formatCost(e.total_cost)}</td>
+            </tr>
+          ))}
+          {encounters.length === 0 && (
+            <tr>
+              <td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">
+                No encounters found
               </td>
             </tr>
           )}

@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { getUserDetail } from '@/lib/queries';
-import { formatCost, formatTokens, modelLabel } from '@/lib/pricing';
+import { getUserDetail, getUserEncounters } from '@/lib/queries';
+import { formatCost } from '@/lib/pricing';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +10,13 @@ export default async function UserDetailPage({
   params: Promise<{ userId: string }>;
 }) {
   const { userId } = await params;
-  const user = await getUserDetail(userId);
+  const [user, encounters] = await Promise.all([
+    getUserDetail(userId),
+    getUserEncounters(userId),
+  ]);
+
+  const totalEncounterCost = encounters.reduce((s, e) => s + e.total_cost, 0);
+  const totalRequests = encounters.reduce((s, e) => s + e.requests, 0);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
@@ -24,45 +30,49 @@ export default async function UserDetailPage({
       </p>
 
       <div className="mb-8 grid grid-cols-3 gap-4">
-        <StatCard label="Total Cost" value={formatCost(user.totalCost)} />
-        <StatCard label="Total Requests" value={user.totalRequests.toLocaleString()} />
-        <StatCard label="User ID" value={user.id.slice(0, 8) + '...'} />
+        <StatCard label="Total Cost" value={formatCost(totalEncounterCost)} />
+        <StatCard label="Total Requests" value={totalRequests.toLocaleString()} />
+        <StatCard label="Encounters" value={encounters.length.toLocaleString()} />
       </div>
 
-      <h2 className="mb-3 text-lg font-semibold">Recent API Calls</h2>
+      <h2 className="mb-3 text-lg font-semibold">Encounters</h2>
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-muted/50">
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Time</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Operation</th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Model</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Input</th>
-              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Output</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Patient</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
+              <th className="px-4 py-3 text-right font-medium text-muted-foreground">Requests</th>
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">Cost</th>
             </tr>
           </thead>
           <tbody>
-            {user.usage.map((r) => (
-              <tr key={r.id} className="border-b border-border last:border-0">
+            {encounters.map((e) => (
+              <tr key={e.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                <td className="px-4 py-3">
+                  <Link href={`/encounters/${e.id}`} className="text-primary underline-offset-4 hover:underline">
+                    {e.title || 'Untitled'}
+                  </Link>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{e.patient_name || '—'}</td>
                 <td className="px-4 py-3 text-muted-foreground">
-                  {new Date(r.created_at).toLocaleString()}
+                  {new Date(e.visit_date).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
                   <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
-                    {r.operation}
+                    {e.status}
                   </span>
                 </td>
-                <td className="px-4 py-3">{modelLabel(r.model)}</td>
-                <td className="px-4 py-3 text-right">{formatTokens(r.input_tokens)}</td>
-                <td className="px-4 py-3 text-right">{formatTokens(r.output_tokens)}</td>
-                <td className="px-4 py-3 text-right font-medium">{formatCost(r.cost_usd)}</td>
+                <td className="px-4 py-3 text-right">{e.requests.toLocaleString()}</td>
+                <td className="px-4 py-3 text-right font-medium">{formatCost(e.total_cost)}</td>
               </tr>
             ))}
-            {user.usage.length === 0 && (
+            {encounters.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
-                  No API calls yet
+                  No encounters yet
                 </td>
               </tr>
             )}
