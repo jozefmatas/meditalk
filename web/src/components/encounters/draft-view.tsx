@@ -227,7 +227,7 @@ export function DraftView({
   return (
     <>
       {/* Sticky header: title + recording bar */}
-      <div className="shrink-0 flex flex-col gap-5 border-border bg-background pt-6 desktop:border-b desktop:py-6">
+      <div className="shrink-0 flex flex-col gap-5 border-border bg-background pt-4 desktop:border-b desktop:py-6">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <Textarea
             value={title}
