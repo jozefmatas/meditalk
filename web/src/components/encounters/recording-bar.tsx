@@ -95,6 +95,42 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const scribeAudioCtxRef = useRef<AudioContext | null>(null);
     const transcriptRef = useRef<string>("");
 
+    // Wake Lock — keeps screen on during recording (no audio interaction)
+    const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+    const acquireWakeLock = useCallback(async () => {
+      if (!("wakeLock" in navigator)) return;
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+        wakeLockRef.current.addEventListener("release", () => {
+          wakeLockRef.current = null;
+        });
+      } catch {
+        // Failed (e.g. low battery, page not visible)
+      }
+    }, []);
+
+    const releaseWakeLock = useCallback(() => {
+      wakeLockRef.current?.release();
+      wakeLockRef.current = null;
+    }, []);
+
+    // Re-acquire wake lock when page becomes visible (OS releases it on hide)
+    useEffect(() => {
+      const handleVisibility = () => {
+        if (
+          document.visibilityState === "visible" &&
+          state !== "idle" &&
+          !wakeLockRef.current
+        ) {
+          acquireWakeLock();
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibility);
+      return () =>
+        document.removeEventListener("visibilitychange", handleVisibility);
+    }, [state, acquireWakeLock]);
+
     // Enumerate audio devices on mount (labels may be empty until permission is granted)
     useEffect(() => {
       navigator.mediaDevices
@@ -267,6 +303,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           const transcript = transcriptRef.current || null;
           transcriptRef.current = "";
 
+          releaseWakeLock();
           setState("idle");
           setDuration(0);
           elapsedBeforePauseRef.current = 0;
@@ -275,7 +312,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           return { blob, transcript };
         },
       }),
-      [buildBlob, stopScribe],
+      [buildBlob, stopScribe, releaseWakeLock],
     );
 
     const startTimer = useCallback(() => {
@@ -345,6 +382,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         // Start Scribe streaming from the same mic stream (non-blocking)
         startScribe(stream);
 
+        // Keep screen awake during recording
+        acquireWakeLock();
+
         startTimer();
         setState("recording");
         onRecordingStateChange?.("recording");
@@ -359,6 +399,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       startTimer,
       onRecordingStateChange,
       startScribe,
+      acquireWakeLock,
     ]);
 
     const handlePause = useCallback(() => {
