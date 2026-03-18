@@ -227,9 +227,16 @@ export function useEncounterGeneration({
       const streamingTranscript = finalized?.transcript ?? null;
 
       try {
-        // If there's a recorded audio that hasn't been uploaded yet, upload
-        // and register it now (safety net if handleRecordingComplete hasn't run)
-        if (blobToProcess && !capturedAudioStoragePath) {
+        // If there's a recorded audio that hasn't been uploaded yet AND we don't
+        // have a streaming transcript, upload now as fallback.
+        // Skip if streamingTranscript exists — the text goes directly to the API,
+        // no need for server-side batch extraction.
+        // Also skip if handleRecordingComplete already uploaded (audioStoragePath set).
+        if (
+          blobToProcess &&
+          !capturedAudioStoragePath &&
+          !streamingTranscript
+        ) {
           const result = await uploadToStorage(
             blobToProcess,
             "recording.webm",

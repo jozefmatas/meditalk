@@ -154,7 +154,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
         const connection = Scribe.connect({
           token,
-          modelId: "scribe_v2",
+          modelId: "scribe_v2_realtime",
           audioFormat,
           sampleRate: targetRate,
           commitStrategy: CommitStrategy.VAD,
