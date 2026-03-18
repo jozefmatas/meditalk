@@ -109,20 +109,133 @@ describe("buildTemplateHtml", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("converts newlines to <br> tags", () => {
+  it("renders multiple lines as separate paragraphs", () => {
     const contents = {
       subjective: "Line one\nLine two",
       objective: "",
       plan: "",
     };
     const html = buildTemplateHtml(simpleTemplate, contents, labels);
-    expect(html).toContain("Line one<br>Line two");
+    expect(html).toContain("<p>Line one</p><p>Line two</p>");
   });
 
   it("uses section id as fallback label", () => {
     const contents = { subjective: "Text" };
     const html = buildTemplateHtml(simpleTemplate, contents, {});
     expect(html).toContain("<h2>subjective</h2>");
+  });
+
+  /* ── Inline formatting (bold/italic) ── */
+
+  it("converts markdown **bold** to <strong> tags", () => {
+    const contents = {
+      subjective: "Patient has **severe headache** and **nausea**.",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain(
+      "<p>Patient has <strong>severe headache</strong> and <strong>nausea</strong>.</p>",
+    );
+  });
+
+  it("preserves existing <strong> tags from editor round-trip", () => {
+    const contents = {
+      subjective:
+        "Patient has <strong>severe headache</strong> and <strong>nausea</strong>.",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain(
+      "<p>Patient has <strong>severe headache</strong> and <strong>nausea</strong>.</p>",
+    );
+  });
+
+  it("preserves <em> tags from editor round-trip", () => {
+    const contents = {
+      subjective: "Patient feels <em>slightly dizzy</em>.",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain("<p>Patient feels <em>slightly dizzy</em>.</p>");
+  });
+
+  /* ── Bullet lists ── */
+
+  it("converts - bullet lines to <ul><li>", () => {
+    const contents = {
+      subjective: "Symptoms:\n- Headache\n- Nausea\n- Dizziness",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain("<p>Symptoms:</p>");
+    expect(html).toContain(
+      "<ul><li>Headache</li><li>Nausea</li><li>Dizziness</li></ul>",
+    );
+  });
+
+  it("handles mixed paragraphs and bullet lists", () => {
+    const contents = {
+      subjective: "Intro text\n- Item A\n- Item B\nConclusion",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain("<p>Intro text</p>");
+    expect(html).toContain("<ul><li>Item A</li><li>Item B</li></ul>");
+    expect(html).toContain("<p>Conclusion</p>");
+  });
+
+  it("preserves bold inside bullet items", () => {
+    const contents = {
+      subjective: "- **Aspirin** 200mg\n- **Heparin** 8000 UI",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain(
+      "<ul><li><strong>Aspirin</strong> 200mg</li><li><strong>Heparin</strong> 8000 UI</li></ul>",
+    );
+  });
+
+  it("handles indented bullet lines", () => {
+    const contents = {
+      subjective: "  - Headache\n  - Nausea",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain("<ul><li>Headache</li><li>Nausea</li></ul>");
+  });
+
+  it("handles en-dash and em-dash bullets", () => {
+    const contents = {
+      subjective: "– Item A\n— Item B\n* Item C",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain(
+      "<ul><li>Item A</li><li>Item B</li><li>Item C</li></ul>",
+    );
+  });
+
+  it("escapes other HTML while preserving <strong> and <em>", () => {
+    const contents = {
+      subjective:
+        "<strong>Bold</strong> & <script>xss</script> <em>italic</em>",
+      objective: "",
+      plan: "",
+    };
+    const html = buildTemplateHtml(simpleTemplate, contents, labels);
+    expect(html).toContain("<strong>Bold</strong>");
+    expect(html).toContain("<em>italic</em>");
+    expect(html).toContain("&amp;");
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).not.toContain("<script>");
   });
 });
 

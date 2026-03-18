@@ -5,7 +5,6 @@ import {
   GENERATION_MODEL,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
-  NOT_STATED,
 } from "@/lib/anthropic";
 import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
@@ -17,7 +16,7 @@ import {
 } from "@/lib/clinical";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
-import { parseNoteToSectionMap } from "@/lib/parse-soap-sections";
+import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -156,7 +155,6 @@ export async function POST(request: NextRequest) {
         .map(([id, content]) => `[${id}]: ${content}`)
         .join("\n\n");
 
-      const notStated = NOT_STATED[language];
       const langLabel = LANGUAGE_LABELS[language];
       const sectionList = allIds
         .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
@@ -169,7 +167,7 @@ Rules:
 1. Preserve ALL clinical information. Do not omit any details from the source.
 2. Preserve the EXACT tone, voice, and writing style of the original note. Do not rephrase, simplify, or embellish — copy the wording verbatim where it fits and only restructure when necessary to fit a different section.
 3. Write in ${langLabel}, except medical terms.
-4. Sections with no relevant content: "${notStated}".
+4. Sections with no relevant content: use empty string "".
 5. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}`;
 
       userMessage = `CURRENT NOTE SECTIONS:\n\n${currentSections}\n\nReorganize into these target template sections:\n${sectionList}\n\nReturn valid JSON.`;
@@ -353,11 +351,10 @@ Rules:
             delete parsed.title;
           }
 
-          const notStated = NOT_STATED[language];
           const sectionContents: Record<string, string> = {};
           for (const id of allIds) {
             const value = parsed[id];
-            sectionContents[id] = typeof value === "string" ? value : notStated;
+            sectionContents[id] = typeof value === "string" ? value : "";
           }
 
           const generatedNote = buildTemplateHtml(

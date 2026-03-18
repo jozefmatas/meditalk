@@ -7,24 +7,24 @@ export const NOT_STATED_VALUES = new Set([
   "Neuvedeno",
 ]);
 
-export interface SoapSection {
+export interface NoteSection {
   id: string;
   title: string;
   content: string;
 }
 
 /**
- * Parse generated SOAP note HTML into individual sections.
+ * Parse generated note HTML into individual sections.
  * The HTML structure from buildTemplateHtml is:
  *   <h2>Section Title</h2><p>Content...</p>
  *   <h3>Subsection Title</h3><p>Content...</p>
  * We split on <h2> tags to get top-level sections,
  * preserving any <h3> subsections within them.
  */
-export function parseSoapSections(html: string): SoapSection[] {
+export function parseNoteSections(html: string): NoteSection[] {
   if (!html) return [];
 
-  const sections: SoapSection[] = [];
+  const sections: NoteSection[] = [];
 
   // Split by <h2> keeping the tag
   const parts = html.split(/(?=<h2[^>]*>)/i);
@@ -63,7 +63,7 @@ export function parseSoapSections(html: string): SoapSection[] {
  * h2 titles are **bold**, h3 subheaders are *italic*.
  * Numbered (1. / 2.) and bullet (- / •) lists get each item on its own line.
  */
-export function sectionToPlainText(section: SoapSection): string {
+export function sectionToPlainText(section: NoteSection): string {
   const text = section.content
     .replace(/<h3[^>]*>(.*?)<\/h3>/gi, "\n*$1*\n")
     .replace(/<li[^>]*>(.*?)<\/li>/gi, "  - $1\n")
@@ -86,7 +86,7 @@ export function sectionToPlainText(section: SoapSection): string {
 /**
  * Check if a section's content is a "not stated" placeholder.
  */
-function isSectionNotStated(section: SoapSection): boolean {
+function isSectionNotStated(section: NoteSection): boolean {
   const text = section.content
     .replace(/<[^>]+>/g, "")
     .replace(/&amp;/g, "&")
@@ -101,7 +101,7 @@ function isSectionNotStated(section: SoapSection): boolean {
  * Convert all sections to a single markdown-style string for clipboard.
  * Sections with "Not stated" content are excluded.
  */
-export function allSectionsToPlainText(sections: SoapSection[]): string {
+export function allSectionsToPlainText(sections: NoteSection[]): string {
   return sections
     .filter((s) => !isSectionNotStated(s))
     .map(sectionToPlainText)
@@ -109,21 +109,33 @@ export function allSectionsToPlainText(sections: SoapSection[]): string {
 }
 
 /**
- * Strip HTML tags and decode entities, returning plain text.
- * If the result is a NOT_STATED placeholder, returns empty string.
+ * Extract inline content from HTML, preserving formatting tags (<strong>, <em>).
+ * Strips structural tags (<p>, <br>) and decodes entities.
+ * If the plain-text result is a NOT_STATED placeholder, returns empty string.
  */
-function htmlToText(html: string): string {
+function htmlToInlineContent(html: string): string {
   const text = html
     .replace(/<br\s*\/?>/gi, "\n")
+    // Convert list items to "- " prefix (handles <li>text</li> and <li><p>text</p></li>)
+    .replace(/<li[^>]*>(?:<p[^>]*>)?([\s\S]*?)(?:<\/p>)?<\/li>/gi, "- $1\n")
+    // Strip list wrappers
+    .replace(/<\/?[uo]l[^>]*>/gi, "")
+    // Convert </p> to newlines, strip opening <p>
     .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
+    .replace(/<p[^>]*>/gi, "")
+    // Strip all tags EXCEPT <strong>, </strong>, <em>, </em>
+    .replace(/<(?!\/?(?:strong|em)\b)[^>]+>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
-  // Treat AI "not stated" placeholders as empty
-  if (NOT_STATED_VALUES.has(text)) return "";
+
+  // Check NOT_STATED against plain text (strip formatting tags for check)
+  const plainText = text.replace(/<\/?(?:strong|em)>/gi, "").trim();
+  if (NOT_STATED_VALUES.has(plainText)) return "";
+
   return text;
 }
 
@@ -176,8 +188,11 @@ export function filterEmptySectionsHtml(html: string): string {
 }
 
 /**
- * Parse generated note HTML into a map of { sectionId → text content }
+ * Parse generated note HTML into a map of { sectionId → inline content }
  * keyed by template section/subsection IDs.
+ *
+ * Content preserves inline formatting tags (<strong>, <em>) but strips
+ * structural tags (<p>, <br>). Newlines separate paragraphs.
  *
  * The HTML from buildTemplateHtml has:
  *   <h2>Title</h2><p>content</p><h3>Sub</h3><p>sub content</p>...
@@ -207,14 +222,14 @@ export function parseNoteToSectionMap(
 
     if (!templateSection.subsections?.length) {
       // No subsections — entire body is this section's content
-      map[templateSection.id] = htmlToText(body);
+      map[templateSection.id] = htmlToInlineContent(body);
     } else {
       // Split body on <h3> to separate parent content from subsection content
       const h3Parts = body.split(/(?=<h3[^>]*>)/i);
 
       // First chunk (before any <h3>) is the parent section content
       if (h3Parts[0] && !h3Parts[0].startsWith("<h3")) {
-        map[templateSection.id] = htmlToText(h3Parts[0]);
+        map[templateSection.id] = htmlToInlineContent(h3Parts[0]);
       } else {
         map[templateSection.id] = "";
       }
@@ -231,7 +246,7 @@ export function parseNoteToSectionMap(
           subIdx++;
           continue;
         }
-        map[sub.id] = htmlToText(h3Part.slice(subBodyStart + 5));
+        map[sub.id] = htmlToInlineContent(h3Part.slice(subBodyStart + 5));
         subIdx++;
       }
     }

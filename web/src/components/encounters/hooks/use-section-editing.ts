@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Encounter } from "@/lib/types";
 import type { Template } from "@/lib/templates";
-import { parseNoteToSectionMap } from "@/lib/parse-soap-sections";
+import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 import { buildTemplateHtml } from "@/lib/templates/html";
 
 interface UseSectionEditingOptions {

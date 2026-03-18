@@ -115,7 +115,6 @@ export function buildTemplateSystemPrompt(
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
 ): string {
-  const notStated = NOT_STATED[language];
   const langLabel = LANGUAGE_LABELS[language];
   const allIds = flattenSectionIds(template);
 
@@ -126,15 +125,15 @@ export function buildTemplateSystemPrompt(
   return `You are a medical documentation assistant. You MUST follow these rules strictly:
 
 1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
-2. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
-3. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
-4. MISSING INFORMATION: If a section has no relevant information, write "${notStated}".
+2. STRICT GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, estimate, or hallucinate any medical facts. If a value (age, duration, measurement, dosage, etc.) is not explicitly stated, do NOT guess — omit it entirely.
+3. OUTPUT LANGUAGE: Write ALL content exclusively in ${langLabel}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+4. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
 5. FORMAT: Return valid JSON with the following keys:
-   - One key for each section ID listed below, with the section content as a string value.
+   - One key for each section ID listed below, with the section content as a string value (or "" if no information).
    - A "letter" key with a patient-friendly summary letter.
    - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in ${langLabel}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
 
-TEMPLATE SECTIONS (fill each one):
+TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 ${sectionList}
 
 PATIENT LETTER:
@@ -183,7 +182,7 @@ export function buildTemplateUserMessage(
 /**
  * Generate a medical document from a template, transcript chunks, and optional doctor notes.
  */
-export const GENERATION_MODEL = "claude-haiku-4-5-20251001";
+export const GENERATION_MODEL = "claude-opus-4-6";
 
 export async function generateFromTemplate(
   chunks: string[],
@@ -265,12 +264,11 @@ export async function generateFromTemplate(
   const suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
   delete parsed.title;
 
-  // Ensure all section IDs have content, fill missing with "Not stated"
-  const notStated = NOT_STATED[language];
+  // Fill section contents (empty string for missing keys)
   const sectionContents: Record<string, string> = {};
   for (const id of allIds) {
     const value = parsed[id];
-    sectionContents[id] = typeof value === "string" ? value : notStated;
+    sectionContents[id] = typeof value === "string" ? value : "";
   }
 
   const generatedNote = buildTemplateHtml(

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
 import type { RecordingBarRef } from "@/components/encounters/recording-bar";
-import type { SoapSection } from "@/lib/parse-soap-sections";
+import type { NoteSection } from "@/lib/parse-note-sections";
 import { getDefaultTemplate } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
 
@@ -44,7 +44,13 @@ export function useEncounterGeneration({
     activeGenerations.has(visitId),
   );
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [streamedSections, setStreamedSections] = useState<SoapSection[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamedSections, setStreamedSections] = useState<NoteSection[]>([]);
+  // Template section IDs received from streaming_start — used for skeleton rendering
+  const [streamingSectionIds, setStreamingSectionIds] = useState<string[]>([]);
+  const [streamingSectionLabels, setStreamingSectionLabels] = useState<
+    Record<string, string>
+  >({});
 
   // Audio recording — blob kept in memory for canGenerate check
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -203,6 +209,10 @@ export function useEncounterGeneration({
       if (!visitId) return;
       activeGenerations.add(visitId);
       setIsGenerating(true);
+      setIsStreaming(false);
+      setStreamedSections([]);
+      setStreamingSectionIds([]);
+      setStreamingSectionLabels({});
       setError(null);
 
       // Reflect processing state in sidebar + persist to DB
@@ -229,9 +239,6 @@ export function useEncounterGeneration({
       try {
         // If there's a recorded audio that hasn't been uploaded yet AND we don't
         // have a streaming transcript, upload now as fallback.
-        // Skip if streamingTranscript exists — the text goes directly to the API,
-        // no need for server-side batch extraction.
-        // Also skip if handleRecordingComplete already uploaded (audioStoragePath set).
         if (
           blobToProcess &&
           !capturedAudioStoragePath &&
@@ -242,7 +249,6 @@ export function useEncounterGeneration({
             "recording.webm",
             { encounterId: visitId },
           );
-          // Register the file in encounter metadata
           await fetch(`/api/encounters/${visitId}/files`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -264,7 +270,7 @@ export function useEncounterGeneration({
         setAudioBlob(null);
         setAudioStoragePath(null);
 
-        // Generate note — recordings are now processed uniformly with other files
+        // Generate note via SSE streaming
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -287,59 +293,114 @@ export function useEncounterGeneration({
           throw new Error(message);
         }
 
-        const data = await res.json();
-        setGeneratedNoteHtml(data.generatedNote);
-        setVisit((prev) => {
-          if (!prev) return prev;
-          const existingMeta = (prev.metadata ?? {}) as Record<string, unknown>;
-          return {
-            ...prev,
-            soap_note: data.generatedNote,
-            patient_letter: data.letter,
-            ...(streamingTranscript ? { raw_text: streamingTranscript } : {}),
-            metadata: {
-              ...existingMeta,
-              ...(data.clinicalAnalysis
-                ? { clinical_analysis: data.clinicalAnalysis }
-                : {}),
-            },
-          };
-        });
+        // Read SSE stream
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("No response stream");
 
-        // Auto-set title if user hasn't provided one
-        const autoTitle = !capturedTitle.trim() ? data.suggestedTitle : null;
-        const patchBody: Record<string, string> = { status: "to_review" };
-        if (autoTitle) patchBody.title = autoTitle;
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let completedEvent: Record<string, unknown> | null = null;
 
-        // Auto-transition to review (+ title if generated)
-        await fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patchBody),
-        });
-        if (autoTitle) updateTitleRef.current(autoTitle);
-        setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-        window.dispatchEvent(
-          new CustomEvent("encounter-update", {
-            detail: {
-              id: visitId,
-              status: "to_review",
-              ...(autoTitle ? { title: autoTitle } : {}),
-            },
-          }),
-        );
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        // Send note as email if toggled on (fire-and-forget)
-        if (options?.sendAsEmail) {
-          fetch("/api/send-note-email", {
-            method: "POST",
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === "streaming_start") {
+                // Switch from full-screen overlay to streaming sections view
+                setIsStreaming(true);
+                setStreamingSectionIds(event.sectionIds);
+                setStreamingSectionLabels(event.sectionLabels);
+              } else if (event.type === "section") {
+                setStreamedSections((prev) => [
+                  ...prev,
+                  { id: event.id, title: event.title, content: event.content },
+                ]);
+              } else if (event.type === "complete") {
+                completedEvent = event;
+                setGeneratedNoteHtml(event.generatedNote);
+                setVisit((prev) => {
+                  if (!prev) return prev;
+                  const existingMeta = (prev.metadata ?? {}) as Record<
+                    string,
+                    unknown
+                  >;
+                  return {
+                    ...prev,
+                    soap_note: event.generatedNote,
+                    patient_letter: event.letter,
+                    ...(streamingTranscript
+                      ? { raw_text: streamingTranscript }
+                      : {}),
+                    metadata: {
+                      ...existingMeta,
+                      ...(event.clinicalAnalysis
+                        ? { clinical_analysis: event.clinicalAnalysis }
+                        : {}),
+                    },
+                  };
+                });
+              } else if (event.type === "error") {
+                throw new Error(event.error);
+              }
+            } catch (parseErr) {
+              if (
+                parseErr instanceof Error &&
+                parseErr.message !== "Unexpected end of JSON input"
+              ) {
+                throw parseErr;
+              }
+            }
+          }
+        }
+
+        // Handle post-generation (title, status transition) using completed event
+        if (completedEvent) {
+          const autoTitle = !capturedTitle.trim()
+            ? (completedEvent.suggestedTitle as string)
+            : null;
+          const patchBody: Record<string, string> = { status: "to_review" };
+          if (autoTitle) patchBody.title = autoTitle;
+
+          await fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ visitId }),
-          }).catch(() => {});
+            body: JSON.stringify(patchBody),
+          });
+          if (autoTitle) updateTitleRef.current(autoTitle);
+          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: {
+                id: visitId,
+                status: "to_review",
+                ...(autoTitle ? { title: autoTitle } : {}),
+              },
+            }),
+          );
+
+          if (options?.sendAsEmail) {
+            fetch("/api/send-note-email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ visitId }),
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Generation failed");
-        // Revert status back from "processing" on failure
         setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
         window.dispatchEvent(
           new CustomEvent("encounter-update", {
@@ -354,7 +415,7 @@ export function useEncounterGeneration({
       } finally {
         activeGenerations.delete(visitId);
         setIsGenerating(false);
-        // Notify any remounted instances that generation is done
+        setIsStreaming(false);
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
         );
@@ -585,8 +646,11 @@ export function useEncounterGeneration({
     generatedNoteHtml,
     setGeneratedNoteHtml,
     isGenerating,
+    isStreaming,
     isRegenerating,
     streamedSections,
+    streamingSectionIds,
+    streamingSectionLabels,
     audioBlob,
     hasActiveRecording,
     recordingBarRef,

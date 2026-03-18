@@ -29,6 +29,49 @@ interface NoteSectionCardProps {
   onAutoFocused?: () => void;
 }
 
+/** Matches bullet-style list lines: - , • , – , — , *  (with optional leading whitespace) */
+const BULLET_RE = /^\s*[-•–—*]\s/;
+
+/** Convert inline content (may contain markdown **bold** and - bullets) to TipTap HTML */
+function contentToEditorHtml(content: string): string {
+  if (!content) return "";
+  const withBold = content.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  const lines = withBold.split("\n");
+  const parts: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (BULLET_RE.test(lines[i])) {
+      const items: string[] = [];
+      while (i < lines.length && BULLET_RE.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-•–—*]\s/, ""));
+        i++;
+      }
+      parts.push(
+        `<ul>${items.map((item) => `<li><p>${item}</p></li>`).join("")}</ul>`,
+      );
+    } else if (lines[i].trim()) {
+      parts.push(`<p>${lines[i]}</p>`);
+      i++;
+    } else {
+      i++;
+    }
+  }
+
+  return parts.join("");
+}
+
+/** Convert TipTap HTML back to inline content format */
+function editorHtmlToContent(html: string): string {
+  return html
+    .replace(/<li[^>]*>(?:<p[^>]*>)?([\s\S]*?)(?:<\/p>)?<\/li>/gi, "- $1\n")
+    .replace(/<\/?[uo]l[^>]*>/gi, "")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<p[^>]*>/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 const editorClassName = cn(
   "prose prose-sm dark:prose-invert max-w-none text-foreground",
   "[&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[1.5em]",
@@ -63,15 +106,15 @@ function InlineEditor({
         placeholder: "Type here...",
       }),
     ],
-    content: content ? `<p>${content.replace(/\n/g, "</p><p>")}</p>` : "",
+    content: contentToEditorHtml(content),
     editable: !!onContentChange,
     immediatelyRender: false,
     onBlur: ({ editor }) => {
       if (!onContentChange) return;
-      const text = editor.getText({ blockSeparator: "\n" }).trim();
-      if (text !== lastEmittedRef.current) {
-        lastEmittedRef.current = text;
-        onContentChange(sectionId, text);
+      const content = editorHtmlToContent(editor.getHTML());
+      if (content !== lastEmittedRef.current) {
+        lastEmittedRef.current = content;
+        onContentChange(sectionId, content);
       }
     },
     editorProps: {
@@ -87,7 +130,7 @@ function InlineEditor({
     if (!editor || content === initialContentRef.current) return;
     initialContentRef.current = content;
     lastEmittedRef.current = content;
-    editor.commands.setContent(`<p>${content.replace(/\n/g, "</p><p>")}</p>`);
+    editor.commands.setContent(contentToEditorHtml(content));
   }, [editor, content]);
 
   // Auto-focus when section is re-added from sidebar (without triggering scroll)

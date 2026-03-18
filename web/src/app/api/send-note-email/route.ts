@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNoteEmail } from "@/lib/email/send-note-email";
-import { filterEmptySectionsHtml } from "@/lib/parse-soap-sections";
+import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
 
 export async function POST(request: Request) {
   try {

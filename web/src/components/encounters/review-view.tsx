@@ -35,10 +35,11 @@ import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import type { Template } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
 import {
-  parseSoapSections,
+  parseNoteSections,
   allSectionsToPlainText,
-  type SoapSection,
-} from "@/lib/parse-soap-sections";
+  NOT_STATED_VALUES,
+  type NoteSection,
+} from "@/lib/parse-note-sections";
 import { buildTemplateHtml } from "@/lib/templates/html";
 import type { Encounter } from "@/lib/types";
 
@@ -52,9 +53,13 @@ interface ReviewViewProps {
   error: string | null;
   // Generation
   isRegenerating: boolean;
+  /** True when initial generation is streaming (shows skeleton sections) */
+  isStreamingGeneration?: boolean;
   selectedTemplateId: string;
   onRegenerate: (templateId: string) => void;
-  streamedSections: SoapSection[];
+  streamedSections: NoteSection[];
+  /** Section labels from streaming_start event */
+  streamingSectionLabels?: Record<string, string>;
   generatedNoteHtml: string;
   // Template
   template: Template | undefined;
@@ -81,9 +86,11 @@ export function ReviewView({
   formattedDate,
   error,
   isRegenerating,
+  isStreamingGeneration = false,
   selectedTemplateId,
   onRegenerate,
   streamedSections,
+  streamingSectionLabels,
   generatedNoteHtml,
   template,
   sectionLabels,
@@ -170,10 +177,10 @@ export function ReviewView({
   );
 
   /** Determine which section/subsection IDs have content and are not removed.
-   *  During regeneration, derive from streamed sections instead of stale sectionContents. */
+   *  During regeneration or streaming generation, derive from streamed sections. */
   const documentedSectionIds = useMemo(() => {
     if (!template) return new Set<string>();
-    if (isRegenerating) {
+    if (isRegenerating || isStreamingGeneration) {
       return new Set(streamedSections.map((s) => s.id));
     }
     const documented = new Set<string>();
@@ -188,6 +195,7 @@ export function ReviewView({
     sectionContents,
     removedSections,
     isRegenerating,
+    isStreamingGeneration,
     streamedSections,
   ]);
 
@@ -243,7 +251,7 @@ export function ReviewView({
             { skipEmpty: true },
           )
         : generatedNoteHtml;
-    const parsed = parseSoapSections(currentHtml);
+    const parsed = parseNoteSections(currentHtml);
     const plainText = allSectionsToPlainText(parsed);
     try {
       await navigator.clipboard.write([
@@ -266,51 +274,143 @@ export function ReviewView({
   ]);
 
   // Note section cards — shared between desktop note tab and mobile note tab
-  const noteSectionCards = isRegenerating ? (
-    <>
-      {streamedSections.map((section) => (
-        <div key={section.id} className="animate-in fade-in duration-300">
-          <NoteSectionCard
-            sectionId={section.id}
-            title={section.title}
-            content={section.content}
-          />
-        </div>
-      ))}
-      {streamedSections.length === 0 && (
-        <div className="flex flex-col gap-4">
-          <Skeleton className="h-32 rounded-2xl" />
-          <Skeleton className="h-32 rounded-2xl" />
-          <Skeleton className="h-32 rounded-2xl" />
-        </div>
-      )}
-    </>
-  ) : template && Object.keys(sectionContents).length > 0 ? (
-    template.sections
-      .filter((s) => !removedSections.has(s.id))
-      .map((section) => (
-        <NoteSectionCard
-          key={section.id}
-          id={`note-section-${section.id}`}
-          sectionId={section.id}
-          title={tTemplates(`sections.${section.labelKey}`)}
-          content={sectionContents[section.id] ?? ""}
-          subsections={section.subsections
-            ?.filter((sub) => !removedSections.has(sub.id))
-            .map((sub) => ({
+  const isActivelyStreaming = isRegenerating || isStreamingGeneration;
+
+  // Map of streamed section content for quick lookup
+  const streamedMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of streamedSections) map.set(s.id, s.content);
+    return map;
+  }, [streamedSections]);
+
+  /** Check if a streamed value has meaningful content (not empty / not a NOT_STATED placeholder). */
+  const hasMeaningfulContent = useCallback((value: string | undefined) => {
+    if (value === undefined) return false;
+    const trimmed = value.trim();
+    return trimmed.length > 0 && !NOT_STATED_VALUES.has(trimmed);
+  }, []);
+
+  const noteSectionCards =
+    isActivelyStreaming && template ? (
+      <>
+        {/* During streaming: use template hierarchy (sections + subsections).
+          Completed sections show real content; pending ones show skeleton lines.
+          Received-but-empty sections are hidden entirely (no flash). */}
+        {template.sections.map((section) => {
+          const mainContent = streamedMap.get(section.id);
+          const isMainReceived = streamedMap.has(section.id);
+          const hasMainContent = hasMeaningfulContent(mainContent);
+          const label =
+            streamingSectionLabels?.[section.id] ??
+            sectionLabels[section.id] ??
+            tTemplates(`sections.${section.labelKey}`);
+
+          // Build subsection data with streamed or pending content
+          const subsectionData = section.subsections?.map((sub) => {
+            const subContent = streamedMap.get(sub.id);
+            const subLabel =
+              streamingSectionLabels?.[sub.id] ??
+              sectionLabels[sub.id] ??
+              tTemplates(`sections.${sub.labelKey}`);
+            return {
               id: sub.id,
-              title: tTemplates(`sections.${sub.labelKey}`),
-              content: sectionContents[sub.id] ?? "",
-            }))}
-          onContentChange={onSectionContentChange}
-          onRemove={onRemoveSection}
-          autoFocusId={focusSectionId}
-          onAutoFocused={onAutoFocused}
-        />
-      ))
-  ) : (
-    <p className="text-sm text-muted-foreground">{t("detail.noNote")}</p>
-  );
+              title: subLabel,
+              content: subContent,
+              received: streamedMap.has(sub.id),
+            };
+          });
+
+          const hasAnyContent =
+            hasMainContent ||
+            subsectionData?.some((s) => hasMeaningfulContent(s.content));
+
+          // All parts received (main + subsections)?
+          const allReceived =
+            isMainReceived &&
+            (!subsectionData || subsectionData.every((s) => s.received));
+
+          if (hasAnyContent) {
+            // Show card — filter out received-but-empty subsections
+            return (
+              <div key={section.id} className="animate-in fade-in duration-300">
+                <NoteSectionCard
+                  sectionId={section.id}
+                  title={label}
+                  content={hasMainContent ? mainContent! : ""}
+                  subsections={subsectionData
+                    ?.filter((s) => hasMeaningfulContent(s.content))
+                    .map((s) => ({
+                      id: s.id,
+                      title: s.title,
+                      content: s.content ?? "",
+                    }))}
+                />
+              </div>
+            );
+          }
+
+          // All received but all empty — hide entirely (no flash)
+          if (allReceived) return null;
+
+          // Still pending — show skeleton
+          return (
+            <div
+              key={section.id}
+              className="rounded-2xl border border-border p-6"
+            >
+              <div className="flex flex-col gap-3">
+                <Skeleton className="h-5 w-32 rounded" />
+                <div className="flex flex-col gap-2">
+                  <Skeleton className="h-4 w-full rounded" />
+                  <Skeleton className="h-4 w-4/5 rounded" />
+                  <Skeleton className="h-4 w-3/5 rounded" />
+                </div>
+                {subsectionData &&
+                  subsectionData.length > 0 &&
+                  subsectionData.map((sub) => (
+                    <div key={sub.id} className="mt-2 flex flex-col gap-2">
+                      <Skeleton className="h-4 w-24 rounded" />
+                      <Skeleton className="h-4 w-full rounded" />
+                      <Skeleton className="h-4 w-3/4 rounded" />
+                    </div>
+                  ))}
+              </div>
+            </div>
+          );
+        })}
+      </>
+    ) : isActivelyStreaming ? (
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-32 rounded-2xl" />
+        <Skeleton className="h-32 rounded-2xl" />
+        <Skeleton className="h-32 rounded-2xl" />
+      </div>
+    ) : template && Object.keys(sectionContents).length > 0 ? (
+      template.sections
+        .filter((s) => !removedSections.has(s.id))
+        .map((section) => (
+          <NoteSectionCard
+            key={section.id}
+            id={`note-section-${section.id}`}
+            sectionId={section.id}
+            title={tTemplates(`sections.${section.labelKey}`)}
+            content={sectionContents[section.id] ?? ""}
+            subsections={section.subsections
+              ?.filter((sub) => !removedSections.has(sub.id))
+              .map((sub) => ({
+                id: sub.id,
+                title: tTemplates(`sections.${sub.labelKey}`),
+                content: sectionContents[sub.id] ?? "",
+              }))}
+            onContentChange={onSectionContentChange}
+            onRemove={onRemoveSection}
+            autoFocusId={focusSectionId}
+            onAutoFocused={onAutoFocused}
+          />
+        ))
+    ) : (
+      <p className="text-sm text-muted-foreground">{t("detail.noNote")}</p>
+    );
 
   return (
     <>
@@ -353,13 +453,15 @@ export function ReviewView({
             <TemplateSelector
               value={selectedTemplateId}
               onChange={handleRegenerateWithTabSwitch}
-              disabled={isRegenerating}
+              disabled={isActivelyStreaming}
               size="lg"
               label={t("detail.templateLabel")}
             />
-            {isRegenerating ? (
+            {isActivelyStreaming ? (
               <TextShimmer className="py-2 text-center text-sm" duration={3}>
-                {t("detail.regenerating")}
+                {isStreamingGeneration
+                  ? t("detail.generatingEncounter")
+                  : t("detail.regenerating")}
               </TextShimmer>
             ) : (
               <Button
@@ -526,10 +628,10 @@ export function ReviewView({
               <TemplateSidebar
                 templateId={selectedTemplateId}
                 onTemplateChange={handleRegenerateWithTabSwitch}
-                disabled={isRegenerating}
+                disabled={isActivelyStreaming}
                 documentedSections={documentedSectionIds}
                 onScrollToSection={handleScrollToNoteSection}
-                onAddSection={isRegenerating ? undefined : onAddSection}
+                onAddSection={isActivelyStreaming ? undefined : onAddSection}
                 stickyTop={stickyHeaderHeight + 24}
               />
             </div>
@@ -539,9 +641,11 @@ export function ReviewView({
                 style={{ top: stickyHeaderHeight }}
               >
                 <h2 className="text-lg font-medium">{t("detail.note")}</h2>
-                {isRegenerating ? (
+                {isActivelyStreaming ? (
                   <TextShimmer className="text-sm" duration={3}>
-                    {t("detail.regenerating")}
+                    {isStreamingGeneration
+                      ? t("detail.generatingEncounter")
+                      : t("detail.regenerating")}
                   </TextShimmer>
                 ) : (
                   <Button

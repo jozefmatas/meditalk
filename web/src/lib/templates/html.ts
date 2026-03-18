@@ -71,8 +71,7 @@ function renderSection(
   parts.push(`<${headingLevel}>${escapeHtml(label)}</${headingLevel}>`);
 
   if (content && !(options?.skipEmpty && NOT_STATED.has(content.trim()))) {
-    // Preserve newlines from AI output as <br> tags
-    parts.push(`<p>${escapeHtml(content).replace(/\n/g, "<br>")}</p>`);
+    parts.push(renderContent(content));
   }
 
   if (section.subsections) {
@@ -91,6 +90,69 @@ function escapeHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/**
+ * Format a single line of text for embedding in HTML.
+ * - Converts markdown **bold** to <strong> tags
+ * - Preserves existing <strong>/<em> tags (from editor round-trip)
+ * - Escapes all other HTML entities
+ */
+function formatInlineText(text: string): string {
+  // Convert markdown **bold** to placeholders (before escaping)
+  let result = text.replace(/\*\*(.+?)\*\*/g, "\x00S\x00$1\x00/S\x00");
+
+  // Preserve existing <strong> and <em> tags as placeholders
+  result = result
+    .replace(/<strong>/gi, "\x00S\x00")
+    .replace(/<\/strong>/gi, "\x00/S\x00")
+    .replace(/<em>/gi, "\x00E\x00")
+    .replace(/<\/em>/gi, "\x00/E\x00");
+
+  // Escape all remaining HTML
+  result = escapeHtml(result);
+
+  // Restore formatting tags
+  return result
+    .replace(/\x00S\x00/g, "<strong>")
+    .replace(/\x00\/S\x00/g, "</strong>")
+    .replace(/\x00E\x00/g, "<em>")
+    .replace(/\x00\/E\x00/g, "</em>");
+}
+
+/**
+ * Render section content as HTML, converting:
+ * - Lines starting with "- " or "• " into <ul><li> lists
+ * - Other lines into <p> paragraphs
+ * - Inline **bold** and <strong>/<em> formatting
+ */
+/** Matches bullet-style list lines: - , • , – , — , *  (with optional leading whitespace) */
+const BULLET_RE = /^\s*[-•–—*]\s/;
+
+function renderContent(content: string): string {
+  const lines = content.split("\n");
+  const parts: string[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    if (BULLET_RE.test(lines[i])) {
+      const items: string[] = [];
+      while (i < lines.length && BULLET_RE.test(lines[i])) {
+        items.push(formatInlineText(lines[i].replace(/^\s*[-•–—*]\s/, "")));
+        i++;
+      }
+      parts.push(
+        `<ul>${items.map((item) => `<li>${item}</li>`).join("")}</ul>`,
+      );
+    } else if (lines[i].trim()) {
+      parts.push(`<p>${formatInlineText(lines[i])}</p>`);
+      i++;
+    } else {
+      i++;
+    }
+  }
+
+  return parts.join("");
 }
 
 /**

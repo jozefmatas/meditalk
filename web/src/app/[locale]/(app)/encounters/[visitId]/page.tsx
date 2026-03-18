@@ -293,8 +293,46 @@ export default function EncounterDetailPage({ params }: PageProps) {
         isGenerating={generation.isGenerating}
       />
 
-      {/* Processing overlay — takes over full content area */}
-      {generation.isGenerating && <ProcessingOverlay />}
+      {/* Processing overlay — only during pre-processing (before streaming starts) */}
+      {generation.isGenerating && !generation.isStreaming && (
+        <ProcessingOverlay />
+      )}
+
+      {/* Streaming generation view — show sections progressively */}
+      {generation.isGenerating && generation.isStreaming && (
+        <div className="flex flex-1 justify-center overflow-y-auto px-4 pb-6 desktop:px-6">
+          <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-full">
+            <ReviewView
+              visit={data.visit}
+              setVisit={data.setVisit}
+              title={metadata.title}
+              onTitleChange={updateTitle}
+              onMetadataBlur={metadata.handleMetadataBlur}
+              formattedDate={formattedDate}
+              error={data.error}
+              isRegenerating={false}
+              isStreamingGeneration
+              selectedTemplateId={generation.selectedTemplateId}
+              onRegenerate={generation.handleRegenerate}
+              streamedSections={generation.streamedSections}
+              streamingSectionLabels={generation.streamingSectionLabels}
+              generatedNoteHtml={generation.generatedNoteHtml}
+              template={template}
+              sectionLabels={sectionLabels}
+              sectionContents={sections.sectionContents}
+              removedSections={sections.removedSections}
+              onSectionContentChange={sections.handleSectionContentChange}
+              onRemoveSection={sections.handleRemoveSection}
+              onAddSection={sections.handleAddSection}
+              focusSectionId={sections.focusSectionId}
+              onAutoFocused={sections.handleAutoFocused}
+              t={t}
+              tTemplates={tTemplates}
+            />
+            <div aria-hidden className="min-h-32 shrink-0" />
+          </div>
+        </div>
+      )}
 
       {/* Main content area — hidden during generation */}
       {!generation.isGenerating && (

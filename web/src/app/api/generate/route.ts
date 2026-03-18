@@ -2,15 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
 import {
-  generateFromTemplate,
-  InsufficientContextError,
+  anthropic,
+  GENERATION_MODEL,
+  buildTemplateSystemPrompt,
+  buildTemplateUserMessage,
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
-import { flattenSectionIds } from "@/lib/templates/html";
+import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
+import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
+import { logUsage } from "@/lib/usage";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
-import type { GenerateResponse, SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -25,10 +29,21 @@ export async function POST(request: NextRequest) {
   const lap = (label: string) =>
     console.log(`[generate] ${label} — ${Date.now() - t0}ms`);
 
-  try {
-    const { userId, supabase } = await requireAuth();
-    lap("auth");
+  // Auth — return JSON errors for auth failures
+  let userId: string;
+  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
 
+  try {
+    const auth = await requireAuth();
+    userId = auth.userId;
+    supabase = auth.supabase;
+    lap("auth");
+  } catch (err) {
+    if (err instanceof Response) return err;
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
     const body = await request.json();
     // Support both visitId (new) and transcriptId (legacy)
     const visitId = body.visitId || body.transcriptId;
@@ -163,10 +178,7 @@ export async function POST(request: NextRequest) {
 
     // If streaming transcript is provided but no recording file captured it
     // (e.g. file upload hasn't completed yet), inject it directly as content
-    if (
-      transcriptText &&
-      !fileTexts.some((f) => f.text === transcriptText)
-    ) {
+    if (transcriptText && !fileTexts.some((f) => f.text === transcriptText)) {
       fileTexts.push({
         name: "recording-transcript",
         type: "text/plain",
@@ -308,96 +320,267 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Pass 2: Generate note from template (enriched with clinical analysis)
+    // Build prompts for streaming generation
+    let systemPrompt = buildTemplateSystemPrompt(
+      template,
+      language,
+      sectionLabels,
+    );
+    if (clinicalAnalysis) {
+      systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
+    }
+
+    const userMessage = buildTemplateUserMessage(
+      chunkContents,
+      template,
+      doctorNotes,
+      fileTexts,
+    );
+
+    console.log(
+      `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+    );
+
+    // Stream Anthropic response as SSE
     lap("generation-start");
-    let generatedNote: string;
-    let letter: string;
-    let suggestedTitle: string;
-    try {
-      const result = await generateFromTemplate(
-        chunkContents,
-        template,
-        language,
-        sectionLabels,
-        doctorNotes,
-        fileTexts,
-        { userId, visitId },
-        clinicalAnalysis ?? undefined,
-      );
-      generatedNote = result.generatedNote;
-      letter = result.letter;
-      suggestedTitle = result.suggestedTitle;
-      lap("generation-done");
-    } catch (anthropicErr) {
-      if (anthropicErr instanceof InsufficientContextError) {
-        return NextResponse.json(
-          {
-            error: "insufficient_context",
-          },
-          { status: 422 },
-        );
-      }
-      console.error("Anthropic generation failed:", anthropicErr);
-      return NextResponse.json(
-        {
-          error: `Generation failed: ${anthropicErr instanceof Error ? anthropicErr.message : String(anthropicErr)}`,
-        },
-        { status: 500 },
-      );
-    }
+    const stream = anthropic().messages.stream({
+      model: GENERATION_MODEL,
+      max_tokens: 8192,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
 
-    // Save generated content to the visit (preserve existing metadata)
-    const existingMetadata = (visit.metadata as Record<string, unknown>) || {};
-    const { error: updateError } = await supabase
-      .from("visits")
-      .update({
-        soap_note: generatedNote,
-        patient_letter: letter,
-        metadata: {
-          ...existingMetadata,
-          template_id: template.id,
-          ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-          ...(clinicalAnalysis
-            ? {
-                clinical_analysis: {
-                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                  matchedConcepts: clinicalAnalysis.matchedConcepts,
-                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                  problemClusters: clinicalAnalysis.problemClusters,
-                },
+    const encoder = new TextEncoder();
+    const sectionIdSet = new Set(allIds);
+    const emittedSections = new Set<string>();
+
+    const readable = new ReadableStream({
+      async start(controller) {
+        let accumulated = "";
+        let inputTokens = 0;
+        let outputTokens = 0;
+
+        function sendEvent(data: Record<string, unknown>) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+          );
+        }
+
+        // Notify client that streaming is starting (switch from overlay to sections)
+        sendEvent({
+          type: "streaming_start",
+          sectionIds: allIds,
+          sectionLabels,
+        });
+
+        // Notify client that clinical analysis is complete
+        if (clinicalAnalysis) {
+          sendEvent({
+            type: "analysis_complete",
+            specialty: clinicalAnalysis.inferredSpecialty,
+            icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
+            conceptCount: clinicalAnalysis.matchedConcepts.length,
+          });
+        }
+
+        /**
+         * Try to extract completed "key": "value" pairs from the accumulated JSON.
+         * Emits SSE events for each newly completed template section.
+         */
+        function tryExtractSections() {
+          for (const id of sectionIdSet) {
+            if (emittedSections.has(id)) continue;
+
+            const keyPattern = `"${id}"\\s*:\\s*"`;
+            const keyMatch = accumulated.match(new RegExp(keyPattern));
+            if (!keyMatch) continue;
+
+            const valueStart = keyMatch.index! + keyMatch[0].length;
+            let pos = valueStart;
+            let found = false;
+            while (pos < accumulated.length) {
+              if (accumulated[pos] === "\\") {
+                pos += 2;
+                continue;
               }
-            : {}),
-        },
-      })
-      .eq("id", visitId);
+              if (accumulated[pos] === '"') {
+                found = true;
+                break;
+              }
+              pos++;
+            }
 
-    if (updateError) {
-      console.error("Failed to save generated content:", updateError);
-    }
+            if (!found) continue;
 
-    const response: GenerateResponse = {
-      generatedNote,
-      letter,
-      suggestedTitle: suggestedTitle || undefined,
-      usedChunks,
-      templateId: template.id,
-      soap: generatedNote,
-      ...(clinicalAnalysis
-        ? {
-            clinicalAnalysis: {
-              inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-              secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-              candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-              matchedConcepts: clinicalAnalysis.matchedConcepts,
-              problemClusters: clinicalAnalysis.problemClusters,
-            },
+            const rawValue = accumulated.slice(valueStart, pos);
+            let value: string;
+            try {
+              value = JSON.parse(`"${rawValue}"`);
+            } catch {
+              value = rawValue;
+            }
+
+            emittedSections.add(id);
+            sendEvent({
+              type: "section",
+              id,
+              title: sectionLabels[id] || id,
+              content: value,
+            });
           }
-        : {}),
-    };
+        }
 
-    lap("total");
-    return NextResponse.json(response);
+        try {
+          stream.on("text", (delta) => {
+            accumulated += delta;
+            tryExtractSections();
+          });
+
+          const finalMessage = await stream.finalMessage();
+          inputTokens = finalMessage.usage.input_tokens;
+          outputTokens = finalMessage.usage.output_tokens;
+
+          lap("generation-done");
+          console.log(
+            `[generate] Anthropic usage — input: ${inputTokens}, output: ${outputTokens}, stop: ${finalMessage.stop_reason}`,
+          );
+
+          // Parse the full JSON for the final result
+          const fullText =
+            finalMessage.content[0].type === "text"
+              ? finalMessage.content[0].text
+              : "";
+
+          // Check for insufficient context
+          if (fullText.includes('"insufficient_context"')) {
+            try {
+              const rawParsed = extractJson<Record<string, unknown>>(fullText);
+              if (rawParsed.insufficient_context === true) {
+                sendEvent({ type: "error", error: "insufficient_context" });
+                controller.close();
+                return;
+              }
+            } catch {
+              // Continue with normal parsing
+            }
+          }
+
+          let parsed: Record<string, string>;
+          try {
+            parsed = extractJson<Record<string, string>>(fullText);
+          } catch {
+            sendEvent({ type: "error", error: "Failed to parse response" });
+            controller.close();
+            return;
+          }
+
+          // Extract letter and title
+          const letter =
+            typeof parsed.letter === "string"
+              ? parsed.letter
+              : JSON.stringify(parsed.letter || "");
+          delete parsed.letter;
+
+          const suggestedTitle =
+            typeof parsed.title === "string" ? parsed.title : "";
+          delete parsed.title;
+
+          // Fill section contents (empty string for missing keys)
+          const sectionContents: Record<string, string> = {};
+          for (const id of allIds) {
+            const value = parsed[id];
+            sectionContents[id] = typeof value === "string" ? value : "";
+          }
+
+          const generatedNote = buildTemplateHtml(
+            template,
+            sectionContents,
+            sectionLabels,
+          );
+
+          // Save to DB
+          const existingMetadata =
+            (visit.metadata as Record<string, unknown>) || {};
+          supabase
+            .from("visits")
+            .update({
+              soap_note: generatedNote,
+              patient_letter: letter,
+              metadata: {
+                ...existingMetadata,
+                template_id: template.id,
+                ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+                ...(clinicalAnalysis
+                  ? {
+                      clinical_analysis: {
+                        inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                        secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                        matchedConcepts: clinicalAnalysis.matchedConcepts,
+                        candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                        problemClusters: clinicalAnalysis.problemClusters,
+                      },
+                    }
+                  : {}),
+              },
+            })
+            .eq("id", visitId)
+            .then(({ error }) => {
+              if (error)
+                console.error("Failed to save generated content:", error);
+            });
+
+          // Log usage
+          logUsage({
+            userId,
+            visitId,
+            provider: "anthropic",
+            model: GENERATION_MODEL,
+            operation: "generate_template",
+            inputTokens,
+            outputTokens,
+          });
+
+          // Send final complete event
+          sendEvent({
+            type: "complete",
+            generatedNote,
+            letter,
+            suggestedTitle,
+            usedChunks,
+            templateId: template.id,
+            ...(clinicalAnalysis
+              ? {
+                  clinicalAnalysis: {
+                    inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                    secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                    candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                    matchedConcepts: clinicalAnalysis.matchedConcepts,
+                    problemClusters: clinicalAnalysis.problemClusters,
+                  },
+                }
+              : {}),
+          });
+
+          lap("total");
+          controller.close();
+        } catch (err) {
+          console.error("Generate stream error:", err);
+          sendEvent({
+            type: "error",
+            error: err instanceof Error ? err.message : "Generation failed",
+          });
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(readable, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
   } catch (err) {
     if (err instanceof Response) return err;
     console.error("Generate route error:", err);

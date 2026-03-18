@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseSoapSections,
+  parseNoteSections,
   parseNoteToSectionMap,
   sectionToPlainText,
   allSectionsToPlainText,
-} from "./parse-soap-sections";
+} from "./parse-note-sections";
 import type { Template } from "./templates/types";
 
 /* ── Helpers ── */
@@ -39,11 +39,11 @@ const templateWithSubs: Template = {
   ],
 };
 
-/* ── parseSoapSections ── */
+/* ── parseNoteSections ── */
 
-describe("parseSoapSections", () => {
+describe("parseNoteSections", () => {
   it("returns empty array for empty input", () => {
-    expect(parseSoapSections("")).toEqual([]);
+    expect(parseNoteSections("")).toEqual([]);
   });
 
   it("parses simple h2 sections", () => {
@@ -51,7 +51,7 @@ describe("parseSoapSections", () => {
       "<h2>Subjective</h2><p>Patient reports headache.</p>" +
       "<h2>Objective</h2><p>BP 120/80.</p>";
 
-    const result = parseSoapSections(html);
+    const result = parseNoteSections(html);
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({
       id: "subjective",
@@ -67,7 +67,7 @@ describe("parseSoapSections", () => {
 
   it("decodes HTML entities in titles", () => {
     const html = "<h2>Signs &amp; Symptoms</h2><p>Content</p>";
-    const result = parseSoapSections(html);
+    const result = parseNoteSections(html);
     expect(result[0].title).toBe("Signs & Symptoms");
   });
 });
@@ -192,6 +192,101 @@ describe("parseNoteToSectionMap", () => {
 
     expect(map.subjective).toBe("Not stated by the patient explicitly.");
     expect(map.objective).toBe("Neuvedené údaje.");
+  });
+
+  /* ── Inline formatting preservation ── */
+
+  it("preserves <strong> tags in section content", () => {
+    const html =
+      "<h2>Subjective</h2><p>Patient reports <strong>severe headache</strong> and nausea.</p>" +
+      "<h2>Objective</h2><p>BP 120/80.</p>" +
+      "<h2>Assessment</h2><p><strong>Migraine</strong> with aura.</p>" +
+      "<h2>Plan</h2><p>Ibuprofen 400mg PRN.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe(
+      "Patient reports <strong>severe headache</strong> and nausea.",
+    );
+    expect(map.assessment).toBe("<strong>Migraine</strong> with aura.");
+    expect(map.objective).toBe("BP 120/80.");
+  });
+
+  it("preserves <em> tags in section content", () => {
+    const html =
+      "<h2>Subjective</h2><p>Patient feels <em>dizzy</em>.</p>" +
+      "<h2>Objective</h2><p>Normal.</p>" +
+      "<h2>Assessment</h2><p>Vertigo.</p>" +
+      "<h2>Plan</h2><p>Rest.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe("Patient feels <em>dizzy</em>.");
+  });
+
+  it("preserves <strong> in subsections", () => {
+    const html =
+      "<h2>Reason</h2><p>Checkup.</p>" +
+      "<h2>Exam</h2><p>General.</p><h3>Vitals</h3><p>BP <strong>elevated</strong> at 150/90.</p><h3>Skin</h3><p>Clear.</p>" +
+      "<h2>Plan</h2><p>Monitor.</p>";
+
+    const map = parseNoteToSectionMap(html, templateWithSubs);
+
+    expect(map.vitals).toBe("BP <strong>elevated</strong> at 150/90.");
+  });
+
+  it("converts <br> and paragraph breaks to newlines while preserving formatting", () => {
+    const html =
+      "<h2>Subjective</h2><p><strong>Headache</strong> for 3 days.<br>Also reports <em>nausea</em>.</p>" +
+      "<h2>Objective</h2><p>Normal.</p>" +
+      "<h2>Assessment</h2><p>Migraine.</p>" +
+      "<h2>Plan</h2><p>Rest.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe(
+      "<strong>Headache</strong> for 3 days.\nAlso reports <em>nausea</em>.",
+    );
+  });
+
+  /* ── Bullet list preservation ── */
+
+  it("converts <ul><li> to - prefixed lines", () => {
+    const html =
+      "<h2>Subjective</h2><p>Symptoms:</p><ul><li>Headache</li><li>Nausea</li></ul>" +
+      "<h2>Objective</h2><p>Normal.</p>" +
+      "<h2>Assessment</h2><p>Migraine.</p>" +
+      "<h2>Plan</h2><p>Rest.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe("Symptoms:\n- Headache\n- Nausea");
+  });
+
+  it("handles <li><p>text</p></li> format (from TipTap editor)", () => {
+    const html =
+      "<h2>Subjective</h2><ul><li><p>Item A</p></li><li><p>Item B</p></li></ul>" +
+      "<h2>Objective</h2><p>Normal.</p>" +
+      "<h2>Assessment</h2><p>Ok.</p>" +
+      "<h2>Plan</h2><p>Rest.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe("- Item A\n- Item B");
+  });
+
+  it("preserves bold inside list items", () => {
+    const html =
+      "<h2>Subjective</h2><ul><li><strong>Aspirin</strong> 200mg</li><li><strong>Heparin</strong> 8000 UI</li></ul>" +
+      "<h2>Objective</h2><p>Normal.</p>" +
+      "<h2>Assessment</h2><p>Ok.</p>" +
+      "<h2>Plan</h2><p>Rest.</p>";
+
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+
+    expect(map.subjective).toBe(
+      "- <strong>Aspirin</strong> 200mg\n- <strong>Heparin</strong> 8000 UI",
+    );
   });
 });
 
