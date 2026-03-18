@@ -161,6 +161,25 @@ export async function POST(request: NextRequest) {
       .filter((f) => f.extracted_text)
       .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));
 
+    // If streaming transcript is provided but no recording file captured it
+    // (e.g. file upload hasn't completed yet), inject it directly as content
+    if (
+      transcriptText &&
+      !fileTexts.some((f) => f.text === transcriptText)
+    ) {
+      fileTexts.push({
+        name: "recording-transcript",
+        type: "text/plain",
+        text: transcriptText,
+      });
+
+      // Also persist raw_text for ResourcesPanel
+      await supabase
+        .from("visits")
+        .update({ raw_text: transcriptText })
+        .eq("id", visitId);
+    }
+
     // Look up the template
     const template =
       (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();

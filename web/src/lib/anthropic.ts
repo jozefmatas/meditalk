@@ -183,7 +183,7 @@ export function buildTemplateUserMessage(
 /**
  * Generate a medical document from a template, transcript chunks, and optional doctor notes.
  */
-export const GENERATION_MODEL = "claude-sonnet-4-5-20250929";
+export const GENERATION_MODEL = "claude-haiku-4-5-20251001";
 
 export async function generateFromTemplate(
   chunks: string[],
