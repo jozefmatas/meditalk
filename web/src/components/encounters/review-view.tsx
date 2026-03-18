@@ -399,7 +399,7 @@ export function ReviewView({
               size="lg"
               label={t("detail.templateLabel")}
             />
-            <div className="flex flex-col gap-4">{noteSectionCards}</div>
+            <div className="flex flex-col gap-2">{noteSectionCards}</div>
           </div>
         )}
 
@@ -586,7 +586,7 @@ export function ReviewView({
                   </Button>
                 )}
               </div>
-              <div className="flex flex-col gap-4">{noteSectionCards}</div>
+              <div className="flex flex-col gap-2">{noteSectionCards}</div>
             </div>
           </div>
         </TabsContent>
