@@ -126,7 +126,7 @@
       "note": "Note",
       "addDocument": "Add document",
       "copyNote": "Copy note",
-      "sendAsEmail": "Email note after generation",
+      "sendAsEmail": "Send email",
       "noteCopied": "Copied!",
       "addTemplateHeader": "Add template header",
       "markComplete": "Mark complete",

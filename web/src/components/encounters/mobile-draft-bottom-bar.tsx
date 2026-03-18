@@ -51,6 +51,27 @@ export function MobileDraftBottomBar({
 
   return (
     <div className="fixed bottom-0 left-0 z-10 flex w-full flex-col gap-2 border-t border-border bg-background px-4 py-3 desktop:hidden">
+      <div className="flex items-center gap-4">
+        <LabeledSwitch
+          label={t("detail.sendAsEmail")}
+          checked={sendAsEmail}
+          onCheckedChange={handleSendAsEmailChange}
+        />
+        <Button
+          size="lg"
+          className="flex-1"
+          onClick={() => onGenerate({ sendAsEmail })}
+          disabled={isGenerating || !canGenerate}
+        >
+          <HugeiconsIcon
+            icon={isGenerating ? Loading03Icon : SparklesIcon}
+            size={16}
+            className={isGenerating ? "animate-spin" : ""}
+          />
+          {isGenerating ? t("detail.generating") : t("detail.generate")}
+        </Button>
+      </div>
+
       <Select
         value={generationLanguage}
         onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
@@ -66,26 +87,6 @@ export function MobileDraftBottomBar({
           ))}
         </SelectContent>
       </Select>
-
-      <div className="flex items-center gap-4">
-        <LabeledSwitch
-          label={t("detail.sendAsEmail")}
-          checked={sendAsEmail}
-          onCheckedChange={handleSendAsEmailChange}
-        />
-        <Button
-          className="flex-1"
-          onClick={() => onGenerate({ sendAsEmail })}
-          disabled={isGenerating || !canGenerate}
-        >
-          <HugeiconsIcon
-            icon={isGenerating ? Loading03Icon : SparklesIcon}
-            size={16}
-            className={isGenerating ? "animate-spin" : ""}
-          />
-          {isGenerating ? t("detail.generating") : t("detail.generate")}
-        </Button>
-      </div>
     </div>
   );
 }

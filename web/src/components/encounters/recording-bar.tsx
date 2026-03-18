@@ -93,6 +93,113 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const scribeRef = useRef<any>(null);
     const transcriptRef = useRef<string>("");
 
+    // ── Keep-alive: Wake Lock + silent audio to survive screen lock in PWA ──
+    const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+    const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+
+    /** Create a tiny silent WAV and loop it — keeps the audio session alive
+     *  even when the screen is locked (iOS/Android suspend audio otherwise). */
+    const startSilentAudio = useCallback(() => {
+      if (silentAudioRef.current) return;
+      const sampleRate = 8000;
+      const numSamples = sampleRate; // 1 second
+      const buffer = new ArrayBuffer(44 + numSamples * 2);
+      const view = new DataView(buffer);
+      const w = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++)
+          view.setUint8(offset + i, str.charCodeAt(i));
+      };
+      w(0, "RIFF");
+      view.setUint32(4, 36 + numSamples * 2, true);
+      w(8, "WAVE");
+      w(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      w(36, "data");
+      view.setUint32(40, numSamples * 2, true);
+      // samples stay zero → silence
+
+      const blob = new Blob([buffer], { type: "audio/wav" });
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.loop = true;
+      audio.volume = 0;
+      audio.play().catch(() => {});
+      silentAudioRef.current = audio;
+
+      // Tell the OS we're actively recording
+      if ("mediaSession" in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: "MediTalk",
+          artist: "Recording…",
+        });
+      }
+    }, []);
+
+    const stopSilentAudio = useCallback(() => {
+      if (silentAudioRef.current) {
+        silentAudioRef.current.pause();
+        const src = silentAudioRef.current.src;
+        silentAudioRef.current.src = "";
+        URL.revokeObjectURL(src);
+        silentAudioRef.current = null;
+      }
+    }, []);
+
+    const acquireWakeLock = useCallback(async () => {
+      if (!("wakeLock" in navigator)) return;
+      try {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+        wakeLockRef.current.addEventListener("release", () => {
+          wakeLockRef.current = null;
+        });
+      } catch {
+        // Wake lock request failed (e.g. low battery, page hidden)
+      }
+    }, []);
+
+    const releaseWakeLock = useCallback(() => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    }, []);
+
+    /** Acquire both keep-alive mechanisms */
+    const acquireKeepAlive = useCallback(async () => {
+      startSilentAudio();
+      await acquireWakeLock();
+    }, [startSilentAudio, acquireWakeLock]);
+
+    /** Release both keep-alive mechanisms */
+    const releaseKeepAlive = useCallback(() => {
+      stopSilentAudio();
+      releaseWakeLock();
+    }, [stopSilentAudio, releaseWakeLock]);
+
+    // Re-acquire wake lock when page becomes visible again (OS releases it on hide)
+    useEffect(() => {
+      const handleVisibilityChange = () => {
+        if (
+          document.visibilityState === "visible" &&
+          state !== "idle" &&
+          !wakeLockRef.current
+        ) {
+          acquireWakeLock();
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      return () =>
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange,
+        );
+    }, [state, acquireWakeLock]);
+
     // Enumerate audio devices on mount
     useEffect(() => {
       async function loadDevices() {
@@ -207,6 +314,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           const transcript = transcriptRef.current || null;
           transcriptRef.current = "";
 
+          // Allow screen to lock again
+          releaseKeepAlive();
+
           setState("idle");
           setDuration(0);
           elapsedBeforePauseRef.current = 0;
@@ -215,7 +325,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           return { blob, transcript };
         },
       }),
-      [buildBlob, stopScribe],
+      [buildBlob, stopScribe, releaseKeepAlive],
     );
 
     const startTimer = useCallback(() => {
@@ -283,6 +393,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         // Start Scribe streaming in parallel (non-blocking)
         startScribe(selectedDeviceId || undefined);
 
+        // Keep screen awake + audio session alive during recording
+        acquireKeepAlive();
+
         startTimer();
         setState("recording");
         onRecordingStateChange?.("recording");
@@ -296,6 +409,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       startTimer,
       onRecordingStateChange,
       startScribe,
+      acquireKeepAlive,
     ]);
 
     const handlePause = useCallback(() => {
