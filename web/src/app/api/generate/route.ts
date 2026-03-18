@@ -21,8 +21,13 @@ const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
 };
 
 export async function POST(request: NextRequest) {
+  const t0 = Date.now();
+  const lap = (label: string) =>
+    console.log(`[generate] ${label} — ${Date.now() - t0}ms`);
+
   try {
     const { userId, supabase } = await requireAuth();
+    lap("auth");
 
     const body = await request.json();
     // Support both visitId (new) and transcriptId (legacy)
@@ -31,6 +36,10 @@ export async function POST(request: NextRequest) {
     const doctorNotes: string | undefined = body.doctorNotes;
     // Scribe real-time transcript (used for recording files instead of Whisper)
     const transcriptText: string | undefined = body.transcriptText;
+
+    console.log(
+      `[generate] transcriptText: ${transcriptText ? `${transcriptText.length} chars` : "NONE"}`,
+    );
 
     if (!visitId) {
       return NextResponse.json(
@@ -67,8 +76,17 @@ export async function POST(request: NextRequest) {
     const unprocessed = uploadedFiles.filter(
       (f) => !f.extracted_text && f.path,
     );
+    console.log(
+      `[generate] files: ${uploadedFiles.length} total, ${unprocessed.length} unprocessed`,
+      uploadedFiles.map((f) => ({
+        name: f.name,
+        source: f.source,
+        hasText: !!f.extracted_text,
+      })),
+    );
 
     if (unprocessed.length > 0) {
+      lap("extraction-start");
       await Promise.all(
         unprocessed.map(async (file) => {
           // For recording files: use Scribe pre-transcript if available (instant)
@@ -101,6 +119,8 @@ export async function POST(request: NextRequest) {
           }
         }),
       );
+
+      lap("extraction-done");
 
       // Cleanup: delete all processed files from storage (text already extracted)
       const pathsToDelete = uploadedFiles
@@ -172,6 +192,7 @@ export async function POST(request: NextRequest) {
 
     // Run embedding search and clinical analysis in parallel
     // Skip embedding entirely when transcriptText is provided (modern Scribe flow)
+    lap("parallel-start");
     const embeddingPromise = transcriptText
       ? Promise.resolve({
           chunkContents: [] as string[],
@@ -249,6 +270,7 @@ export async function POST(request: NextRequest) {
       clinicalPromise,
     ]);
 
+    lap("parallel-done");
     chunkContents = embeddingResult.chunkContents;
     usedChunks = embeddingResult.usedChunks;
 
@@ -268,14 +290,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Pass 2: Generate note from template (enriched with clinical analysis)
-    console.log(
-      "Calling Anthropic with",
-      chunkContents.length,
-      "chunks, language:",
-      language,
-      "template:",
-      template.id,
-    );
+    lap("generation-start");
     let generatedNote: string;
     let letter: string;
     let suggestedTitle: string;
@@ -293,6 +308,7 @@ export async function POST(request: NextRequest) {
       generatedNote = result.generatedNote;
       letter = result.letter;
       suggestedTitle = result.suggestedTitle;
+      lap("generation-done");
     } catch (anthropicErr) {
       if (anthropicErr instanceof InsufficientContextError) {
         return NextResponse.json(
@@ -361,6 +377,7 @@ export async function POST(request: NextRequest) {
         : {}),
     };
 
+    lap("total");
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
