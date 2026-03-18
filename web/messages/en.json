@@ -121,6 +121,7 @@
       "pausedStatus": "Paused",
       "templateLabel": "Template",
       "defaultMicrophone": "Default microphone",
+      "micError": "Could not access microphone. Check permissions and try again.",
       "generatingEncounter": "Generating your encounter",
       "regenerating": "Regenerating note...",
       "note": "Note",

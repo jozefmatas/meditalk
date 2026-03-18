@@ -121,6 +121,7 @@
       "pausedStatus": "Pozastaveno",
       "templateLabel": "Šablona",
       "defaultMicrophone": "Výchozí mikrofon",
+      "micError": "Nepodařilo se získat přístup k mikrofonu. Zkontrolujte oprávnění a zkuste to znovu.",
       "generatingEncounter": "Generuji záznam",
       "regenerating": "Regeneruji zprávu...",
       "note": "Zpráva",

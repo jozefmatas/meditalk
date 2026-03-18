@@ -72,6 +72,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     const [state, setState] = useState<RecordingState>("idle");
     const [duration, setDuration] = useState(0);
+    const [micError, setMicError] = useState(false);
     const [recordingStream, setRecordingStream] = useState<MediaStream | null>(
       null,
     );
@@ -91,6 +92,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // Scribe streaming refs
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const scribeRef = useRef<any>(null);
+    const scribeAudioCtxRef = useRef<AudioContext | null>(null);
     const transcriptRef = useRef<string>("");
 
     // Enumerate audio devices on mount (labels may be empty until permission is granted)
@@ -116,10 +118,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       return new Blob(chunksRef.current, { type: mimeTypeRef.current });
     }, []);
 
-    /** Start Scribe real-time streaming (fire-and-forget, non-blocking) */
-    const startScribe = useCallback(async (deviceId?: string) => {
+    /** Start Scribe real-time streaming in manual audio mode (shares existing mic stream) */
+    const startScribe = useCallback(async (stream: MediaStream) => {
       try {
-        // Fetch single-use token from server
         const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
         if (!tokenRes.ok) {
           console.warn("[scribe] Token fetch failed, will fall back to batch");
@@ -127,19 +128,36 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         }
         const { token } = await tokenRes.json();
 
-        // Dynamically import client SDK to keep bundle lean
-        const { Scribe, RealtimeEvents } = await import("@elevenlabs/client");
+        const { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } =
+          await import("@elevenlabs/client");
+
+        // Create AudioContext to read PCM from the existing recording stream
+        const audioCtx = new AudioContext();
+        scribeAudioCtxRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+
+        // Map native sample rate → Scribe format (most browsers = 48 kHz)
+        const rate = audioCtx.sampleRate;
+        const formatMap: Partial<
+          Record<number, (typeof AudioFormat)[keyof typeof AudioFormat]>
+        > = {
+          8000: AudioFormat.PCM_8000,
+          16000: AudioFormat.PCM_16000,
+          22050: AudioFormat.PCM_22050,
+          24000: AudioFormat.PCM_24000,
+          44100: AudioFormat.PCM_44100,
+          48000: AudioFormat.PCM_48000,
+        };
+        const audioFormat = formatMap[rate] ?? AudioFormat.PCM_16000;
+        const targetRate = formatMap[rate] ? rate : 16000;
+        const needsDownsample = !formatMap[rate];
 
         const connection = Scribe.connect({
           token,
           modelId: "scribe_v2",
-          microphone: {
-            deviceId: deviceId || undefined,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-          },
+          audioFormat,
+          sampleRate: targetRate,
+          commitStrategy: CommitStrategy.VAD,
         });
 
         connection.on(
@@ -157,13 +175,54 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           console.warn("[scribe] Streaming error:", err);
         });
 
+        // Pipe PCM from our mic stream → Scribe via ScriptProcessorNode
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (e) => {
+          const float32 = e.inputBuffer.getChannelData(0);
+          let pcm: Float32Array;
+          if (needsDownsample) {
+            const ratio = rate / targetRate;
+            const len = Math.floor(float32.length / ratio);
+            pcm = new Float32Array(len);
+            for (let i = 0; i < len; i++) {
+              pcm[i] = float32[Math.floor(i * ratio)];
+            }
+          } else {
+            pcm = float32;
+          }
+          // Float32 → Int16 PCM
+          const int16 = new Int16Array(pcm.length);
+          for (let i = 0; i < pcm.length; i++) {
+            const s = Math.max(-1, Math.min(1, pcm[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+          }
+          // Base64 encode and send
+          const bytes = new Uint8Array(int16.buffer);
+          let bin = "";
+          for (let i = 0; i < bytes.length; i++) {
+            bin += String.fromCharCode(bytes[i]);
+          }
+          try {
+            connection.send({ audioBase64: btoa(bin) });
+          } catch {
+            // Connection closed
+          }
+        };
+
+        // Connect pipeline: source → processor → silent gain (no speaker output)
+        const silent = audioCtx.createGain();
+        silent.gain.value = 0;
+        source.connect(processor);
+        processor.connect(silent);
+        silent.connect(audioCtx.destination);
+
         scribeRef.current = connection;
       } catch (err) {
         console.warn("[scribe] Failed to start streaming:", err);
       }
     }, []);
 
-    /** Stop Scribe connection */
+    /** Stop Scribe connection and audio pipeline */
     const stopScribe = useCallback(() => {
       if (scribeRef.current) {
         try {
@@ -172,6 +231,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           // ignore
         }
         scribeRef.current = null;
+      }
+      if (scribeAudioCtxRef.current) {
+        try {
+          scribeAudioCtxRef.current.close();
+        } catch {
+          // ignore
+        }
+        scribeAudioCtxRef.current = null;
       }
     }, []);
 
@@ -243,6 +310,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     const handleStart = useCallback(async () => {
       setDuration(0);
+      setMicError(false);
       elapsedBeforePauseRef.current = 0;
       transcriptRef.current = "";
 
@@ -274,14 +342,15 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
         recorder.start(1000);
 
-        // Start Scribe streaming in parallel (non-blocking)
-        startScribe(selectedDeviceId || undefined);
+        // Start Scribe streaming from the same mic stream (non-blocking)
+        startScribe(stream);
 
         startTimer();
         setState("recording");
         onRecordingStateChange?.("recording");
-      } catch {
-        // Mic access denied — stay idle
+      } catch (err) {
+        console.warn("[recording] Mic access failed:", err);
+        setMicError(true);
       }
     }, [
       selectedDeviceId,
@@ -309,12 +378,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       if (recorder?.state === "paused") {
         recorder.resume();
       }
-      // Reconnect Scribe with context from previous transcript
-      startScribe(selectedDeviceId || undefined);
+      // Reconnect Scribe using the existing recording stream
+      if (recordingStreamRef.current) {
+        startScribe(recordingStreamRef.current);
+      }
       startTimer();
       setState("recording");
       onRecordingStateChange?.("recording");
-    }, [startTimer, onRecordingStateChange, startScribe, selectedDeviceId]);
+    }, [startTimer, onRecordingStateChange, startScribe]);
 
     // Device selector element — shared between idle & paused states
     const deviceSelector =
@@ -392,6 +463,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               {t("startRecording")}
             </Button>
           </div>
+          {micError && (
+            <p className="text-sm text-destructive">{t("micError")}</p>
+          )}
         </div>
       );
     }

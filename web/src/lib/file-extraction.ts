@@ -21,7 +21,7 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
  *
  * - PDF: text extraction via Claude document API
  * - Image (PNG/JPEG): OCR via Claude Vision
- * - Audio: transcription via Whisper
+ * - Audio: transcription via ElevenLabs Scribe v2
  *
  * Returns extracted text or null on failure.
  */
@@ -84,7 +84,7 @@ async function extractFromImage(
 }
 
 /**
- * Transcribe audio using Whisper.
+ * Transcribe audio using ElevenLabs Scribe v2 (batch).
  */
 async function extractFromAudio(
   buffer: Buffer,
