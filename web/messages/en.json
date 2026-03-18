@@ -104,6 +104,8 @@
       "audioUploaded": "Audio uploaded and transcribed",
       "reprocessAudio": "Re-upload audio",
       "noAudioYet": "No audio yet. Upload or record to get started.",
+      "filesTab": "Files",
+      "notesTab": "Notes",
       "files": "Upload files",
       "filesDescription": "Upload transcript or any relevant files for the encounter",
       "uploadFiles": "Click or drag files to upload",

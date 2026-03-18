@@ -11,6 +11,7 @@ import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
 import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
 import { ReviewView } from "@/components/encounters/review-view";
+import { MobileDraftBottomBar } from "@/components/encounters/mobile-draft-bottom-bar";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Button } from "@/components/shared/button";
 import {
@@ -298,7 +299,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
       {/* Main content area — hidden during generation */}
       {!generation.isGenerating && (
         <div
-          className={`flex flex-1 justify-center px-6 pb-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
+          className={`flex flex-1 justify-center px-4 pb-6 desktop:px-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
         >
           <div
             className={`flex w-full max-w-[960px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
@@ -320,6 +321,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 template={template}
                 doctorNotes={generation.doctorNotes}
                 onDoctorNotesChange={generation.setDoctorNotes}
+                visitId={visitId}
+                files={data.files}
+                onFilesChange={data.setFiles}
                 t={t}
                 tTemplates={tTemplates}
               />
@@ -357,7 +361,18 @@ export default function EncounterDetailPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Right panel — hidden during generation */}
+      {/* Mobile bottom bar — draft only */}
+      {!generation.isGenerating && isDraft && (
+        <MobileDraftBottomBar
+          generationLanguage={generation.generationLanguage}
+          onLanguageChange={generation.handleLanguageChange}
+          onGenerate={generation.handleGenerate}
+          canGenerate={canGenerate}
+          isGenerating={generation.isGenerating}
+        />
+      )}
+
+      {/* Right panel — hidden during generation, hidden on mobile */}
       {!generation.isGenerating &&
         (isDraft ? (
           <FilesPanel

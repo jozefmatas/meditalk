@@ -160,10 +160,7 @@ export function NoteSectionCard({
         </Button>
       )}
       <div className="flex flex-col gap-3 text-foreground">
-        <SectionHeader
-          title={title}
-          sectionId={sectionId}
-        />
+        <SectionHeader title={title} sectionId={sectionId} />
 
         <InlineEditor
           sectionId={sectionId}

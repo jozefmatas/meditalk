@@ -93,40 +93,48 @@ export function EncounterHeaderActions({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Generation language selector — draft only */}
+        {/* Generation language selector — draft only, desktop only */}
         {isDraft && (
-          <Select
-            value={generationLanguage}
-            onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
-          >
-            <SelectTrigger className="w-auto" label={t("detail.noteLanguage")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent align="end">
-              {GENERATION_LANGUAGES.map((lang) => (
-                <SelectItem key={lang.value} value={lang.value}>
-                  {lang.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="hidden desktop:block">
+            <Select
+              value={generationLanguage}
+              onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
+            >
+              <SelectTrigger
+                className="w-auto"
+                label={t("detail.noteLanguage")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {GENERATION_LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.value} value={lang.value}>
+                    {lang.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
 
-        {/* Send as email switch — draft only */}
+        {/* Send as email switch — draft only, desktop only */}
         {isDraft && (
-          <LabeledSwitch
-            label={t("detail.sendAsEmail")}
-            checked={sendAsEmail}
-            onCheckedChange={handleSendAsEmailChange}
-          />
+          <div className="hidden desktop:block">
+            <LabeledSwitch
+              label={t("detail.sendAsEmail")}
+              checked={sendAsEmail}
+              onCheckedChange={handleSendAsEmailChange}
+            />
+          </div>
         )}
 
-        {/* Generate button — draft only */}
+        {/* Generate button — draft only, desktop only */}
         {isDraft && (
           <Button
             size="lg"
             onClick={() => onGenerate({ sendAsEmail })}
             disabled={isGenerating || !canGenerate}
+            className="hidden desktop:inline-flex"
           >
             <HugeiconsIcon
               icon={isGenerating ? Loading03Icon : SparklesIcon}

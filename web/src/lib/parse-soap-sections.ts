@@ -136,7 +136,7 @@ export function filterEmptySectionsHtml(html: string): string {
 
   // First pass: remove <h3> subsections with "Not stated" content
   // Each subsection is <h3>...</h3> followed by content until the next <h2>/<h3> or end
-  let filtered = html.replace(
+  const filtered = html.replace(
     /<h3[^>]*>.*?<\/h3>[\s\S]*?(?=<h[23][^>]*>|$)/gi,
     (match) => {
       const contentStart = match.indexOf("</h3>");

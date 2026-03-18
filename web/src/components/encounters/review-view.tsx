@@ -500,8 +500,8 @@ interface EncounterFile {
 function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   const meta = visit.metadata as Record<string, unknown> | undefined;
   const doctorNotes = (meta?.doctor_notes as string) || "";
-  const files = ((meta?.files as EncounterFile[]) || []).filter(
-    (f) => f.extracted_text?.trim(),
+  const files = ((meta?.files as EncounterFile[]) || []).filter((f) =>
+    f.extracted_text?.trim(),
   );
   const transcript = visit.raw_text || "";
 
@@ -534,9 +534,7 @@ function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
 
   if (!hasAnything) {
     return (
-      <p className="text-sm text-muted-foreground">
-        {t("detail.noResources")}
-      </p>
+      <p className="text-sm text-muted-foreground">{t("detail.noResources")}</p>
     );
   }
 

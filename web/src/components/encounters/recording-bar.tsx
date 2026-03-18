@@ -330,13 +330,18 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           onValueChange={setSelectedDeviceId}
           disabled={state === "recording" || !!disabled}
         >
-          <SelectTrigger variant="ghost" className="w-auto min-w-0 px-2">
-            <HugeiconsIcon
-              icon={Mic01Icon}
-              size={16}
-              className="shrink-0 text-foreground"
-            />
-            <SelectValue className="text-left truncate" />
+          <SelectTrigger
+            variant="ghost"
+            className="w-full min-w-0 px-2 desktop:w-auto"
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <HugeiconsIcon
+                icon={Mic01Icon}
+                size={16}
+                className="shrink-0 text-foreground"
+              />
+              <SelectValue className="truncate text-left" />
+            </span>
           </SelectTrigger>
           <SelectContent>
             {devices.map((device) => (
@@ -347,7 +352,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           </SelectContent>
         </Select>
       ) : devices.length === 1 ? (
-        <span className="truncate text-sm text-muted-foreground">
+        <span className="flex w-full items-center truncate text-sm text-muted-foreground desktop:w-auto">
           <HugeiconsIcon
             icon={Mic01Icon}
             size={16}
@@ -360,16 +365,28 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     /* ── Idle: template selector (left) | mic + start button (right) ── */
     if (state === "idle") {
       return (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
           <TemplateSelector
             value={templateId}
             onChange={onTemplateChange}
             disabled={!!disabled}
             size="lg"
             label={t("templateLabel")}
-            className="w-auto max-w-[320px]"
+            className="w-full desktop:w-auto desktop:max-w-[320px]"
           />
-          <div className="flex min-w-0 items-center gap-3">
+          {/* Mobile: button then mic (reversed from desktop) */}
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={handleStart}
+            disabled={!!disabled}
+            className="w-full shrink-0 desktop:hidden"
+          >
+            {t("startRecording")}
+          </Button>
+          <div className="w-full desktop:hidden">{deviceSelector}</div>
+          {/* Desktop: mic then button */}
+          <div className="hidden min-w-0 items-center gap-3 desktop:flex">
             {deviceSelector}
             <Button
               variant="secondary"
@@ -388,8 +405,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     /* ── Recording: waveform (left) | status + pause button (right) ── */
     if (state === "recording") {
       return (
-        <div className="flex items-center justify-between gap-4">
-          <div className="h-9 min-w-0 max-w-[360px] flex-1 text-foreground">
+        <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
+          <div className="h-9 min-w-0 max-w-full flex-1 text-foreground desktop:max-w-[360px]">
             <LiveWaveform
               active
               deviceId={selectedDeviceId || undefined}
@@ -410,7 +427,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             />
           </div>
 
-          <div className="flex shrink-0 items-center gap-3">
+          <div className="flex shrink-0 items-center justify-between gap-3 desktop:justify-start">
             <span className="flex items-center gap-2 text-sm font-medium text-destructive">
               <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
               {t("recordingStatus")} {formatDuration(duration)}
@@ -429,21 +446,21 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     /* ── Paused: template selector (left) | mic + divider + status + resume button (right) ── */
     return (
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
         <TemplateSelector
           value={templateId}
           onChange={onTemplateChange}
           disabled={!!disabled}
           size="lg"
           label={t("templateLabel")}
-          className="w-auto max-w-[280px]"
+          className="w-full desktop:w-auto desktop:max-w-[280px]"
         />
-        <div className="flex min-w-0 items-center gap-5">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-5">
+          <div className="hidden min-w-0 items-center gap-3 desktop:flex">
             {deviceSelector}
             <div className="h-6 w-px shrink-0 bg-border" />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center justify-between gap-3 desktop:justify-start">
             <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
               <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
               {t("pausedStatus")} {formatDuration(duration)}

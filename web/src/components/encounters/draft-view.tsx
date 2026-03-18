@@ -1,14 +1,24 @@
 "use client";
 
-import { useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { Textarea } from "@/components/shared/textarea";
 import { Badge } from "@/components/shared/badge";
 import { ErrorAlert } from "@/components/shared/error-alert";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/shared/tabs";
 import {
   RecordingBar,
   type RecordingBarRef,
 } from "@/components/encounters/recording-bar";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
+import {
+  FilesContent,
+  type EncounterFile,
+} from "@/components/encounters/files-panel";
 import {
   TiptapEditor,
   type Editor,
@@ -36,6 +46,10 @@ interface DraftViewProps {
   // Editor
   doctorNotes: string;
   onDoctorNotesChange: (value: string) => void;
+  // Files (for mobile tab)
+  visitId: string;
+  files: EncounterFile[];
+  onFilesChange: (files: EncounterFile[]) => void;
   // i18n
   t: (key: string) => string;
   tTemplates: (key: string) => string;
@@ -57,9 +71,15 @@ export function DraftView({
   template,
   doctorNotes,
   onDoctorNotesChange,
+  visitId,
+  files,
+  onFilesChange,
   t,
   tTemplates,
 }: DraftViewProps) {
+  // Mobile tab state
+  const [mobileTab, setMobileTab] = useState<"files" | "notes">("files");
+
   // TipTap editor ref
   const editorRef = useRef<Editor | null>(null);
   const handleEditorReady = useCallback((editor: Editor) => {
@@ -230,10 +250,10 @@ export function DraftView({
             }}
           />
           <div className="flex items-center gap-3">
+            <span className="text-sm text-foreground/65">{formattedDate}</span>
             <Badge variant={`status-${visit.status}` as "status-started"}>
               {t(`status.${visit.status}`)}
             </Badge>
-            <span className="text-sm text-foreground/65">{formattedDate}</span>
           </div>
         </div>
         <RecordingBar
@@ -255,8 +275,44 @@ export function DraftView({
         />
       )}
 
-      {/* Draft: template sidebar + editor */}
-      <div className="flex flex-1 min-h-0 gap-6">
+      {/* Mobile: Files / Notes tabs */}
+      <div className="flex flex-1 min-h-0 flex-col desktop:hidden">
+        <Tabs
+          value={mobileTab}
+          onValueChange={(v) => setMobileTab(v as "files" | "notes")}
+        >
+          <div className="border-b border-border">
+            <TabsList variant="line">
+              <TabsTrigger value="files">{t("detail.filesTab")}</TabsTrigger>
+              <TabsTrigger value="notes">{t("detail.notesTab")}</TabsTrigger>
+            </TabsList>
+          </div>
+
+          <TabsContent value="files" className="flex-1 overflow-y-auto py-4">
+            <div className="flex flex-col gap-4">
+              <FilesContent
+                visitId={visitId}
+                files={files}
+                onFilesChange={onFilesChange}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="notes" className="flex-1 min-h-0">
+            <TiptapEditor
+              content={doctorNotes}
+              onChange={onDoctorNotesChange}
+              placeholder={tTemplates("doctorNotesPlaceholder")}
+              className="flex-1 overflow-y-auto rounded-2xl"
+              onEditorReady={handleEditorReady}
+              slashCommandItems={slashCommandItems}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Desktop: template sidebar + editor */}
+      <div className="hidden desktop:flex flex-1 min-h-0 gap-6">
         <TemplateSidebar
           templateId={selectedTemplateId}
           onTemplateChange={onTemplateChange}

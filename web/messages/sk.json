@@ -104,6 +104,8 @@
       "audioUploaded": "Audio nahrané a prepísané",
       "reprocessAudio": "Nahrať audio znova",
       "noAudioYet": "Zatiaľ žiadne audio. Nahrajte alebo zaznamenajte.",
+      "filesTab": "Súbory",
+      "notesTab": "Poznámky",
       "files": "Nahrať súbory",
       "filesDescription": "Nahrajte prepis alebo akékoľvek relevantné súbory pre vyšetrenie",
       "uploadFiles": "Kliknite alebo presuňte súbory na nahranie",

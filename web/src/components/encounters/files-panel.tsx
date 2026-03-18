@@ -29,17 +29,23 @@ export interface EncounterFile {
   source?: string;
 }
 
-interface FilesPanelProps {
+interface FilesContentProps {
   visitId: string;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
 }
 
+type FilesPanelProps = FilesContentProps;
+
 function iconForType(type: string) {
   return type.startsWith("audio/") ? Mic01Icon : File01Icon;
 }
 
-export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
+export function FilesContent({
+  visitId,
+  files,
+  onFilesChange,
+}: FilesContentProps) {
   const t = useTranslations("encounters.detail");
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -146,14 +152,7 @@ export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
   );
 
   return (
-    <div className="flex w-[280px] shrink-0 flex-col gap-4 border-l bg-background p-6">
-      <div className="flex flex-col gap-1">
-        <h3 className="text-lg font-medium leading-none">{t("files")}</h3>
-        <p className="text-sm leading-snug text-foreground/65">
-          {t("filesDescription")}
-        </p>
-      </div>
-
+    <>
       {/* Upload dropzone */}
       <button
         type="button"
@@ -237,6 +236,26 @@ export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
           </Table>
         </div>
       )}
+    </>
+  );
+}
+
+export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
+  const t = useTranslations("encounters.detail");
+
+  return (
+    <div className="hidden desktop:flex w-[280px] shrink-0 flex-col gap-4 border-l bg-background p-6">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-lg font-medium leading-none">{t("files")}</h3>
+        <p className="text-sm leading-snug text-foreground/65">
+          {t("filesDescription")}
+        </p>
+      </div>
+      <FilesContent
+        visitId={visitId}
+        files={files}
+        onFilesChange={onFilesChange}
+      />
     </div>
   );
 }

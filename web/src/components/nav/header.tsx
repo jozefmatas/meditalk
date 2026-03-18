@@ -78,20 +78,22 @@ export function Header() {
     <header className="sticky top-0 z-10 flex h-13 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 self-auto! h-4" />
-      <Breadcrumb>
-        <BreadcrumbList>
+      <Breadcrumb className="min-w-0 flex-1">
+        <BreadcrumbList className="flex-nowrap">
           {breadcrumbs.map((crumb, index) => {
             const isLast = index === breadcrumbs.length - 1;
             return (
               <React.Fragment key={index}>
                 {index > 0 && <BreadcrumbSeparator />}
-                <BreadcrumbItem>
+                <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
                   {!isLast && crumb.href ? (
                     <BreadcrumbLink asChild>
                       <Link href={crumb.href}>{crumb.label}</Link>
                     </BreadcrumbLink>
                   ) : (
-                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                    <BreadcrumbPage className="truncate">
+                      {crumb.label}
+                    </BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
               </React.Fragment>
