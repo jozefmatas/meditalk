@@ -56,6 +56,7 @@ export function MobileDraftBottomBar({
           label={t("detail.sendAsEmail")}
           checked={sendAsEmail}
           onCheckedChange={handleSendAsEmailChange}
+          disabled={isGenerating}
         />
         <Button
           size="lg"
@@ -75,8 +76,9 @@ export function MobileDraftBottomBar({
       <Select
         value={generationLanguage}
         onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
+        disabled={isGenerating}
       >
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" label={t("detail.noteLanguage")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

@@ -81,7 +81,7 @@ export function EncounterHeaderActions({
         {/* 3-dot menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon-lg">
+            <Button variant="outline" size="icon-lg" disabled={isGenerating}>
               <HugeiconsIcon icon={MoreVerticalIcon} size={16} />
             </Button>
           </DropdownMenuTrigger>
@@ -99,6 +99,7 @@ export function EncounterHeaderActions({
             <Select
               value={generationLanguage}
               onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
+              disabled={isGenerating}
             >
               <SelectTrigger
                 className="w-auto"
@@ -124,6 +125,7 @@ export function EncounterHeaderActions({
               label={t("detail.sendAsEmail")}
               checked={sendAsEmail}
               onCheckedChange={handleSendAsEmailChange}
+              disabled={isGenerating}
             />
           </div>
         )}
