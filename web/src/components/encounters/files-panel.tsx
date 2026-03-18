@@ -223,7 +223,7 @@ export function FilesContent({
                       <Button
                         variant="outline"
                         size="icon-sm"
-                        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                        className="shrink-0 desktop:opacity-0 desktop:transition-opacity desktop:group-hover:opacity-100"
                         onClick={() => handleDelete(file.id)}
                       >
                         <HugeiconsIcon icon={Delete01Icon} size={12} />

@@ -131,6 +131,12 @@
 }
 
 @layer base {
+  html {
+    font-size: 17px;
+    @media (width >= theme(--breakpoint-desktop)) {
+      font-size: 16px;
+    }
+  }
   * {
     @apply border-border outline-ring/50;
   }
