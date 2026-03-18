@@ -19,13 +19,16 @@ export async function transcribeAudio(
   filename: string,
   ctx?: UsageContext,
 ): Promise<string> {
-  const blob =
+  // Create a File with proper name so ElevenLabs can detect the audio format
+  const audioFile =
     file instanceof File
-      ? new Blob([await file.arrayBuffer()])
-      : new Blob([new Uint8Array(file)]);
+      ? file
+      : new File([new Uint8Array(file)], filename, {
+          type: filename.endsWith(".webm") ? "audio/webm" : "audio/mpeg",
+        });
 
   const result = await elevenlabs().speechToText.convert({
-    file: blob,
+    file: audioFile,
     modelId: "scribe_v2",
   });
 
@@ -53,12 +56,11 @@ export async function transcribeAudio(
  */
 export async function generateScribeToken(): Promise<string> {
   const response = await fetch(
-    "https://api.elevenlabs.io/v1/speech-to-text/realtime/token",
+    "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
     {
       method: "POST",
       headers: {
         "xi-api-key": process.env.ELEVENLABS_API_KEY!,
-        "Content-Type": "application/json",
       },
     },
   );
