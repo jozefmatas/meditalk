@@ -1,2 +1,2 @@
-export { LiveWaveform } from "@/components/generated/ui/live-waveform";
-export type { LiveWaveformProps } from "@/components/generated/ui/live-waveform";
+export { LiveWaveform } from "./LiveWaveform";
+export type { LiveWaveformProps } from "./LiveWaveform";

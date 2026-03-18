@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
     const visitId = body.visitId || body.transcriptId;
     const templateId: string | undefined = body.templateId;
     const doctorNotes: string | undefined = body.doctorNotes;
+    // Scribe real-time transcript (used for recording files instead of Whisper)
+    const transcriptText: string | undefined = body.transcriptText;
 
     if (!visitId) {
       return NextResponse.json(
@@ -61,13 +63,19 @@ export async function POST(request: NextRequest) {
       extracted_text?: string | null;
     }[];
 
-    // Extract text from unprocessed files (skip recording files — handled by process-audio)
+    // Extract text from all unprocessed files (recordings, PDFs, images, etc.)
     const unprocessed = uploadedFiles.filter(
-      (f) => !f.extracted_text && f.source !== "recording" && f.path,
+      (f) => !f.extracted_text && f.path,
     );
 
     if (unprocessed.length > 0) {
       for (const file of unprocessed) {
+        // For recording files: use Scribe pre-transcript if available
+        if (file.source === "recording" && transcriptText) {
+          file.extracted_text = transcriptText;
+          continue;
+        }
+
         try {
           const { data: fileData, error: dlError } = await supabase.storage
             .from("encounter-files")
@@ -101,31 +109,30 @@ export async function POST(request: NextRequest) {
           .from("encounter-files")
           .remove(pathsToDelete)
           .catch(() => {});
-        // Clear paths in metadata (extracted text remains)
         for (const f of uploadedFiles) {
           if (f.extracted_text) f.path = "";
         }
       }
 
-      // Also cleanup recording files that were just staging artifacts
-      const recordingPaths = uploadedFiles
-        .filter((f) => f.source === "recording" && f.path)
-        .map((f) => f.path);
-      if (recordingPaths.length > 0) {
-        await supabase.storage
-          .from("encounter-files")
-          .remove(recordingPaths)
-          .catch(() => {});
-        for (const f of uploadedFiles) {
-          if (f.source === "recording") f.path = "";
-        }
+      // Set raw_text on visit from recording transcript (for ResourcesPanel)
+      const recordingText = uploadedFiles.find(
+        (f) => f.source === "recording" && f.extracted_text,
+      )?.extracted_text;
+      if (recordingText) {
+        await supabase
+          .from("visits")
+          .update({
+            raw_text: recordingText,
+            metadata: { ...visitMeta, files: uploadedFiles },
+          })
+          .eq("id", visitId);
+      } else {
+        // Persist extracted text + cleared paths back to metadata
+        await supabase
+          .from("visits")
+          .update({ metadata: { ...visitMeta, files: uploadedFiles } })
+          .eq("id", visitId);
       }
-
-      // Persist extracted text + cleared paths back to metadata
-      await supabase
-        .from("visits")
-        .update({ metadata: { ...visitMeta, files: uploadedFiles } })
-        .eq("id", visitId);
     }
 
     const fileTexts = uploadedFiles
@@ -147,50 +154,47 @@ export async function POST(request: NextRequest) {
       sectionLabels[id] = templateSections[id] || id;
     }
 
-    // Embed a clinical retrieval query to find the most relevant chunks
+    // Semantic search on transcript chunks (if any exist from older recordings)
     let chunkContents: string[] = [];
     let usedChunks: string[] = [];
-
-    const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
-      userId,
-      visitId,
-    });
-
-    const { data: matches, error: rpcError } = await supabase.rpc(
-      "match_chunks",
-      {
-        query_embedding: JSON.stringify(queryEmbedding),
-        match_count: 16,
-        p_visit_id: visitId,
-      },
-    );
-
     const hasFileContent = fileTexts.length > 0;
 
-    if (rpcError) {
-      console.error("match_chunks RPC error:", rpcError);
-      // Only fail if we also have no doctor notes or file content
-      if (!doctorNotes?.trim() && !hasFileContent) {
-        return NextResponse.json(
-          { error: `Chunk retrieval failed: ${rpcError.message}` },
-          { status: 500 },
-        );
+    const { count: chunkCount } = await supabase
+      .from("transcript_chunks")
+      .select("id", { count: "exact", head: true })
+      .eq("visit_id", visitId);
+
+    if (chunkCount && chunkCount > 0) {
+      const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
+        userId,
+        visitId,
+      });
+
+      const { data: matches, error: rpcError } = await supabase.rpc(
+        "match_chunks",
+        {
+          query_embedding: JSON.stringify(queryEmbedding),
+          match_count: 16,
+          p_visit_id: visitId,
+        },
+      );
+
+      if (rpcError) {
+        console.error("match_chunks RPC error:", rpcError);
+      } else if (matches && matches.length > 0) {
+        chunkContents = matches.map((m: { content: string }) => m.content);
+        usedChunks = matches.map((m: { id: string }) => m.id as string);
       }
     }
 
-    if (!matches || matches.length === 0) {
-      if (!doctorNotes?.trim() && !hasFileContent) {
-        return NextResponse.json(
-          {
-            error:
-              "No transcript, doctor notes, or file content available for generation",
-          },
-          { status: 404 },
-        );
-      }
-    } else {
-      chunkContents = matches.map((m: { content: string }) => m.content);
-      usedChunks = matches.map((m: { id: string }) => m.id as string);
+    if (chunkContents.length === 0 && !doctorNotes?.trim() && !hasFileContent) {
+      return NextResponse.json(
+        {
+          error:
+            "No transcript, doctor notes, or file content available for generation",
+        },
+        { status: 404 },
+      );
     }
 
     // Pass 1: Clinical analysis (non-fatal — proceed without if it fails)

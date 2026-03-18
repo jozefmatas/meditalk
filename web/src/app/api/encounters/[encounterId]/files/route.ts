@@ -72,6 +72,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         size: number;
         type: string;
         path: string;
+        source?: string;
       }>;
 
       if (!preUploaded?.length) {
@@ -97,6 +98,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         size: f.size,
         type: f.type,
         path: f.path,
+        ...(f.source ? { source: f.source } : {}),
       }));
     } else {
       // Legacy FormData path (fallback)

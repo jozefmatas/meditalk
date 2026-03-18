@@ -350,7 +350,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onAddSection={sections.handleAddSection}
                 focusSectionId={sections.focusSectionId}
                 onAutoFocused={sections.handleAutoFocused}
-                onMarkComplete={handleMarkComplete}
                 t={t}
                 tTemplates={tTemplates}
               />

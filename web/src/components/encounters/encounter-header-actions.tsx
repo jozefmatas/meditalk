@@ -8,6 +8,7 @@ import {
   SparklesIcon,
   Loading03Icon,
   Delete01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { useHeaderActions } from "@/components/nav/header-actions-context";
 import { Button } from "@/components/shared/button";
@@ -86,6 +87,12 @@ export function EncounterHeaderActions({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {status === "to_review" && (
+              <DropdownMenuItem onSelect={onMarkComplete}>
+                <HugeiconsIcon icon={Tick02Icon} size={14} />
+                {t("detail.markComplete")}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>
               <HugeiconsIcon icon={Delete01Icon} size={14} />
               {tNav("deleteVisit")}

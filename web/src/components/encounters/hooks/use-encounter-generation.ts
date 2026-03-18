@@ -155,6 +155,7 @@ export function useEncounterGeneration({
                 size: blob.size,
                 type: contentType,
                 path,
+                source: "recording",
               },
             ],
           }),
@@ -166,11 +167,10 @@ export function useEncounterGeneration({
         }
 
         const data = await res.json();
-        const newFiles = (data.files as EncounterFile[]).map((f) => ({
-          ...f,
-          source: "recording" as const,
-        }));
-        setFiles((prev: EncounterFile[]) => [...prev, ...newFiles]);
+        setFiles((prev: EncounterFile[]) => [
+          ...prev,
+          ...(data.files as EncounterFile[]),
+        ]);
       } catch (err) {
         console.error("Audio upload error:", err);
       }
@@ -221,65 +221,43 @@ export function useEncounterGeneration({
       const capturedTemplateId = selectedTemplateId;
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
-      const capturedLanguage = generationLanguage;
       const capturedAudioStoragePath = audioStoragePath;
       const finalized = recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
 
       try {
-        // Step 1: If there's a recorded audio blob, process it (chunk + embed)
-        if (blobToProcess || capturedAudioStoragePath) {
-          // Ensure audio is in storage — it may already be there from
-          // handleRecordingComplete; if not, upload now (bypasses Vercel limit)
-          let audioPath = capturedAudioStoragePath;
-          if (!audioPath && blobToProcess) {
-            const result = await uploadToStorage(
-              blobToProcess,
-              "recording.webm",
-              { encounterId: visitId },
-            );
-            audioPath = result.path;
-          }
-
-          if (audioPath) {
-            // Send small JSON payload instead of FormData with file bytes
-            const transcribeRes = await fetch("/api/process-audio", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                audioPath,
-                language: capturedLanguage,
-                visitId,
-                transcriptText: streamingTranscript || undefined,
-              }),
-            });
-
-            if (!transcribeRes.ok) {
-              let message = "Transcription failed";
-              try {
-                const data = await transcribeRes.json();
-                message = data.error || message;
-              } catch {
-                if (transcribeRes.status === 413)
-                  message = "Audio file is too large";
-              }
-              throw new Error(message);
-            }
-
-            const transcribeData = await transcribeRes.json();
-            setVisit((prev) =>
-              prev
-                ? { ...prev, raw_text: transcribeData.transcriptText }
-                : prev,
-            );
-          }
-
-          setAudioBlob(null);
-          setAudioStoragePath(null);
+        // If there's a recorded audio that hasn't been uploaded yet, upload
+        // and register it now (safety net if handleRecordingComplete hasn't run)
+        if (blobToProcess && !capturedAudioStoragePath) {
+          const result = await uploadToStorage(
+            blobToProcess,
+            "recording.webm",
+            { encounterId: visitId },
+          );
+          // Register the file in encounter metadata
+          await fetch(`/api/encounters/${visitId}/files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: [
+                {
+                  id: crypto.randomUUID(),
+                  name: "recording.webm",
+                  size: blobToProcess.size,
+                  type: "audio/webm",
+                  path: result.path,
+                  source: "recording",
+                },
+              ],
+            }),
+          });
         }
 
-        // Step 2: Generate note from transcript + doctor notes
+        setAudioBlob(null);
+        setAudioStoragePath(null);
+
+        // Generate note — recordings are now processed uniformly with other files
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -287,6 +265,7 @@ export function useEncounterGeneration({
             visitId,
             templateId: capturedTemplateId,
             doctorNotes: capturedDoctorNotes || undefined,
+            transcriptText: streamingTranscript || undefined,
           }),
         });
 
@@ -310,6 +289,7 @@ export function useEncounterGeneration({
             ...prev,
             soap_note: data.generatedNote,
             patient_letter: data.letter,
+            ...(streamingTranscript ? { raw_text: streamingTranscript } : {}),
             metadata: {
               ...existingMeta,
               ...(data.clinicalAnalysis
@@ -377,7 +357,6 @@ export function useEncounterGeneration({
       visitId,
       selectedTemplateId,
       doctorNotes,
-      generationLanguage,
       audioBlob,
       audioStoragePath,
       setVisit,

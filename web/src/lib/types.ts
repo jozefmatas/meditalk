@@ -78,13 +78,6 @@ export interface UpdateEncounterRequest {
 }
 
 // API response types
-export interface ProcessAudioResponse {
-  visitId: string;
-  audioPath: string;
-  chunkCount: number;
-  transcriptText: string;
-}
-
 export interface SearchResponse {
   matches: ChunkMatch[];
 }

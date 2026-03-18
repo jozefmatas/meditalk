@@ -66,28 +66,25 @@ function buildEmailHtml({
     <tr>
       <td align="center" style="padding:32px 16px;">
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:12px;overflow:hidden;">
-          <!-- Header: logo + CTA -->
+          <!-- Header: logo -->
           <tr>
             <td style="padding:24px 32px;border-bottom:1px solid #e6e3db;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="vertical-align:middle;white-space:nowrap;width:100%;">
-                    <table role="presentation" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="vertical-align:middle;padding-right:12px;">
-                          <img src="https://app.meditalk.ai/app-icon.png" alt="MediTalk" width="40" height="40" style="border-radius:8px;display:block;" />
-                        </td>
-                        <td style="vertical-align:middle;">
-                          <span style="font-size:18px;font-weight:600;color:#232334;">MediTalk</span>
-                        </td>
-                      </tr>
-                    </table>
+                  <td style="vertical-align:middle;padding-right:12px;">
+                    <img src="https://app.meditalk.ai/app-icon.png" alt="MediTalk" width="40" height="40" style="border-radius:8px;display:block;" />
                   </td>
-                  <td style="vertical-align:middle;text-align:right;">
-                    ${cta}
+                  <td style="vertical-align:middle;">
+                    <span style="font-size:18px;font-weight:600;color:#232334;">MediTalk</span>
                   </td>
                 </tr>
               </table>
+            </td>
+          </tr>
+          <!-- CTA -->
+          <tr>
+            <td style="padding:24px 32px 0;">
+              ${cta}
             </td>
           </tr>
           <!-- Note content -->

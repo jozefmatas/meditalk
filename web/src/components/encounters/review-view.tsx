@@ -67,8 +67,6 @@ interface ReviewViewProps {
   onAddSection: (sectionId: string) => void;
   focusSectionId: string | null;
   onAutoFocused: () => void;
-  // Actions
-  onMarkComplete: () => void;
   // i18n
   t: (key: string) => string;
   tTemplates: (key: string) => string;
@@ -96,7 +94,6 @@ export function ReviewView({
   onAddSection,
   focusSectionId,
   onAutoFocused,
-  onMarkComplete,
   t,
   tTemplates,
 }: ReviewViewProps) {
@@ -351,18 +348,31 @@ export function ReviewView({
             </div>
           </div>
 
-          {/* Mark complete — full width on mobile */}
-          {visit.status === "to_review" && (
-            <Button
-              variant="outline"
-              size="lg"
-              className="w-full"
-              onClick={onMarkComplete}
+          {/* Template picker + copy note */}
+          <div className="flex flex-col gap-2">
+            <TemplateSelector
+              value={selectedTemplateId}
+              onChange={handleRegenerateWithTabSwitch}
               disabled={isRegenerating}
-            >
-              {t("detail.markComplete")}
-            </Button>
-          )}
+              size="lg"
+              label={t("detail.templateLabel")}
+            />
+            {isRegenerating ? (
+              <TextShimmer className="py-2 text-center text-sm" duration={3}>
+                {t("detail.regenerating")}
+              </TextShimmer>
+            ) : (
+              <Button
+                variant="secondary"
+                size="lg"
+                className="w-full"
+                onClick={handleCopyNote}
+                disabled={!generatedNoteHtml}
+              >
+                {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
+              </Button>
+            )}
+          </div>
 
           {/* Mobile tabs: Note | Codes */}
           <div className="border-b border-border">
@@ -391,14 +401,7 @@ export function ReviewView({
 
         {/* Mobile Note content */}
         {mobileTab === "note" && (
-          <div className="flex flex-col gap-4 pb-20 pt-4">
-            <TemplateSelector
-              value={selectedTemplateId}
-              onChange={handleRegenerateWithTabSwitch}
-              disabled={isRegenerating}
-              size="lg"
-              label={t("detail.templateLabel")}
-            />
+          <div className="flex flex-col gap-4 pt-4">
             <div className="flex flex-col gap-2">{noteSectionCards}</div>
           </div>
         )}
@@ -407,30 +410,6 @@ export function ReviewView({
         {mobileTab === "codes" && (
           <div className="flex flex-col gap-2 pt-4">
             <IcdPanelContent visit={visit} setVisit={setVisit} />
-          </div>
-        )}
-
-        {/* Mobile bottom bar — note tab only */}
-        {mobileTab === "note" && (
-          <div className="fixed bottom-0 left-0 z-10 flex w-full border-t border-border bg-background px-4 py-3">
-            {isRegenerating ? (
-              <TextShimmer
-                className="flex-1 py-2 text-center text-sm"
-                duration={3}
-              >
-                {t("detail.regenerating")}
-              </TextShimmer>
-            ) : (
-              <Button
-                variant="secondary"
-                size="lg"
-                className="w-full"
-                onClick={handleCopyNote}
-                disabled={!generatedNoteHtml}
-              >
-                {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
-              </Button>
-            )}
           </div>
         )}
       </div>
@@ -476,17 +455,6 @@ export function ReviewView({
                 </span>
               </div>
             </div>
-            {visit.status === "to_review" && (
-              <Button
-                variant="outline"
-                size="lg"
-                className="shrink-0"
-                onClick={onMarkComplete}
-                disabled={isRegenerating}
-              >
-                {t("detail.markComplete")}
-              </Button>
-            )}
           </div>
           <div className="flex items-center gap-1 border-b border-border">
             <TabsList variant="line">

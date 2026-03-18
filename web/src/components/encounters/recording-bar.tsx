@@ -17,10 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/shared/select";
-import {
-  LiveWaveform,
-  type LiveWaveformProps,
-} from "@/components/shared/live-waveform";
+import { LiveWaveform } from "@/components/shared/live-waveform";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Mic01Icon } from "@hugeicons/core-free-icons";
@@ -75,6 +72,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     const [state, setState] = useState<RecordingState>("idle");
     const [duration, setDuration] = useState(0);
+    const [recordingStream, setRecordingStream] = useState<MediaStream | null>(
+      null,
+    );
 
     // Device selection
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
@@ -303,6 +303,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           if (recordingStreamRef.current) {
             recordingStreamRef.current.getTracks().forEach((t) => t.stop());
             recordingStreamRef.current = null;
+            setRecordingStream(null);
           }
           if (timerRef.current) {
             clearInterval(timerRef.current);
@@ -370,6 +371,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             : true,
         });
         recordingStreamRef.current = stream;
+        setRecordingStream(stream);
 
         const mimeType = getSupportedMimeType();
         mimeTypeRef.current = mimeType;
@@ -523,7 +525,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           <div className="h-9 min-w-0 max-w-full flex-1 text-foreground desktop:max-w-[360px]">
             <LiveWaveform
               active
-              deviceId={selectedDeviceId || undefined}
+              stream={recordingStream}
               height={36}
               barWidth={2}
               barGap={1}
@@ -533,11 +535,6 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               mode="static"
               fadeEdges
               fadeWidth={16}
-              onError={
-                (() => {
-                  /* mic errors handled by device enumeration */
-                }) as LiveWaveformProps["onError"]
-              }
             />
           </div>
 
