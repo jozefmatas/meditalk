@@ -215,7 +215,7 @@ export function NavEncounters() {
   return (
     <div
       ref={scrollRef}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto group-data-[collapsible=icon]:hidden"
+      className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto group-data-[collapsible=icon]:hidden"
     >
       {isLoading && visits.length === 0 ? (
         <SidebarMenu className="gap-0.5">

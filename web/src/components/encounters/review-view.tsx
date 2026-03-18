@@ -391,7 +391,14 @@ export function ReviewView({
 
         {/* Mobile Note content */}
         {mobileTab === "note" && (
-          <div className="flex flex-col gap-4 pb-28 pt-4">
+          <div className="flex flex-col gap-4 pb-20 pt-4">
+            <TemplateSelector
+              value={selectedTemplateId}
+              onChange={handleRegenerateWithTabSwitch}
+              disabled={isRegenerating}
+              size="lg"
+              label={t("detail.templateLabel")}
+            />
             <div className="flex flex-col gap-4">{noteSectionCards}</div>
           </div>
         )}
@@ -405,9 +412,12 @@ export function ReviewView({
 
         {/* Mobile bottom bar — note tab only */}
         {mobileTab === "note" && (
-          <div className="fixed bottom-0 left-0 z-10 flex w-full flex-col gap-2 border-t border-border bg-background px-4 py-3">
+          <div className="fixed bottom-0 left-0 z-10 flex w-full border-t border-border bg-background px-4 py-3">
             {isRegenerating ? (
-              <TextShimmer className="py-2 text-center text-sm" duration={3}>
+              <TextShimmer
+                className="flex-1 py-2 text-center text-sm"
+                duration={3}
+              >
                 {t("detail.regenerating")}
               </TextShimmer>
             ) : (
@@ -421,13 +431,6 @@ export function ReviewView({
                 {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
               </Button>
             )}
-            <TemplateSelector
-              value={selectedTemplateId}
-              onChange={handleRegenerateWithTabSwitch}
-              disabled={isRegenerating}
-              size="lg"
-              label={t("detail.templateLabel")}
-            />
           </div>
         )}
       </div>
