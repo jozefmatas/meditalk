@@ -320,7 +320,7 @@ export function ReviewView({
       {/* ── MOBILE LAYOUT (< desktop breakpoint) ── */}
       <div className="flex flex-col gap-0 desktop:hidden">
         {/* Sticky header */}
-        <div className="sticky top-0 z-10 flex flex-col gap-4 bg-background pt-6">
+        <div className="sticky top-0 z-10 flex flex-col gap-4 bg-background pt-4">
           <div className="flex min-w-0 flex-col gap-1">
             <Textarea
               value={title}
