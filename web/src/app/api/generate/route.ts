@@ -91,6 +91,7 @@ export async function POST(request: NextRequest) {
     const unprocessed = uploadedFiles.filter(
       (f) => !f.extracted_text && f.path,
     );
+    const extractionErrors: string[] = [];
     console.log(
       `[generate] files: ${uploadedFiles.length} total, ${unprocessed.length} unprocessed`,
       uploadedFiles.map((f) => ({
@@ -117,6 +118,7 @@ export async function POST(request: NextRequest) {
 
             if (dlError || !fileData) {
               console.error(`Failed to download ${file.name}:`, dlError);
+              extractionErrors.push(`${file.name}: download failed`);
               return;
             }
 
@@ -130,7 +132,10 @@ export async function POST(request: NextRequest) {
             );
             file.extracted_text = text;
           } catch (err) {
+            const msg =
+              err instanceof Error ? err.message : "Unknown extraction error";
             console.error(`Text extraction failed for ${file.name}:`, err);
+            extractionErrors.push(`${file.name}: ${msg}`);
           }
         }),
       );
@@ -311,13 +316,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (chunkContents.length === 0 && !doctorNotes?.trim() && !hasFileContent) {
-      return NextResponse.json(
-        {
-          error:
-            "No transcript, doctor notes, or file content available for generation",
-        },
-        { status: 404 },
-      );
+      const error =
+        extractionErrors.length > 0
+          ? `File processing failed: ${extractionErrors.join("; ")}`
+          : "No transcript, doctor notes, or file content available for generation";
+      return NextResponse.json({ error }, { status: 422 });
     }
 
     // Build prompts for streaming generation

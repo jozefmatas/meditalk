@@ -7,6 +7,7 @@ import { getMessages } from "next-intl/server";
 import { PageTitleProvider } from "@/components/nav/page-title-context";
 import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import { ImpersonationProvider } from "@/components/admin/impersonation-context";
+import { Toaster } from "@/components/shared/sonner";
 import "../globals.css";
 
 const figtree = Figtree({
@@ -75,6 +76,7 @@ export default async function LocaleLayout({
               <ImpersonationProvider>{children}</ImpersonationProvider>
             </HeaderActionsProvider>
           </PageTitleProvider>
+          <Toaster />
         </NextIntlClientProvider>
       </body>
     </html>

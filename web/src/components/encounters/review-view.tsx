@@ -177,16 +177,31 @@ export function ReviewView({
   );
 
   /** Determine which section/subsection IDs have content and are not removed.
-   *  During regeneration or streaming generation, derive from streamed sections. */
+   *  During streaming, derive from streamed sections with meaningful content. */
   const documentedSectionIds = useMemo(() => {
     if (!template) return new Set<string>();
+    let documented: Set<string>;
     if (isRegenerating || isStreamingGeneration) {
-      return new Set(streamedSections.map((s) => s.id));
+      documented = new Set(
+        streamedSections
+          .filter((s) => {
+            const trimmed = s.content?.trim();
+            return trimmed && !NOT_STATED_VALUES.has(trimmed);
+          })
+          .map((s) => s.id),
+      );
+    } else {
+      documented = new Set<string>();
+      for (const id of flattenSectionIds(template)) {
+        if (!removedSections.has(id) && sectionContents[id]?.trim()) {
+          documented.add(id);
+        }
+      }
     }
-    const documented = new Set<string>();
-    for (const id of flattenSectionIds(template)) {
-      if (!removedSections.has(id) && sectionContents[id]?.trim()) {
-        documented.add(id);
+    // Mark parent sections as documented if any of their subsections are
+    for (const section of template.sections) {
+      if (section.subsections?.some((sub) => documented.has(sub.id))) {
+        documented.add(section.id);
       }
     }
     return documented;
@@ -630,7 +645,9 @@ export function ReviewView({
                 onTemplateChange={handleRegenerateWithTabSwitch}
                 disabled={isActivelyStreaming}
                 documentedSections={documentedSectionIds}
-                onScrollToSection={handleScrollToNoteSection}
+                onScrollToSection={
+                  isActivelyStreaming ? undefined : handleScrollToNoteSection
+                }
                 onAddSection={isActivelyStreaming ? undefined : onAddSection}
                 stickyTop={stickyHeaderHeight + 24}
               />

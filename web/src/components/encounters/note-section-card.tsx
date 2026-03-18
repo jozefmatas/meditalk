@@ -187,10 +187,17 @@ export function NoteSectionCard({
   autoFocusId,
   onAutoFocused,
 }: NoteSectionCardProps) {
+  const isReadOnly = !onContentChange;
+
   return (
     <div
       id={id}
-      className="group relative rounded-2xl border p-6 transition-colors hover:border-ring focus-within:border-ring focus-within:bg-accent"
+      className={cn(
+        "group relative rounded-2xl border p-6 transition-colors",
+        isReadOnly
+          ? "text-foreground/65"
+          : "hover:border-ring focus-within:border-ring focus-within:bg-accent",
+      )}
     >
       {onRemove && (
         <Button

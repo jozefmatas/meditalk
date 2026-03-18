@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
+import { toast } from "sonner";
 import { Badge } from "@/components/shared/badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/shared/tabs";
 import {
   InputGroup,
   InputGroupAddon,
@@ -11,7 +11,11 @@ import {
   InputGroupInput,
 } from "@/components/shared/input-group";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Search01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
+import {
+  Search01Icon,
+  Cancel01Icon,
+  Copy01Icon,
+} from "@hugeicons/core-free-icons";
 import type { Encounter } from "@/lib/types";
 
 interface IcdCode {
@@ -24,8 +28,6 @@ interface IcdPanelProps {
   visit: Encounter;
   setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
 }
-
-type Tab = "suggested" | "saved";
 
 /** Inner content of the ICD panel — reusable without the desktop sidebar wrapper. */
 export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
@@ -52,7 +54,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     }));
   })();
 
-  const [activeTab, setActiveTab] = useState<Tab>("suggested");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<IcdCode[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -151,21 +152,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     [visit.id, visit.metadata, setVisit],
   );
 
-  const addCode = useCallback(
-    (code: IcdCode) => {
-      setSelectedCodes((prev) => {
-        if (prev.some((c) => c.code === code.code)) return prev;
-        const next = [
-          ...prev,
-          { code: code.code, description: code.description },
-        ];
-        persistCodes(next);
-        return next;
-      });
-    },
-    [persistCodes],
-  );
-
   const removeCode = useCallback(
     (code: string) => {
       setSelectedCodes((prev) => {
@@ -175,6 +161,16 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
       });
     },
     [persistCodes],
+  );
+
+  const copyCodeToClipboard = useCallback(
+    (code: IcdCode) => {
+      const text = `${code.code} ${code.description}`;
+      navigator.clipboard.writeText(text).then(() => {
+        toast.success(t("icdCopied"));
+      });
+    },
+    [t],
   );
 
   // Search ICD-10 database (debounced)
@@ -214,9 +210,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   const listCodes: IcdCode[] =
     searchQuery.length >= 2
       ? searchResults.filter((c) => !selectedSet.has(c.code))
-      : activeTab === "suggested"
-        ? suggestedCodes.filter((c) => !selectedSet.has(c.code))
-        : [];
+      : suggestedCodes.filter((c) => !selectedSet.has(c.code));
 
   return (
     <>
@@ -261,16 +255,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
         </div>
       )}
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
-        <div className="border-b border-border">
-          <TabsList variant="line">
-            <TabsTrigger value="suggested">{t("icdSuggested")}</TabsTrigger>
-            <TabsTrigger value="saved">{t("icdSaved")}</TabsTrigger>
-          </TabsList>
-        </div>
-      </Tabs>
-
       {/* Search */}
       <InputGroup>
         <InputGroupAddon align="inline-start">
@@ -288,7 +272,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
       {/* Code list */}
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
         {isSearching && (
-          <p className="py-4 text-center text-xs text-foreground">
+          <p className="py-4 text-center text-xs text-foreground/65">
             {t("icdSearching")}
           </p>
         )}
@@ -297,11 +281,9 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
           <p className="py-4 text-center text-xs text-foreground/65">
             {searchQuery.length >= 2
               ? t("icdNoResults")
-              : activeTab === "suggested"
-                ? suggestedCodes.length === 0
-                  ? t("icdNoSuggestions")
-                  : t("icdAllSelected")
-                : t("icdSavedEmpty")}
+              : suggestedCodes.length === 0
+                ? t("icdNoSuggestions")
+                : t("icdAllSelected")}
           </p>
         )}
 
@@ -309,9 +291,12 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
           listCodes.map((code) => (
             <button
               key={code.code}
-              onClick={() => addCode(code)}
-              className="flex w-full flex-col gap-1 rounded-xl border border-border p-3 text-left transition-colors hover:border-ring"
+              onClick={() => copyCodeToClipboard(code)}
+              className="group/code relative flex w-full flex-col gap-1 rounded-xl border border-border p-3 text-left transition-colors hover:border-ring"
             >
+              <span className="absolute top-2 right-2 rounded-md p-1 text-foreground/65 opacity-0 transition-opacity group-hover/code:opacity-100">
+                <HugeiconsIcon icon={Copy01Icon} size={14} />
+              </span>
               <span className="text-sm text-foreground">{code.code}</span>
               <span className="text-xs leading-snug text-foreground/65">
                 {code.description}
@@ -326,7 +311,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 /** Desktop sidebar wrapper for IcdPanelContent. */
 export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
   return (
-    <div className="hidden h-full w-[280px] shrink-0 flex-col gap-2 border-l bg-background p-4 desktop:flex">
+    <div className="hidden h-full w-70 shrink-0 flex-col gap-2 border-l bg-background p-4 desktop:flex">
       <IcdPanelContent visit={visit} setVisit={setVisit} />
     </div>
   );

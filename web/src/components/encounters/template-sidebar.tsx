@@ -40,23 +40,27 @@ const itemClass =
 function SectionItem({
   label,
   isUsed,
+  disabled,
   onClick,
   onScrollTo,
 }: {
   label: string;
   isUsed: boolean;
+  disabled?: boolean;
   onClick: () => void;
   onScrollTo?: () => void;
 }) {
   if (isUsed) {
     return (
-      <button
-        type="button"
-        onClick={onScrollTo}
+      <div
+        role={disabled ? undefined : "button"}
+        tabIndex={disabled ? undefined : 0}
+        onClick={disabled ? undefined : onScrollTo}
         className={cn(
           itemClass,
-          "cursor-pointer text-foreground",
-          "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+          "text-foreground",
+          !disabled &&
+            "cursor-pointer [&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
         )}
       >
         <span className="flex size-5 shrink-0 items-center justify-center">
@@ -67,24 +71,26 @@ function SectionItem({
           />
         </span>
         <span className="section-label truncate">{label}</span>
-      </button>
+      </div>
     );
   }
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
+      role={disabled ? undefined : "button"}
+      tabIndex={disabled ? undefined : 0}
+      onClick={disabled ? undefined : onClick}
       className={cn(
         itemClass,
-        "cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
+        "text-foreground/65",
+        !disabled && "cursor-pointer hover:bg-accent hover:text-foreground",
       )}
     >
       <span className="flex size-5 shrink-0 items-center justify-center">
         <HugeiconsIcon icon={Add01Icon} size={16} />
       </span>
       <span className="truncate">{label}</span>
-    </button>
+    </div>
   );
 }
 
@@ -238,6 +244,7 @@ function SectionWithSubs({
 function ReviewSectionWithSubs({
   section,
   sectionLabel,
+  disabled,
   documentedSections,
   onAddSection,
   onScrollToSection,
@@ -245,6 +252,7 @@ function ReviewSectionWithSubs({
 }: {
   section: TemplateSection;
   sectionLabel: string;
+  disabled?: boolean;
   documentedSections?: Set<string>;
   onAddSection?: (sectionId: string) => void;
   onScrollToSection?: (sectionId: string) => void;
@@ -263,14 +271,18 @@ function ReviewSectionWithSubs({
     <div>
       <div className="flex items-center">
         {isDocumented ? (
-          <button
-            type="button"
-            onClick={() => onScrollToSection?.(section.id)}
+          <div
+            role={disabled ? undefined : "button"}
+            tabIndex={disabled ? undefined : 0}
+            onClick={
+              disabled ? undefined : () => onScrollToSection?.(section.id)
+            }
             className={cn(
               itemClass,
-              "min-w-0 flex-1 cursor-pointer",
+              "min-w-0 flex-1",
               allSubsDocumented ? "text-foreground/30" : "text-foreground",
-              "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
+              !disabled &&
+                "cursor-pointer [&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
             )}
           >
             <span className="flex size-5 shrink-0 items-center justify-center">
@@ -284,14 +296,17 @@ function ReviewSectionWithSubs({
             <span className="ml-auto shrink-0 text-xs text-foreground/40">
               {documentedSubCount}/{subCount}
             </span>
-          </button>
+          </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => onAddSection?.(section.id)}
+          <div
+            role={disabled ? undefined : "button"}
+            tabIndex={disabled ? undefined : 0}
+            onClick={disabled ? undefined : () => onAddSection?.(section.id)}
             className={cn(
               itemClass,
-              "min-w-0 flex-1 cursor-pointer text-foreground/65 hover:bg-accent hover:text-foreground",
+              "min-w-0 flex-1 text-foreground/65",
+              !disabled &&
+                "cursor-pointer hover:bg-accent hover:text-foreground",
             )}
           >
             <span className="flex size-5 shrink-0 items-center justify-center">
@@ -301,27 +316,29 @@ function ReviewSectionWithSubs({
             <span className="ml-auto shrink-0 text-xs text-foreground/40">
               {documentedSubCount}/{subCount}
             </span>
-          </button>
+          </div>
         )}
 
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => setOpen((prev) => !prev)}
-          className="shrink-0 text-foreground/40"
-        >
-          <HugeiconsIcon
-            icon={ArrowRight01Icon}
-            size={16}
-            className={cn(
-              "transition-transform duration-200",
-              open && "rotate-90",
-            )}
-          />
-        </Button>
+        {!disabled && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setOpen((prev) => !prev)}
+            className="shrink-0 text-foreground/40"
+          >
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={16}
+              className={cn(
+                "transition-transform duration-200",
+                open && "rotate-90",
+              )}
+            />
+          </Button>
+        )}
       </div>
 
-      {open && (
+      {open && !disabled && (
         <div className="flex flex-col">
           {section.subsections?.map((sub) => {
             const subLabel = tTemplates(`sections.${sub.labelKey}`);
@@ -329,9 +346,10 @@ function ReviewSectionWithSubs({
 
             if (isSubDocumented) {
               return (
-                <button
+                <div
                   key={sub.id}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onScrollToSection?.(sub.id)}
                   className={cn(
                     itemClass,
@@ -347,14 +365,15 @@ function ReviewSectionWithSubs({
                     />
                   </span>
                   <span className="section-label truncate">{subLabel}</span>
-                </button>
+                </div>
               );
             }
 
             return (
-              <button
+              <div
                 key={sub.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => onAddSection?.(sub.id)}
                 className={cn(
                   itemClass,
@@ -365,7 +384,7 @@ function ReviewSectionWithSubs({
                   <HugeiconsIcon icon={Add01Icon} size={16} />
                 </span>
                 <span className="truncate">{subLabel}</span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -466,6 +485,7 @@ export function TemplateSidebar({
                   key={section.id}
                   label={sectionLabel}
                   isUsed={isDocumented}
+                  disabled={disabled}
                   onClick={() => onAddSection?.(section.id)}
                   onScrollTo={() => onScrollToSection?.(section.id)}
                 />
@@ -477,6 +497,7 @@ export function TemplateSidebar({
                 key={section.id}
                 section={section}
                 sectionLabel={sectionLabel}
+                disabled={disabled}
                 documentedSections={documentedSections}
                 onAddSection={onAddSection}
                 onScrollToSection={onScrollToSection}
