@@ -120,7 +120,10 @@
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk remote -v:*)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk status --short)",
       "Bash(python3:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(gh run list:*)",
+      "Bash(brew list:*)",
+      "Bash(vercel ls:*)"
     ],
     "deny": [],
     "ask": []
