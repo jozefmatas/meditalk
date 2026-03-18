@@ -63,42 +63,44 @@ export async function POST(request: NextRequest) {
       extracted_text?: string | null;
     }[];
 
-    // Extract text from all unprocessed files (recordings, PDFs, images, etc.)
+    // Extract text from all unprocessed files — in parallel for speed
     const unprocessed = uploadedFiles.filter(
       (f) => !f.extracted_text && f.path,
     );
 
     if (unprocessed.length > 0) {
-      for (const file of unprocessed) {
-        // For recording files: use Scribe pre-transcript if available
-        if (file.source === "recording" && transcriptText) {
-          file.extracted_text = transcriptText;
-          continue;
-        }
-
-        try {
-          const { data: fileData, error: dlError } = await supabase.storage
-            .from("encounter-files")
-            .download(file.path);
-
-          if (dlError || !fileData) {
-            console.error(`Failed to download ${file.name}:`, dlError);
-            continue;
+      await Promise.all(
+        unprocessed.map(async (file) => {
+          // For recording files: use Scribe pre-transcript if available (instant)
+          if (file.source === "recording" && transcriptText) {
+            file.extracted_text = transcriptText;
+            return;
           }
 
-          const buffer = Buffer.from(await fileData.arrayBuffer());
-          const text = await extractTextFromFile(
-            buffer,
-            file.name,
-            file.type,
-            language,
-            { userId, visitId },
-          );
-          file.extracted_text = text;
-        } catch (err) {
-          console.error(`Text extraction failed for ${file.name}:`, err);
-        }
-      }
+          try {
+            const { data: fileData, error: dlError } = await supabase.storage
+              .from("encounter-files")
+              .download(file.path);
+
+            if (dlError || !fileData) {
+              console.error(`Failed to download ${file.name}:`, dlError);
+              return;
+            }
+
+            const buffer = Buffer.from(await fileData.arrayBuffer());
+            const text = await extractTextFromFile(
+              buffer,
+              file.name,
+              file.type,
+              language,
+              { userId, visitId },
+            );
+            file.extracted_text = text;
+          } catch (err) {
+            console.error(`Text extraction failed for ${file.name}:`, err);
+          }
+        }),
+      );
 
       // Cleanup: delete all processed files from storage (text already extracted)
       const pathsToDelete = uploadedFiles
@@ -154,37 +156,105 @@ export async function POST(request: NextRequest) {
       sectionLabels[id] = templateSections[id] || id;
     }
 
-    // Semantic search on transcript chunks (if any exist from older recordings)
+    // Semantic search on legacy transcript chunks + clinical analysis — run in parallel
     let chunkContents: string[] = [];
     let usedChunks: string[] = [];
     const hasFileContent = fileTexts.length > 0;
 
-    const { count: chunkCount } = await supabase
-      .from("transcript_chunks")
-      .select("id", { count: "exact", head: true })
-      .eq("visit_id", visitId);
+    // Build clinical input from all extracted text + doctor notes
+    const clinicalInputParts: string[] = [];
+    for (const ft of fileTexts) {
+      clinicalInputParts.push(`[File: ${ft.name}]\n${ft.text}`);
+    }
+    if (doctorNotes?.trim()) {
+      clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
+    }
 
-    if (chunkCount && chunkCount > 0) {
-      const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
-        userId,
-        visitId,
-      });
+    // Run embedding search and clinical analysis in parallel
+    // Skip embedding entirely when transcriptText is provided (modern Scribe flow)
+    const embeddingPromise = transcriptText
+      ? Promise.resolve({
+          chunkContents: [] as string[],
+          usedChunks: [] as string[],
+        })
+      : (async () => {
+          const { count: chunkCount } = await supabase
+            .from("transcript_chunks")
+            .select("id", { count: "exact", head: true })
+            .eq("visit_id", visitId);
 
-      const { data: matches, error: rpcError } = await supabase.rpc(
-        "match_chunks",
-        {
-          query_embedding: JSON.stringify(queryEmbedding),
-          match_count: 16,
-          p_visit_id: visitId,
-        },
-      );
+          if (!chunkCount || chunkCount === 0) {
+            return {
+              chunkContents: [] as string[],
+              usedChunks: [] as string[],
+            };
+          }
 
-      if (rpcError) {
-        console.error("match_chunks RPC error:", rpcError);
-      } else if (matches && matches.length > 0) {
-        chunkContents = matches.map((m: { content: string }) => m.content);
-        usedChunks = matches.map((m: { id: string }) => m.id as string);
-      }
+          const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
+            userId,
+            visitId,
+          });
+
+          const { data: matches, error: rpcError } = await supabase.rpc(
+            "match_chunks",
+            {
+              query_embedding: JSON.stringify(queryEmbedding),
+              match_count: 16,
+              p_visit_id: visitId,
+            },
+          );
+
+          if (rpcError) {
+            console.error("match_chunks RPC error:", rpcError);
+            return {
+              chunkContents: [] as string[],
+              usedChunks: [] as string[],
+            };
+          }
+
+          if (matches && matches.length > 0) {
+            return {
+              chunkContents: matches.map((m: { content: string }) => m.content),
+              usedChunks: matches.map((m: { id: string }) => m.id as string),
+            };
+          }
+          return { chunkContents: [] as string[], usedChunks: [] as string[] };
+        })();
+
+    const clinicalPromise: Promise<ClinicalAnalysis | null> =
+      clinicalInputParts.length > 0
+        ? runClinicalAnalysis(clinicalInputParts, language, { userId, visitId })
+            .then((result) => {
+              console.log(
+                "Clinical analysis complete — specialty:",
+                result.inferredSpecialty,
+                "concepts:",
+                result.matchedConcepts.length,
+                "ICD codes:",
+                result.candidateIcdCodes.length,
+              );
+              return result;
+            })
+            .catch((err) => {
+              console.warn(
+                "Clinical analysis failed, proceeding without enrichment:",
+                err,
+              );
+              return null;
+            })
+        : Promise.resolve(null);
+
+    const [embeddingResult, clinicalAnalysis] = await Promise.all([
+      embeddingPromise,
+      clinicalPromise,
+    ]);
+
+    chunkContents = embeddingResult.chunkContents;
+    usedChunks = embeddingResult.usedChunks;
+
+    // Add chunk contents to clinical input (for generation, not re-analysis)
+    if (chunkContents.length > 0) {
+      clinicalInputParts.unshift(...chunkContents);
     }
 
     if (chunkContents.length === 0 && !doctorNotes?.trim() && !hasFileContent) {
@@ -195,40 +265,6 @@ export async function POST(request: NextRequest) {
         },
         { status: 404 },
       );
-    }
-
-    // Pass 1: Clinical analysis (non-fatal — proceed without if it fails)
-    // Combine all available content: transcript chunks + file texts + doctor notes
-    const clinicalInputParts = [...chunkContents];
-    for (const ft of fileTexts) {
-      clinicalInputParts.push(`[File: ${ft.name}]\n${ft.text}`);
-    }
-    if (doctorNotes?.trim()) {
-      clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
-    }
-
-    let clinicalAnalysis: ClinicalAnalysis | null = null;
-    if (clinicalInputParts.length > 0) {
-      try {
-        clinicalAnalysis = await runClinicalAnalysis(
-          clinicalInputParts,
-          language,
-          { userId, visitId },
-        );
-        console.log(
-          "Clinical analysis complete — specialty:",
-          clinicalAnalysis.inferredSpecialty,
-          "concepts:",
-          clinicalAnalysis.matchedConcepts.length,
-          "ICD codes:",
-          clinicalAnalysis.candidateIcdCodes.length,
-        );
-      } catch (analysisErr) {
-        console.warn(
-          "Clinical analysis failed, proceeding without enrichment:",
-          analysisErr,
-        );
-      }
     }
 
     // Pass 2: Generate note from template (enriched with clinical analysis)
