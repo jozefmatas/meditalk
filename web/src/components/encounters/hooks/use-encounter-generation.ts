@@ -355,7 +355,9 @@ export function useEncounterGeneration({
 
               if (event.type === "streaming_start") {
                 // Switch from full-screen overlay to streaming sections view
+                // Also reset streamed sections (handles server-side retries)
                 setIsStreaming(true);
+                setStreamedSections([]);
                 setStreamingSectionIds(event.sectionIds);
                 setStreamingSectionLabels(event.sectionLabels);
               } else if (event.type === "section") {
@@ -599,7 +601,10 @@ export function useEncounterGeneration({
             try {
               const event = JSON.parse(jsonStr);
 
-              if (event.type === "section") {
+              if (event.type === "streaming_start") {
+                // Reset streamed sections on retry
+                setStreamedSections([]);
+              } else if (event.type === "section") {
                 setStreamedSections((prev) => [
                   ...prev,
                   { id: event.id, title: event.title, content: event.content },

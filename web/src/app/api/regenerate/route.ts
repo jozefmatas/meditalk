@@ -219,22 +219,15 @@ Rules:
       );
     }
 
-    // Stream Anthropic response
-    const stream = anthropic().messages.stream({
-      model: streamModel,
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    // Stream Anthropic response as SSE (with retry on overloaded errors)
+    const STREAM_MAX_RETRIES = 3;
+    const STREAM_RETRY_DELAYS = [2000, 5000, 10000];
 
     const encoder = new TextEncoder();
     const sectionIdSet = new Set(allIds);
-    // Track which sections we've already emitted
-    const emittedSections = new Set<string>();
 
     const readable = new ReadableStream({
       async start(controller) {
-        let accumulated = "";
         let inputTokens = 0;
         let outputTokens = 0;
 
@@ -258,23 +251,23 @@ Rules:
          * Try to extract completed "key": "value" pairs from the accumulated JSON.
          * Emits SSE events for each newly completed template section.
          */
-        function tryExtractSections() {
+        function tryExtractSections(
+          accumulated: string,
+          emittedSections: Set<string>,
+        ) {
           for (const id of sectionIdSet) {
             if (emittedSections.has(id)) continue;
 
-            // Look for "sectionId": "...value..."
-            // Match the key, then capture the string value (handling escaped quotes)
             const keyPattern = `"${id}"\\s*:\\s*"`;
             const keyMatch = accumulated.match(new RegExp(keyPattern));
             if (!keyMatch) continue;
 
             const valueStart = keyMatch.index! + keyMatch[0].length;
-            // Find the closing unescaped quote
             let pos = valueStart;
             let found = false;
             while (pos < accumulated.length) {
               if (accumulated[pos] === "\\") {
-                pos += 2; // skip escaped char
+                pos += 2;
                 continue;
               }
               if (accumulated[pos] === '"') {
@@ -286,7 +279,6 @@ Rules:
 
             if (!found) continue;
 
-            // Extract the raw value and unescape
             const rawValue = accumulated.slice(valueStart, pos);
             let value: string;
             try {
@@ -305,21 +297,61 @@ Rules:
           }
         }
 
-        try {
-          stream.on("text", (delta) => {
-            accumulated += delta;
-            tryExtractSections();
+        let finalMessage: Awaited<
+          ReturnType<
+            ReturnType<typeof anthropic>["messages"]["stream"]
+          >["finalMessage"]
+        >;
+
+        for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
+          sendEvent({
+            type: "streaming_start",
+            sectionIds: allIds,
+            sectionLabels,
           });
 
-          // Wait for stream to complete
-          const finalMessage = await stream.finalMessage();
-          inputTokens = finalMessage.usage.input_tokens;
-          outputTokens = finalMessage.usage.output_tokens;
+          let accumulated = "";
+          const emittedSections = new Set<string>();
+
+          try {
+            const stream = anthropic().messages.stream({
+              model: streamModel,
+              max_tokens: 8192,
+              system: systemPrompt,
+              messages: [{ role: "user", content: userMessage }],
+            });
+
+            stream.on("text", (delta) => {
+              accumulated += delta;
+              tryExtractSections(accumulated, emittedSections);
+            });
+
+            finalMessage = await stream.finalMessage();
+            break; // Success
+          } catch (err) {
+            const isOverloaded =
+              err instanceof Error &&
+              err.message.toLowerCase().includes("overloaded");
+            if (isOverloaded && attempt < STREAM_MAX_RETRIES) {
+              const delay = STREAM_RETRY_DELAYS[attempt];
+              console.warn(
+                `[regenerate] Overloaded, retrying in ${delay}ms (attempt ${attempt + 1}/${STREAM_MAX_RETRIES})`,
+              );
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        try {
+          inputTokens = finalMessage!.usage.input_tokens;
+          outputTokens = finalMessage!.usage.output_tokens;
 
           // Parse the full JSON for the final result
           const fullText =
-            finalMessage.content[0].type === "text"
-              ? finalMessage.content[0].text
+            finalMessage!.content[0].type === "text"
+              ? finalMessage!.content[0].text
               : "";
 
           let parsed: Record<string, string>;
