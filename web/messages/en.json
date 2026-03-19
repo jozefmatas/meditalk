@@ -121,6 +121,12 @@
       "pausedStatus": "Paused",
       "templateLabel": "Template",
       "defaultMicrophone": "Default microphone",
+      "recordingTip": "For best results, keep your screen on and the app in the foreground during the entire recording.",
+      "keepScreenOn": "Keep screen on",
+      "leaveWhileRecordingTitle": "Recording in progress",
+      "leaveWhileRecordingDescription": "If you leave now, your current recording will be saved but the microphone will stop. You can start a new recording when you return.",
+      "leaveWhileRecordingStay": "Stay on page",
+      "leaveWhileRecordingLeave": "Leave page",
       "micError": "Could not access microphone. Check permissions and try again.",
       "generatingEncounter": "Generating your encounter",
       "regenerating": "Regenerating note...",
@@ -145,9 +151,14 @@
       "icdNoSuggestions": "Generate a note to get suggestions",
       "icdAllSelected": "All suggested codes selected",
       "icdSavedEmpty": "No saved codes yet",
-      "transcribing": "Transcribing..."
+      "transcribing": "Transcribing...",
+      "retry": "Retry"
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",
+    "generationInterrupted": "Generation was interrupted. Your recording and files are safe — tap Retry to continue.",
+    "generationFailed": "Something went wrong during generation. Your data is safe — please try again.",
+    "networkError": "Connection lost during generation. Your recording and files are safe — please try again.",
+    "saveFailed": "The note was generated but could not be saved. Please try again.",
     "delete": {
       "title": "Delete Encounter",
       "message": "Are you sure you want to delete this encounter? This action cannot be undone.",
@@ -283,6 +294,14 @@
       "name": "Basic SOAP Note",
       "description": "Standard 4-section SOAP format"
     },
+    "focused-cardiology-exam": {
+      "name": "Focused Cardiology Examination",
+      "description": "Cardiology template with history, objective examination and ECG"
+    },
+    "comprehensive-cardiology-exam": {
+      "name": "Comprehensive Cardiology Examination",
+      "description": "Detailed cardiology template with full history and objective examination"
+    },
     "sections": {
       "reason_for_contact": "Reason for contact",
       "past_history": "Past history",
@@ -341,7 +360,22 @@
       "action_and_plan": "Action and plan",
       "subjective": "Subjective",
       "objective": "Objective",
-      "plan": "Plan"
+      "plan": "Plan",
+      "anamnesis": "History",
+      "epidemiological_history": "Epidemiological history",
+      "work_history": "Work history",
+      "substance_use": "Substance use",
+      "objective_examination": "Objective examination",
+      "general_examination": "General examination",
+      "ra": "RA",
+      "oa": "OA",
+      "sa": "SA",
+      "ea": "EA",
+      "pa": "PA",
+      "aa": "AA",
+      "la": "LA",
+      "ab": "Ab",
+      "to_present_illness": "TO"
     }
   },
   "poc": {

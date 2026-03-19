@@ -1,5 +1,7 @@
 import { comprehensiveMedicalExam } from "./comprehensive-medical-exam";
 import { basicSoap } from "./basic-soap";
+import { focusedCardiologyExam } from "./focused-cardiology-exam";
+import { comprehensiveCardiologyExam } from "./comprehensive-cardiology-exam";
 import type { Template, TemplateSection } from "./types";
 
 /**
@@ -9,6 +11,8 @@ import type { Template, TemplateSection } from "./types";
 export const STATIC_TEMPLATES: Template[] = [
   comprehensiveMedicalExam,
   basicSoap,
+  focusedCardiologyExam,
+  comprehensiveCardiologyExam,
 ];
 
 /** @deprecated Use STATIC_TEMPLATES */

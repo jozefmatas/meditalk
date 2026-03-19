@@ -375,22 +375,16 @@ export async function POST(request: NextRequest) {
       `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
     );
 
-    // Stream Anthropic response as SSE
+    // Stream Anthropic response as SSE (with retry on overloaded errors)
     lap("generation-start");
-    const stream = anthropic().messages.stream({
-      model: GENERATION_MODEL,
-      max_tokens: 8192,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    const STREAM_MAX_RETRIES = 3;
+    const STREAM_RETRY_DELAYS = [2000, 5000, 10000];
 
     const encoder = new TextEncoder();
     const sectionIdSet = new Set(allIds);
-    const emittedSections = new Set<string>();
 
     const readable = new ReadableStream({
       async start(controller) {
-        let accumulated = "";
         let inputTokens = 0;
         let outputTokens = 0;
 
@@ -399,13 +393,6 @@ export async function POST(request: NextRequest) {
             encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
           );
         }
-
-        // Notify client that streaming is starting (switch from overlay to sections)
-        sendEvent({
-          type: "streaming_start",
-          sectionIds: allIds,
-          sectionLabels,
-        });
 
         // Notify client that clinical analysis is complete
         if (clinicalAnalysis) {
@@ -421,7 +408,10 @@ export async function POST(request: NextRequest) {
          * Try to extract completed "key": "value" pairs from the accumulated JSON.
          * Emits SSE events for each newly completed template section.
          */
-        function tryExtractSections() {
+        function tryExtractSections(
+          accumulated: string,
+          emittedSections: Set<string>,
+        ) {
           for (const id of sectionIdSet) {
             if (emittedSections.has(id)) continue;
 
@@ -464,25 +454,67 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        try {
-          stream.on("text", (delta) => {
-            accumulated += delta;
-            tryExtractSections();
+        let finalMessage: Awaited<
+          ReturnType<
+            ReturnType<typeof anthropic>["messages"]["stream"]
+          >["finalMessage"]
+        >;
+
+        for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
+          // Send streaming_start on each attempt so client resets streamed sections
+          sendEvent({
+            type: "streaming_start",
+            sectionIds: allIds,
+            sectionLabels,
           });
 
-          const finalMessage = await stream.finalMessage();
-          inputTokens = finalMessage.usage.input_tokens;
-          outputTokens = finalMessage.usage.output_tokens;
+          let accumulated = "";
+          const emittedSections = new Set<string>();
+
+          try {
+            const stream = anthropic().messages.stream({
+              model: GENERATION_MODEL,
+              max_tokens: 8192,
+              system: systemPrompt,
+              messages: [{ role: "user", content: userMessage }],
+            });
+
+            stream.on("text", (delta) => {
+              accumulated += delta;
+              tryExtractSections(accumulated, emittedSections);
+            });
+
+            finalMessage = await stream.finalMessage();
+            break; // Success
+          } catch (err) {
+            const isOverloaded =
+              err instanceof Error &&
+              err.message.toLowerCase().includes("overloaded");
+            if (isOverloaded && attempt < STREAM_MAX_RETRIES) {
+              const delay = STREAM_RETRY_DELAYS[attempt];
+              console.warn(
+                `[generate] Overloaded, retrying in ${delay}ms (attempt ${attempt + 1}/${STREAM_MAX_RETRIES})`,
+              );
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+
+        try {
+          inputTokens = finalMessage!.usage.input_tokens;
+          outputTokens = finalMessage!.usage.output_tokens;
 
           lap("generation-done");
           console.log(
-            `[generate] Anthropic usage — input: ${inputTokens}, output: ${outputTokens}, stop: ${finalMessage.stop_reason}`,
+            `[generate] Anthropic usage — input: ${inputTokens}, output: ${outputTokens}, stop: ${finalMessage!.stop_reason}`,
           );
 
           // Parse the full JSON for the final result
           const fullText =
-            finalMessage.content[0].type === "text"
-              ? finalMessage.content[0].text
+            finalMessage!.content[0].type === "text"
+              ? finalMessage!.content[0].text
               : "";
 
           // Check for insufficient context
@@ -532,10 +564,11 @@ export async function POST(request: NextRequest) {
             sectionLabels,
           );
 
-          // Save to DB
+          // Save to DB (must complete before sending complete event,
+          // so the email API can read the latest soap_note)
           const existingMetadata =
             (visit.metadata as Record<string, unknown>) || {};
-          supabase
+          const { error: saveError } = await supabase
             .from("visits")
             .update({
               soap_note: generatedNote,
@@ -558,11 +591,13 @@ export async function POST(request: NextRequest) {
                   : {}),
               },
             })
-            .eq("id", visitId)
-            .then(({ error }) => {
-              if (error)
-                console.error("Failed to save generated content:", error);
-            });
+            .eq("id", visitId);
+          if (saveError) {
+            console.error("Failed to save generated content:", saveError);
+            sendEvent({ type: "error", error: "save_failed" });
+            controller.close();
+            return;
+          }
 
           // Log usage
           logUsage({

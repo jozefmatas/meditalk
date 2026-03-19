@@ -9,6 +9,7 @@ import {
   forwardRef,
 } from "react";
 import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/shared/button";
 import {
   Select,
@@ -19,8 +20,17 @@ import {
 } from "@/components/shared/select";
 import { LiveWaveform } from "@/components/shared/live-waveform";
 import { TemplateSelector } from "@/components/templates/template-selector";
+import { Alert, AlertDescription } from "@/components/shared/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/shared/dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Mic01Icon } from "@hugeicons/core-free-icons";
+import { Mic01Icon, AlertCircleIcon } from "@hugeicons/core-free-icons";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -44,17 +54,25 @@ function formatDuration(seconds: number) {
 }
 
 function getSupportedMimeType(): string {
+  // Prefer MP4/AAC — better compatibility with ElevenLabs than WebM from Android Chrome
   const types = [
+    "audio/mp4",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
     "audio/ogg",
-    "audio/mp4",
   ];
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
   return "audio/mp4";
+}
+
+/** Map recording MIME type to file extension. */
+export function audioMimeToExt(mime: string): string {
+  if (mime.includes("mp4")) return ".m4a";
+  if (mime.includes("ogg")) return ".ogg";
+  return ".webm";
 }
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
@@ -69,6 +87,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     ref,
   ) {
     const t = useTranslations("encounters.detail");
+    const router = useRouter();
 
     const [state, setState] = useState<RecordingState>("idle");
     const [duration, setDuration] = useState(0);
@@ -77,9 +96,17 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       null,
     );
 
+    // Navigation guard state
+    const [navDialogOpen, setNavDialogOpen] = useState(false);
+    const pendingNavUrlRef = useRef<string | null>(null);
+
     // Device selection
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+
+    // Stable ref for onRecordingComplete so cleanup can call it without stale closure
+    const onRecordingCompleteRef = useRef(onRecordingComplete);
+    onRecordingCompleteRef.current = onRecordingComplete;
 
     // Recording refs
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -131,6 +158,99 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         document.removeEventListener("visibilitychange", handleVisibility);
     }, [state, acquireWakeLock]);
 
+    // Prevent accidental navigation while recording is active
+    useEffect(() => {
+      if (state === "idle") return;
+
+      // Tab close / page refresh — browser shows native "Leave site?" dialog
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        e.preventDefault();
+      };
+      window.addEventListener("beforeunload", handleBeforeUnload);
+
+      // Client-side link clicks — show our custom dialog instead of navigating
+      const handleClick = (e: MouseEvent) => {
+        const anchor = (e.target as Element).closest("a");
+        if (!anchor) return;
+        const href = anchor.getAttribute("href");
+        if (!href || href === "#") return;
+        try {
+          const url = new URL(href, location.origin);
+          if (
+            url.origin === location.origin &&
+            url.pathname !== location.pathname
+          ) {
+            e.preventDefault();
+            e.stopPropagation();
+            pendingNavUrlRef.current = href;
+            setNavDialogOpen(true);
+          }
+        } catch {
+          // invalid URL, ignore
+        }
+      };
+      document.addEventListener("click", handleClick, true);
+
+      return () => {
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+        document.removeEventListener("click", handleClick, true);
+      };
+    }, [state]);
+
+    const handleConfirmLeave = useCallback(() => {
+      setNavDialogOpen(false);
+      const url = pendingNavUrlRef.current;
+      pendingNavUrlRef.current = null;
+      if (url) router.push(url);
+    }, [router]);
+
+    // Clean up all resources on unmount (e.g. navigating between encounters)
+    // Without this, the old MediaStream holds the mic and blocks getUserMedia on the next page
+    useEffect(() => {
+      return () => {
+        // Save accumulated recording before tearing down (max ~1s loss from last timeslice)
+        if (chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, {
+            type: mimeTypeRef.current,
+          });
+          onRecordingCompleteRef.current(blob);
+          chunksRef.current = [];
+        }
+        // Stop MediaRecorder
+        if (mediaRecorderRef.current?.state !== "inactive") {
+          try {
+            mediaRecorderRef.current?.stop();
+          } catch {
+            // already stopped
+          }
+        }
+        // Release mic tracks
+        recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
+        // Clear timer
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        // Close Scribe WebSocket + AudioContext
+        try {
+          scribeRef.current?.close();
+        } catch {
+          // ignore
+        }
+        scribeRef.current = null;
+        try {
+          scribeAudioCtxRef.current?.close();
+        } catch {
+          // ignore
+        }
+        scribeAudioCtxRef.current = null;
+        // Release wake lock
+        wakeLockRef.current?.release();
+        wakeLockRef.current = null;
+      };
+    }, []);
+
     // Enumerate audio devices on mount (labels may be empty until permission is granted)
     useEffect(() => {
       navigator.mediaDevices
@@ -169,6 +289,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
         // Create AudioContext to read PCM from the existing recording stream
         const audioCtx = new AudioContext();
+        await audioCtx.resume(); // mobile browsers may start suspended
         scribeAudioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
 
@@ -428,6 +549,28 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       onRecordingStateChange?.("recording");
     }, [startTimer, onRecordingStateChange, startScribe]);
 
+    // Navigation guard dialog — shared between recording & paused states
+    const navGuardDialog = (
+      <Dialog open={navDialogOpen} onOpenChange={setNavDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("leaveWhileRecordingTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("leaveWhileRecordingDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNavDialogOpen(false)}>
+              {t("leaveWhileRecordingStay")}
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmLeave}>
+              {t("leaveWhileRecordingLeave")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+
     // Device selector element — shared between idle & paused states
     const deviceSelector =
       devices.length > 1 ? (
@@ -507,6 +650,13 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           {micError && (
             <p className="text-sm text-destructive">{t("micError")}</p>
           )}
+          <Alert
+            variant="destructive"
+            className="border-none bg-destructive/10 desktop:hidden"
+          >
+            <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+            <AlertDescription>{t("recordingTip")}</AlertDescription>
+          </Alert>
         </div>
       );
     }
@@ -514,72 +664,85 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     /* ── Recording: waveform (left) | status + pause button (right) ── */
     if (state === "recording") {
       return (
-        <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
-          <div className="h-9 min-w-0 max-w-full flex-1 text-foreground desktop:max-w-[360px]">
-            <LiveWaveform
-              active
-              stream={recordingStream}
-              height={36}
-              barWidth={2}
-              barGap={1}
-              barRadius={1}
-              barHeight={3}
-              sensitivity={1.5}
-              mode="static"
-              fadeEdges
-              fadeWidth={16}
-            />
-          </div>
+        <>
+          <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
+            <div className="h-9 min-w-0 max-w-full flex-1 text-foreground desktop:max-w-90">
+              <LiveWaveform
+                active
+                stream={recordingStream}
+                height={36}
+                barWidth={2}
+                barGap={1}
+                barRadius={1}
+                barHeight={3}
+                sensitivity={1.5}
+                mode="static"
+                fadeEdges
+                fadeWidth={16}
+              />
+            </div>
 
-          <div className="flex shrink-0 items-center justify-between gap-3 desktop:justify-start">
-            <span className="flex items-center gap-2 text-sm font-medium text-destructive">
-              <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
-              {t("recordingStatus")} {formatDuration(duration)}
-            </span>
-            <Button
-              size="lg"
-              onClick={handlePause}
-              className="shrink-0 border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
+            <div className="flex shrink-0 items-center justify-between gap-3 desktop:justify-start">
+              <span className="flex items-center gap-2 text-sm font-medium text-destructive">
+                <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
+                {t("recordingStatus")} {formatDuration(duration)}
+              </span>
+              <Button
+                size="lg"
+                onClick={handlePause}
+                className="shrink-0 border-none bg-destructive/10 text-destructive shadow-none hover:bg-destructive/15"
+              >
+                {t("pause")}
+              </Button>
+            </div>
+            <Alert
+              variant="destructive"
+              className="border-none bg-destructive/10 desktop:hidden"
             >
-              {t("pause")}
-            </Button>
+              <HugeiconsIcon icon={AlertCircleIcon} size={16} />
+              <AlertDescription>{t("keepScreenOn")}</AlertDescription>
+            </Alert>
           </div>
-        </div>
+          {navGuardDialog}
+        </>
       );
     }
 
     /* ── Paused: template selector (left) | mic + divider + status + resume button (right) ── */
     return (
-      <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
-        <TemplateSelector
-          value={templateId}
-          onChange={onTemplateChange}
-          disabled={!!disabled}
-          size="lg"
-          label={t("templateLabel")}
-          className="w-full desktop:w-auto desktop:max-w-[280px]"
-        />
-        <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-5">
-          <div className="hidden min-w-0 items-center gap-3 desktop:flex">
-            {deviceSelector}
-            <div className="h-6 w-px shrink-0 bg-border" />
-          </div>
-          <div className="flex items-center justify-between gap-3 desktop:justify-start">
-            <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
-              <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
-              {t("pausedStatus")} {formatDuration(duration)}
-            </span>
-            <Button
-              variant="secondary"
-              size="lg"
-              onClick={handleResume}
-              className="shrink-0"
-            >
-              {t("resume")}
-            </Button>
+      <>
+        <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
+          <TemplateSelector
+            value={templateId}
+            onChange={onTemplateChange}
+            disabled={!!disabled}
+            size="lg"
+            label={t("templateLabel")}
+            className="w-full desktop:w-auto desktop:max-w-70"
+          />
+          <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-5">
+            <div className="hidden min-w-0 items-center gap-3 desktop:flex">
+              {deviceSelector}
+              <div className="h-6 w-px shrink-0 bg-border" />
+            </div>
+            <div className="flex items-center justify-between gap-3 desktop:justify-start">
+              <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
+                <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
+                {t("pausedStatus")} {formatDuration(duration)}
+              </span>
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={handleResume}
+                className="shrink-0"
+              >
+                {t("resume")}
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
+        {navGuardDialog}
+      </>
     );
   },
 );

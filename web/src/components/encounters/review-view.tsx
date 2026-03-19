@@ -72,6 +72,8 @@ interface ReviewViewProps {
   onAddSection: (sectionId: string) => void;
   focusSectionId: string | null;
   onAutoFocused: () => void;
+  // Retry
+  onRetry?: () => void;
   // i18n
   t: (key: string) => string;
   tTemplates: (key: string) => string;
@@ -101,6 +103,7 @@ export function ReviewView({
   onAddSection,
   focusSectionId,
   onAutoFocused,
+  onRetry,
   t,
   tTemplates,
 }: ReviewViewProps) {
@@ -508,11 +511,19 @@ export function ReviewView({
         {/* Error alert */}
         {error && (
           <ErrorAlert
-            message={
+            message={t(
               error === "insufficient_context"
-                ? t("insufficientContext")
-                : error
-            }
+                ? "insufficientContext"
+                : error === "generation_interrupted"
+                  ? "generationInterrupted"
+                  : error === "network_error"
+                    ? "networkError"
+                    : error === "save_failed"
+                      ? "saveFailed"
+                      : "generationFailed",
+            )}
+            onRetry={error !== "insufficient_context" ? onRetry : undefined}
+            retryLabel={t("detail.retry")}
           />
         )}
 
@@ -628,11 +639,19 @@ export function ReviewView({
         {/* Error alert */}
         {error && (
           <ErrorAlert
-            message={
+            message={t(
               error === "insufficient_context"
-                ? t("insufficientContext")
-                : error
-            }
+                ? "insufficientContext"
+                : error === "generation_interrupted"
+                  ? "generationInterrupted"
+                  : error === "network_error"
+                    ? "networkError"
+                    : error === "save_failed"
+                      ? "saveFailed"
+                      : "generationFailed",
+            )}
+            onRetry={error !== "insufficient_context" ? onRetry : undefined}
+            retryLabel={t("detail.retry")}
           />
         )}
 

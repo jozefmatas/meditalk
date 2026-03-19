@@ -121,6 +121,12 @@
       "pausedStatus": "Pozastaveno",
       "templateLabel": "Šablona",
       "defaultMicrophone": "Výchozí mikrofon",
+      "recordingTip": "Pro nejlepší výsledky nechte zapnutou obrazovku a aplikaci v popředí po celou dobu nahrávání.",
+      "keepScreenOn": "Nechte zapnutou obrazovku",
+      "leaveWhileRecordingTitle": "Probíhá nahrávání",
+      "leaveWhileRecordingDescription": "Pokud odejdete, vaše aktuální nahrávání se uloží, ale mikrofon se zastaví. Po návratu můžete začít nové nahrávání.",
+      "leaveWhileRecordingStay": "Zůstat na stránce",
+      "leaveWhileRecordingLeave": "Opustit stránku",
       "micError": "Nepodařilo se získat přístup k mikrofonu. Zkontrolujte oprávnění a zkuste to znovu.",
       "generatingEncounter": "Generuji záznam",
       "regenerating": "Regeneruji zprávu...",
@@ -145,9 +151,14 @@
       "icdNoSuggestions": "Vygenerujte zprávu pro návrhy",
       "icdAllSelected": "Všechny navrhované kódy vybrány",
       "icdSavedEmpty": "Zatím žádné uložené kódy",
-      "transcribing": "Přepisuje se..."
+      "transcribing": "Přepisuje se...",
+      "retry": "Opakovat"
     },
     "insufficientContext": "Nedostatek klinických informací pro vygenerování záznamu. Nahrajte konzultaci, přidejte poznámky s klinickými detaily nebo nahrajte relevantní soubory.",
+    "generationInterrupted": "Generování bylo přerušeno. Vaše nahrávka a soubory jsou v bezpečí — stiskněte Opakovat pro pokračování.",
+    "generationFailed": "Při generování se vyskytla chyba. Vaše data jsou v bezpečí — zkuste to znovu.",
+    "networkError": "Spojení bylo přerušeno během generování. Vaše nahrávka a soubory jsou v bezpečí — zkuste to znovu.",
+    "saveFailed": "Záznam byl vygenerován, ale nepodařilo se ho uložit. Zkuste to znovu.",
     "delete": {
       "title": "Smazat návštěvu",
       "message": "Opravdu chcete smazat tuto návštěvu? Tuto akci nelze vrátit zpět.",
@@ -283,6 +294,14 @@
       "name": "Základní SOAP poznámka",
       "description": "Standardní 4-sekciový SOAP formát"
     },
+    "focused-cardiology-exam": {
+      "name": "Cílené kardiologické vyšetření",
+      "description": "Kardiologická šablona s anamnézami, objektivním vyšetřením a EKG"
+    },
+    "comprehensive-cardiology-exam": {
+      "name": "Komplexní kardiologické vyšetření",
+      "description": "Podrobná kardiologická šablona s kompletní anamnézou a objektivním vyšetřením"
+    },
     "sections": {
       "reason_for_contact": "Důvod kontaktu",
       "past_history": "Osobní anamnéza",
@@ -341,7 +360,22 @@
       "action_and_plan": "Postup a plán",
       "subjective": "Subjektivně",
       "objective": "Objektivně",
-      "plan": "Plán"
+      "plan": "Plán",
+      "anamnesis": "Anamnézy",
+      "epidemiological_history": "Epidemiologická anamnéza",
+      "work_history": "Pracovní anamnéza",
+      "substance_use": "Abúzus",
+      "objective_examination": "Objektivní vyšetření",
+      "general_examination": "Celkové vyšetření",
+      "ra": "RA",
+      "oa": "OA",
+      "sa": "SA",
+      "ea": "EA",
+      "pa": "PA",
+      "aa": "AA",
+      "la": "LA",
+      "ab": "Ab",
+      "to_present_illness": "TO"
     }
   },
   "poc": {

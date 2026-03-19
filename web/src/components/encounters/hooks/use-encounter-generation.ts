@@ -3,13 +3,28 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
-import type { RecordingBarRef } from "@/components/encounters/recording-bar";
+import {
+  type RecordingBarRef,
+  audioMimeToExt,
+} from "@/components/encounters/recording-bar";
 import type { NoteSection } from "@/lib/parse-note-sections";
 import { getDefaultTemplate } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
 
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
+
+const CLIENT_MAX_RETRIES = 2;
+const CLIENT_RETRY_DELAY = 3000;
+
+/** Classify whether an error is transient (worth retrying) or permanent. */
+function isTransientError(err: unknown, status?: number): boolean {
+  if (err instanceof TypeError) return true; // Network failure
+  if (status && [408, 429, 502, 503, 504].includes(status)) return true;
+  if (err instanceof Error && /network|aborted|failed to fetch/i.test(err.message))
+    return true;
+  return false;
+}
 
 interface UseEncounterGenerationOptions {
   visitId: string;
@@ -140,10 +155,26 @@ export function useEncounterGeneration({
 
       // Upload directly to Supabase Storage (bypasses Vercel 4.5 MB limit)
       try {
-        const fileName = "recording.webm";
-        const contentType = blob.type || "audio/webm";
+        // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+        let uploadBlob = blob;
+        let fileName = `recording${audioMimeToExt(blob.type || "audio/webm")}`;
+        let contentType = blob.type || "audio/webm";
 
-        const { path, fileId } = await uploadToStorage(blob, fileName, {
+        if (contentType.includes("webm") || contentType.includes("ogg")) {
+          try {
+            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+            uploadBlob = await convertToWav(blob);
+            fileName = "recording.wav";
+            contentType = "audio/wav";
+          } catch (convErr) {
+            console.warn(
+              "[recording] WAV conversion failed, uploading original:",
+              convErr,
+            );
+          }
+        }
+
+        const { path, fileId } = await uploadToStorage(uploadBlob, fileName, {
           encounterId: visitId,
         });
 
@@ -158,7 +189,7 @@ export function useEncounterGeneration({
               {
                 id: fileId,
                 name: fileName,
-                size: blob.size,
+                size: uploadBlob.size,
                 type: contentType,
                 path,
                 source: "recording",
@@ -244,11 +275,27 @@ export function useEncounterGeneration({
           !capturedAudioStoragePath &&
           !streamingTranscript
         ) {
-          const result = await uploadToStorage(
-            blobToProcess,
-            "recording.webm",
-            { encounterId: visitId },
-          );
+          // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+          let uploadBlob = blobToProcess;
+          const blobMime = blobToProcess.type || "audio/webm";
+          let fileName = `recording${audioMimeToExt(blobMime)}`;
+          let uploadType = blobMime;
+
+          if (blobMime.includes("webm") || blobMime.includes("ogg")) {
+            try {
+              const { convertToWav } =
+                await import("@/lib/audio/convert-to-wav");
+              uploadBlob = await convertToWav(blobToProcess);
+              fileName = "recording.wav";
+              uploadType = "audio/wav";
+            } catch {
+              // Fall back to original
+            }
+          }
+
+          const result = await uploadToStorage(uploadBlob, fileName, {
+            encounterId: visitId,
+          });
           await fetch(`/api/encounters/${visitId}/files`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -256,9 +303,9 @@ export function useEncounterGeneration({
               files: [
                 {
                   id: crypto.randomUUID(),
-                  name: "recording.webm",
-                  size: blobToProcess.size,
-                  type: "audio/webm",
+                  name: fileName,
+                  size: uploadBlob.size,
+                  type: uploadType,
                   path: result.path,
                   source: "recording",
                 },
@@ -270,99 +317,139 @@ export function useEncounterGeneration({
         setAudioBlob(null);
         setAudioStoragePath(null);
 
-        // Generate note via SSE streaming
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            visitId,
-            templateId: capturedTemplateId,
-            doctorNotes: capturedDoctorNotes || undefined,
-            transcriptText: streamingTranscript || undefined,
-          }),
-        });
-
-        if (!res.ok) {
-          let message = "Generation failed";
-          try {
-            const data = await res.json();
-            message = data.error || message;
-          } catch {
-            /* non-JSON response */
-          }
-          throw new Error(message);
-        }
-
-        // Read SSE stream
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response stream");
-
-        const decoder = new TextDecoder();
-        let buffer = "";
+        // Generate note via SSE streaming (with client-side retry for transient errors)
         let completedEvent: Record<string, unknown> | null = null;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            console.warn(
+              `[generate] Client retry ${attempt}/${CLIENT_MAX_RETRIES}`,
+            );
+            await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY));
+            setIsStreaming(false);
+            setStreamedSections([]);
+            setStreamingSectionIds([]);
+            setStreamingSectionLabels({});
+          }
 
-          buffer += decoder.decode(value, { stream: true });
+          try {
+            const res = await fetch("/api/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                visitId,
+                templateId: capturedTemplateId,
+                doctorNotes: capturedDoctorNotes || undefined,
+                transcriptText: streamingTranscript || undefined,
+              }),
+            });
 
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6);
-            if (!jsonStr) continue;
-
-            try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === "streaming_start") {
-                // Switch from full-screen overlay to streaming sections view
-                setIsStreaming(true);
-                setStreamingSectionIds(event.sectionIds);
-                setStreamingSectionLabels(event.sectionLabels);
-              } else if (event.type === "section") {
-                setStreamedSections((prev) => [
-                  ...prev,
-                  { id: event.id, title: event.title, content: event.content },
-                ]);
-              } else if (event.type === "complete") {
-                completedEvent = event;
-                setGeneratedNoteHtml(event.generatedNote);
-                setVisit((prev) => {
-                  if (!prev) return prev;
-                  const existingMeta = (prev.metadata ?? {}) as Record<
-                    string,
-                    unknown
-                  >;
-                  return {
-                    ...prev,
-                    soap_note: event.generatedNote,
-                    patient_letter: event.letter,
-                    ...(streamingTranscript
-                      ? { raw_text: streamingTranscript }
-                      : {}),
-                    metadata: {
-                      ...existingMeta,
-                      ...(event.clinicalAnalysis
-                        ? { clinical_analysis: event.clinicalAnalysis }
-                        : {}),
-                    },
-                  };
-                });
-              } else if (event.type === "error") {
-                throw new Error(event.error);
+            if (!res.ok) {
+              let message = "generation_failed";
+              try {
+                const data = await res.json();
+                message = data.error || message;
+              } catch {
+                /* non-JSON response */
               }
-            } catch (parseErr) {
+              const err = new Error(message);
               if (
-                parseErr instanceof Error &&
-                parseErr.message !== "Unexpected end of JSON input"
-              ) {
-                throw parseErr;
+                isTransientError(null, res.status) &&
+                attempt < CLIENT_MAX_RETRIES
+              )
+                continue;
+              throw err;
+            }
+
+            // Read SSE stream
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("generation_failed");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+
+              const lines = buffer.split("\n");
+              buffer = lines.pop() ?? "";
+
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                const jsonStr = line.slice(6);
+                if (!jsonStr) continue;
+
+                try {
+                  const event = JSON.parse(jsonStr);
+
+                  if (event.type === "streaming_start") {
+                    setIsStreaming(true);
+                    setStreamedSections([]);
+                    setStreamingSectionIds(event.sectionIds);
+                    setStreamingSectionLabels(event.sectionLabels);
+                  } else if (event.type === "section") {
+                    setStreamedSections((prev) => [
+                      ...prev,
+                      {
+                        id: event.id,
+                        title: event.title,
+                        content: event.content,
+                      },
+                    ]);
+                  } else if (event.type === "complete") {
+                    completedEvent = event;
+                    templateCacheRef.current.set(capturedTemplateId, {
+                      generatedNote: event.generatedNote,
+                      letter: event.letter || "",
+                    });
+                    setGeneratedNoteHtml(event.generatedNote);
+                    setVisit((prev) => {
+                      if (!prev) return prev;
+                      const existingMeta = (prev.metadata ?? {}) as Record<
+                        string,
+                        unknown
+                      >;
+                      return {
+                        ...prev,
+                        soap_note: event.generatedNote,
+                        patient_letter: event.letter,
+                        ...(streamingTranscript
+                          ? { raw_text: streamingTranscript }
+                          : {}),
+                        metadata: {
+                          ...existingMeta,
+                          ...(event.clinicalAnalysis
+                            ? { clinical_analysis: event.clinicalAnalysis }
+                            : {}),
+                        },
+                      };
+                    });
+                  } else if (event.type === "error") {
+                    throw new Error(event.error);
+                  }
+                } catch (parseErr) {
+                  if (
+                    parseErr instanceof Error &&
+                    parseErr.message !== "Unexpected end of JSON input"
+                  ) {
+                    throw parseErr;
+                  }
+                }
               }
             }
+
+            break; // Stream completed successfully
+          } catch (err) {
+            if (
+              isTransientError(err) &&
+              attempt < CLIENT_MAX_RETRIES
+            ) {
+              continue;
+            }
+            throw err;
           }
         }
 
@@ -400,7 +487,15 @@ export function useEncounterGeneration({
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Generation failed");
+        // Use structured error keys for i18n translation
+        const msg = err instanceof Error ? err.message : "";
+        const errorKey =
+          msg === "insufficient_context" || msg === "save_failed"
+            ? msg
+            : isTransientError(err)
+              ? "network_error"
+              : "generation_failed";
+        setError(errorKey);
         setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
         window.dispatchEvent(
           new CustomEvent("encounter-update", {
@@ -470,6 +565,8 @@ export function useEncounterGeneration({
       if (!visitId || newTemplateId === selectedTemplateId || isRegenerating)
         return;
 
+      const previousTemplateId = selectedTemplateId;
+
       // Cache current template's note before switching
       if (visit?.soap_note) {
         templateCacheRef.current.set(selectedTemplateId, {
@@ -525,82 +622,149 @@ export function useEncounterGeneration({
       }
 
       try {
-        const res = await fetch("/api/regenerate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            visitId,
-            templateId: newTemplateId,
-            doctorNotes: doctorNotes || undefined,
-          }),
-        });
+        for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
+          if (attempt > 0) {
+            console.warn(
+              `[regenerate] Client retry ${attempt}/${CLIENT_MAX_RETRIES}`,
+            );
+            await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY));
+            setStreamedSections([]);
+          }
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Regeneration failed");
-        }
+          try {
+            const res = await fetch("/api/regenerate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                visitId,
+                templateId: newTemplateId,
+                doctorNotes: doctorNotes || undefined,
+              }),
+            });
 
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No response stream");
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-
-          // Parse SSE events from the buffer
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? ""; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6);
-            if (!jsonStr) continue;
-
-            try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === "section") {
-                setStreamedSections((prev) => [
-                  ...prev,
-                  { id: event.id, title: event.title, content: event.content },
-                ]);
-              } else if (event.type === "complete") {
-                // Cache the newly generated note
-                templateCacheRef.current.set(newTemplateId, {
-                  generatedNote: event.generatedNote,
-                  letter: event.letter || "",
-                });
-                setGeneratedNoteHtml(event.generatedNote);
-                setVisit((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        soap_note: event.generatedNote,
-                        patient_letter: event.letter,
-                      }
-                    : prev,
-                );
-              } else if (event.type === "error") {
-                throw new Error(event.error);
+            if (!res.ok) {
+              let message = "generation_failed";
+              try {
+                const data = await res.json();
+                message = data.error || message;
+              } catch {
+                /* non-JSON */
               }
-            } catch (parseErr) {
-              // If it's a rethrown Error from the event handler, propagate it
+              const err = new Error(message);
               if (
-                parseErr instanceof Error &&
-                parseErr.message !== "Unexpected end of JSON input"
-              ) {
-                throw parseErr;
+                isTransientError(null, res.status) &&
+                attempt < CLIENT_MAX_RETRIES
+              )
+                continue;
+              throw err;
+            }
+
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("generation_failed");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+
+              const lines = buffer.split("\n");
+              buffer = lines.pop() ?? "";
+
+              for (const line of lines) {
+                if (!line.startsWith("data: ")) continue;
+                const jsonStr = line.slice(6);
+                if (!jsonStr) continue;
+
+                try {
+                  const event = JSON.parse(jsonStr);
+
+                  if (event.type === "streaming_start") {
+                    setStreamedSections([]);
+                  } else if (event.type === "section") {
+                    setStreamedSections((prev) => [
+                      ...prev,
+                      {
+                        id: event.id,
+                        title: event.title,
+                        content: event.content,
+                      },
+                    ]);
+                  } else if (event.type === "complete") {
+                    templateCacheRef.current.set(newTemplateId, {
+                      generatedNote: event.generatedNote,
+                      letter: event.letter || "",
+                    });
+                    setGeneratedNoteHtml(event.generatedNote);
+                    setVisit((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            soap_note: event.generatedNote,
+                            patient_letter: event.letter,
+                          }
+                        : prev,
+                    );
+                  } else if (event.type === "error") {
+                    throw new Error(event.error);
+                  }
+                } catch (parseErr) {
+                  if (
+                    parseErr instanceof Error &&
+                    parseErr.message !== "Unexpected end of JSON input"
+                  ) {
+                    throw parseErr;
+                  }
+                }
               }
             }
+
+            break; // Success
+          } catch (err) {
+            if (isTransientError(err) && attempt < CLIENT_MAX_RETRIES) continue;
+            throw err;
           }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Regeneration failed");
+        const msg = err instanceof Error ? err.message : "";
+        const errorKey =
+          msg === "save_failed"
+            ? msg
+            : isTransientError(err)
+              ? "network_error"
+              : "generation_failed";
+        setError(errorKey);
+
+        // Revert template selection so the old note + template stay consistent
+        setSelectedTemplateId(previousTemplateId);
+        const cachedPrev =
+          templateCacheRef.current.get(previousTemplateId);
+        if (cachedPrev) {
+          setGeneratedNoteHtml(cachedPrev.generatedNote);
+          setVisit((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  soap_note: cachedPrev.generatedNote,
+                  patient_letter: cachedPrev.letter,
+                }
+              : prev,
+          );
+        }
+        // Revert template_id in DB
+        if (visit) {
+          const meta = (visit.metadata || {}) as Record<string, unknown>;
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              metadata: { ...meta, template_id: previousTemplateId },
+            }),
+          }).catch(() => {});
+        }
       } finally {
         setIsRegenerating(false);
       }
