@@ -1,13 +1,9 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useSidebarEncounters } from "./use-sidebar-encounters";
+import { useSidebarEncounters, _resetCache } from "./use-sidebar-encounters";
 import type { Encounter, EncounterListResponse } from "@/lib/types";
 
-// Mock next/navigation
-const mockPathname = vi.fn(() => "/");
-vi.mock("next/navigation", () => ({
-  usePathname: () => mockPathname(),
-}));
+// No longer uses usePathname — sidebar fetches on mount only
 
 const makeVisit = (overrides: Partial<Encounter> = {}): Encounter => ({
   id: crypto.randomUUID(),
@@ -47,7 +43,7 @@ describe("useSidebarEncounters", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     global.fetch = vi.fn();
-    mockPathname.mockReturnValue("/");
+    _resetCache();
   });
 
   it("fetches visits on mount", async () => {
@@ -186,6 +182,62 @@ describe("useSidebarEncounters", () => {
     await waitFor(() => {
       expect(result.current.visits[0].status).toBe("started");
     });
+  });
+
+  it("adds new encounter via sidebar-refresh event", async () => {
+    const existing = makeVisit({ title: "Existing" });
+    mockFetchResponse({
+      encounters: [existing],
+      total: 1,
+      page: 1,
+      limit: 20,
+    });
+
+    const { result } = renderHook(() => useSidebarEncounters());
+
+    await waitFor(() => {
+      expect(result.current.visits).toHaveLength(1);
+    });
+
+    const newEncounter = makeVisit({ title: "New encounter" });
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-refresh", {
+          detail: { encounter: newEncounter },
+        }),
+      );
+    });
+
+    expect(result.current.visits).toHaveLength(2);
+    expect(result.current.visits[0].title).toBe("New encounter");
+  });
+
+  it("does not duplicate encounter on sidebar-refresh", async () => {
+    const existing = makeVisit({ title: "Existing" });
+    mockFetchResponse({
+      encounters: [existing],
+      total: 1,
+      page: 1,
+      limit: 20,
+    });
+
+    const { result } = renderHook(() => useSidebarEncounters());
+
+    await waitFor(() => {
+      expect(result.current.visits).toHaveLength(1);
+    });
+
+    // Dispatch sidebar-refresh with same encounter
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("sidebar-refresh", {
+          detail: { encounter: existing },
+        }),
+      );
+    });
+
+    // Should not duplicate
+    expect(result.current.visits).toHaveLength(1);
   });
 
   it("handles fetch failure gracefully", async () => {

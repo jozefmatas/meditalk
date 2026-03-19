@@ -562,6 +562,9 @@ export async function POST(request: NextRequest) {
             .eq("id", visitId);
           if (saveError) {
             console.error("Failed to save generated content:", saveError);
+            sendEvent({ type: "error", error: "save_failed" });
+            controller.close();
+            return;
           }
 
           // Log usage

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, memo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -59,7 +59,7 @@ const ONGOING_STATUSES = new Set([
   "to_review",
 ]);
 
-function EncounterItem({
+const EncounterItem = memo(function EncounterItem({
   visit,
   isActive,
   href,
@@ -149,7 +149,7 @@ function EncounterItem({
       </DropdownMenu>
     </SidebarMenuItem>
   );
-}
+});
 
 export function NavEncounters() {
   const t = useTranslations("encounters");
@@ -163,7 +163,7 @@ export function NavEncounters() {
 
   // Delete confirmation dialog
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const requestDelete = (id: string) => setDeleteTarget(id);
+  const requestDelete = useCallback((id: string) => setDeleteTarget(id), []);
   const confirmDelete = () => {
     if (deleteTarget) deleteVisit(deleteTarget);
     setDeleteTarget(null);

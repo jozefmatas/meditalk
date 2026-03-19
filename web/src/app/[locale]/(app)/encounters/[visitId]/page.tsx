@@ -178,6 +178,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
     setVisit: data.setVisit,
   });
 
+  // --- Retry handler ---
+  const handleRetry = useCallback(() => {
+    data.setError(null);
+    generation.handleGenerate();
+  }, [data, generation]);
+
   // --- Derived state ---
   const canGenerate = !!(
     data.visit?.raw_text ||
@@ -326,6 +332,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               onAddSection={sections.handleAddSection}
               focusSectionId={sections.focusSectionId}
               onAutoFocused={sections.handleAutoFocused}
+              onRetry={handleRetry}
               t={t}
               tTemplates={tTemplates}
             />
@@ -362,6 +369,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 visitId={visitId}
                 files={data.files}
                 onFilesChange={data.setFiles}
+                onRetry={handleRetry}
                 t={t}
                 tTemplates={tTemplates}
               />
@@ -388,6 +396,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onAddSection={sections.handleAddSection}
                 focusSectionId={sections.focusSectionId}
                 onAutoFocused={sections.handleAutoFocused}
+                onRetry={handleRetry}
                 t={t}
                 tTemplates={tTemplates}
               />

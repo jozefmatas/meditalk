@@ -50,6 +50,8 @@ interface DraftViewProps {
   visitId: string;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
+  // Retry
+  onRetry?: () => void;
   // i18n
   t: (key: string) => string;
   tTemplates: (key: string) => string;
@@ -74,6 +76,7 @@ export function DraftView({
   visitId,
   files,
   onFilesChange,
+  onRetry,
   t,
   tTemplates,
 }: DraftViewProps) {
@@ -269,9 +272,19 @@ export function DraftView({
       {/* Error alert */}
       {error && (
         <ErrorAlert
-          message={
-            error === "insufficient_context" ? t("insufficientContext") : error
-          }
+          message={t(
+            error === "insufficient_context"
+              ? "insufficientContext"
+              : error === "generation_interrupted"
+                ? "generationInterrupted"
+                : error === "network_error"
+                  ? "networkError"
+                  : error === "save_failed"
+                    ? "saveFailed"
+                    : "generationFailed",
+          )}
+          onRetry={error !== "insufficient_context" ? onRetry : undefined}
+          retryLabel={t("detail.retry")}
         />
       )}
 

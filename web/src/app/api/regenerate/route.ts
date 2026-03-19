@@ -424,6 +424,9 @@ Rules:
             .eq("id", visitId);
           if (saveError) {
             console.error("Failed to save regenerated content:", saveError);
+            sendEvent({ type: "error", error: "save_failed" });
+            controller.close();
+            return;
           }
 
           // Log usage

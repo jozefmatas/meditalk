@@ -151,9 +151,14 @@
       "icdNoSuggestions": "Vygenerujte správu pre návrhy",
       "icdAllSelected": "Všetky navrhované kódy vybrané",
       "icdSavedEmpty": "Zatiaľ žiadne uložené kódy",
-      "transcribing": "Prepisuje sa..."
+      "transcribing": "Prepisuje sa...",
+      "retry": "Opakovať"
     },
     "insufficientContext": "Nedostatok klinických informácií na vygenerovanie záznamu. Nahrajte konzultáciu, pridajte poznámky s klinickými detailmi alebo nahrajte relevantné súbory.",
+    "generationInterrupted": "Generovanie bolo prerušené. Vaša nahrávka a súbory sú v bezpečí — stlačte Opakovať pre pokračovanie.",
+    "generationFailed": "Pri generovaní sa vyskytla chyba. Vaše dáta sú v bezpečí — skúste to znova.",
+    "networkError": "Spojenie bolo prerušené počas generovania. Vaša nahrávka a súbory sú v bezpečí — skúste to znova.",
+    "saveFailed": "Záznam bol vygenerovaný, ale nepodarilo sa ho uložiť. Skúste to znova.",
     "delete": {
       "title": "Vymazať návštevu",
       "message": "Naozaj chcete vymazať túto návštevu? Táto akcia sa nedá vrátiť späť.",

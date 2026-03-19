@@ -57,14 +57,18 @@ export function useEncounterData({
         if (!res.ok) throw new Error("Visit not found");
 
         const data: Encounter = await res.json();
-        // Recording state isn't persisted across page loads — reset to started
-        if (data.status === "recording") {
+        // Recording/processing states aren't persisted across page loads — reset to started
+        if (data.status === "recording" || data.status === "processing") {
+          const wasProcessing = data.status === "processing";
           data.status = "started";
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "started" }),
           }).catch(() => {});
+          if (wasProcessing) {
+            setError("generation_interrupted");
+          }
         }
         setVisit(data);
 

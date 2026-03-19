@@ -151,9 +151,14 @@
       "icdNoSuggestions": "Generate a note to get suggestions",
       "icdAllSelected": "All suggested codes selected",
       "icdSavedEmpty": "No saved codes yet",
-      "transcribing": "Transcribing..."
+      "transcribing": "Transcribing...",
+      "retry": "Retry"
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",
+    "generationInterrupted": "Generation was interrupted. Your recording and files are safe — tap Retry to continue.",
+    "generationFailed": "Something went wrong during generation. Your data is safe — please try again.",
+    "networkError": "Connection lost during generation. Your recording and files are safe — please try again.",
+    "saveFailed": "The note was generated but could not be saved. Please try again.",
     "delete": {
       "title": "Delete Encounter",
       "message": "Are you sure you want to delete this encounter? This action cannot be undone.",

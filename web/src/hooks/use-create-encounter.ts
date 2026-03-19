@@ -28,6 +28,10 @@ export function useCreateEncounter() {
       if (!res.ok) throw new Error("Failed to create encounter");
 
       const encounter = await res.json();
+      // Notify sidebar to add the new encounter immediately
+      window.dispatchEvent(
+        new CustomEvent("sidebar-refresh", { detail: { encounter } }),
+      );
       router.push(getHref(`/encounters/${encounter.id}`));
     } catch {
       // Let the caller handle errors if needed, but don't block UI
