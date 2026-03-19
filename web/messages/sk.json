@@ -243,6 +243,14 @@
       "name": "Základná SOAP poznámka",
       "description": "Štandardný 4-sekciový SOAP formát"
     },
+    "focused-cardiology-exam": {
+      "name": "Cielené kardiologické vyšetrenie",
+      "description": "Kardiologická šablóna s anamnézami, objektívnym vyšetrením a EKG"
+    },
+    "comprehensive-cardiology-exam": {
+      "name": "Komplexné kardiologické vyšetrenie",
+      "description": "Podrobná kardiologická šablóna s kompletnou anamnézou a objektívnym vyšetrením"
+    },
     "sections": {
       "reason_for_contact": "Dôvod kontaktu",
       "past_history": "Osobná anamnéza",
@@ -301,7 +309,22 @@
       "action_and_plan": "Postup a plán",
       "subjective": "Subjektívne",
       "objective": "Objektívne",
-      "plan": "Plán"
+      "plan": "Plán",
+      "anamnesis": "Anamnézy",
+      "epidemiological_history": "Epidemiologická anamnéza",
+      "work_history": "Pracovná anamnéza",
+      "substance_use": "Abúzus",
+      "objective_examination": "Objektívne vyšetrenie",
+      "general_examination": "Celkové vyšetrenie",
+      "ra": "RA",
+      "oa": "OA",
+      "sa": "SA",
+      "ea": "EA",
+      "pa": "PA",
+      "aa": "AA",
+      "la": "LA",
+      "ab": "Ab",
+      "to_present_illness": "TO"
     }
   },
   "poc": {

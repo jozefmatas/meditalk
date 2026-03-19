@@ -1,0 +1,52 @@
+import type { Template } from "./types";
+
+export const comprehensiveCardiologyExam: Template = {
+  id: "comprehensive-cardiology-exam",
+  nameKey: "comprehensive-cardiology-exam.name",
+  descriptionKey: "comprehensive-cardiology-exam.description",
+  sections: [
+    {
+      id: "anamnesis",
+      labelKey: "anamnesis",
+      subsections: [
+        { id: "family_history", labelKey: "family_history" },
+        { id: "past_history", labelKey: "past_history" },
+        { id: "social_history", labelKey: "social_history" },
+        { id: "epidemiological_history", labelKey: "epidemiological_history" },
+        { id: "work_history", labelKey: "work_history" },
+        { id: "allergies", labelKey: "allergies" },
+        { id: "current_medications", labelKey: "current_medications" },
+        { id: "tobacco", labelKey: "tobacco" },
+        { id: "alcohol", labelKey: "alcohol" },
+        { id: "reason_for_contact", labelKey: "reason_for_contact" },
+        { id: "history_present_illness", labelKey: "history_present_illness" },
+      ],
+    },
+    {
+      id: "objective_examination",
+      labelKey: "objective_examination",
+      subsections: [
+        { id: "general_condition", labelKey: "general_condition" },
+        { id: "body_temp", labelKey: "body_temp" },
+        { id: "skin", labelKey: "skin" },
+        { id: "eyes", labelKey: "eyes" },
+        { id: "heart", labelKey: "heart" },
+        { id: "pulse", labelKey: "pulse" },
+        { id: "blood_pressure", labelKey: "blood_pressure" },
+        { id: "peripheral_pulses", labelKey: "peripheral_pulses" },
+        { id: "ecg", labelKey: "ecg" },
+        { id: "lungs", labelKey: "lungs" },
+        { id: "respiratory_rate", labelKey: "respiratory_rate" },
+        { id: "spo2", labelKey: "spo2" },
+        { id: "gynaecology", labelKey: "gynaecology" },
+        { id: "neurological", labelKey: "neurological" },
+        { id: "mental_state_exam", labelKey: "mental_state_exam" },
+        { id: "lab", labelKey: "lab" },
+        { id: "radiology", labelKey: "radiology" },
+        { id: "other_exam_findings", labelKey: "other_exam_findings" },
+      ],
+    },
+    { id: "assessment", labelKey: "assessment" },
+    { id: "action_and_plan", labelKey: "action_and_plan" },
+  ],
+};

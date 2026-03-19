@@ -243,6 +243,14 @@
       "name": "Basic SOAP Note",
       "description": "Standard 4-section SOAP format"
     },
+    "focused-cardiology-exam": {
+      "name": "Focused Cardiology Examination",
+      "description": "Cardiology template with history, objective examination and ECG"
+    },
+    "comprehensive-cardiology-exam": {
+      "name": "Comprehensive Cardiology Examination",
+      "description": "Detailed cardiology template with full history and objective examination"
+    },
     "sections": {
       "reason_for_contact": "Reason for contact",
       "past_history": "Past history",
@@ -301,7 +309,22 @@
       "action_and_plan": "Action and plan",
       "subjective": "Subjective",
       "objective": "Objective",
-      "plan": "Plan"
+      "plan": "Plan",
+      "anamnesis": "History",
+      "epidemiological_history": "Epidemiological history",
+      "work_history": "Work history",
+      "substance_use": "Substance use",
+      "objective_examination": "Objective examination",
+      "general_examination": "General examination",
+      "ra": "RA",
+      "oa": "OA",
+      "sa": "SA",
+      "ea": "EA",
+      "pa": "PA",
+      "aa": "AA",
+      "la": "LA",
+      "ab": "Ab",
+      "to_present_illness": "TO"
     }
   },
   "poc": {

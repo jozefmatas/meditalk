@@ -1,8 +1,15 @@
 import { comprehensiveMedicalExam } from "./comprehensive-medical-exam";
 import { basicSoap } from "./basic-soap";
+import { focusedCardiologyExam } from "./focused-cardiology-exam";
+import { comprehensiveCardiologyExam } from "./comprehensive-cardiology-exam";
 import type { Template } from "./types";
 
-export const TEMPLATES: Template[] = [comprehensiveMedicalExam, basicSoap];
+export const TEMPLATES: Template[] = [
+  comprehensiveMedicalExam,
+  basicSoap,
+  focusedCardiologyExam,
+  comprehensiveCardiologyExam,
+];
 
 export function getTemplateById(id: string): Template | undefined {
   return TEMPLATES.find((t) => t.id === id);
