@@ -126,7 +126,8 @@
       "Bash(vercel ls:*)",
       "Bash(npm test:*)",
       "WebFetch(domain:deepwiki.com)",
-      "Bash(npm audit:*)"
+      "Bash(npm audit:*)",
+      "Bash(git log:*)"
     ],
     "deny": [],
     "ask": []
