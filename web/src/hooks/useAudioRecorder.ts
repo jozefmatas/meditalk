@@ -3,12 +3,13 @@
 import { useState, useRef, useCallback } from "react";
 
 function getSupportedMimeType(): string {
+  // Prefer MP4/AAC — better compatibility with ElevenLabs than WebM from Android Chrome
   const types = [
+    "audio/mp4",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
     "audio/ogg",
-    "audio/mp4",
   ];
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;

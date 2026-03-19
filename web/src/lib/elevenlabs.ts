@@ -19,12 +19,22 @@ export async function transcribeAudio(
   filename: string,
   ctx?: UsageContext,
 ): Promise<string> {
-  // Create a File with proper name so ElevenLabs can detect the audio format
+  // Create a File with proper MIME type so ElevenLabs can detect the format
+  const mimeMap: Record<string, string> = {
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+  };
+  const ext = filename.slice(filename.lastIndexOf(".")).toLowerCase();
   const audioFile =
     file instanceof File
       ? file
       : new File([new Uint8Array(file)], filename, {
-          type: filename.endsWith(".webm") ? "audio/webm" : "audio/mpeg",
+          type: mimeMap[ext] || "audio/mpeg",
         });
 
   const result = await elevenlabs().speechToText.convert({

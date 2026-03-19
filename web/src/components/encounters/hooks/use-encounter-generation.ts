@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
-import type { RecordingBarRef } from "@/components/encounters/recording-bar";
+import {
+  type RecordingBarRef,
+  audioMimeToExt,
+} from "@/components/encounters/recording-bar";
 import type { NoteSection } from "@/lib/parse-note-sections";
 import { getDefaultTemplate } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
@@ -140,10 +143,26 @@ export function useEncounterGeneration({
 
       // Upload directly to Supabase Storage (bypasses Vercel 4.5 MB limit)
       try {
-        const fileName = "recording.webm";
-        const contentType = blob.type || "audio/webm";
+        // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+        let uploadBlob = blob;
+        let fileName = `recording${audioMimeToExt(blob.type || "audio/webm")}`;
+        let contentType = blob.type || "audio/webm";
 
-        const { path, fileId } = await uploadToStorage(blob, fileName, {
+        if (contentType.includes("webm") || contentType.includes("ogg")) {
+          try {
+            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+            uploadBlob = await convertToWav(blob);
+            fileName = "recording.wav";
+            contentType = "audio/wav";
+          } catch (convErr) {
+            console.warn(
+              "[recording] WAV conversion failed, uploading original:",
+              convErr,
+            );
+          }
+        }
+
+        const { path, fileId } = await uploadToStorage(uploadBlob, fileName, {
           encounterId: visitId,
         });
 
@@ -158,7 +177,7 @@ export function useEncounterGeneration({
               {
                 id: fileId,
                 name: fileName,
-                size: blob.size,
+                size: uploadBlob.size,
                 type: contentType,
                 path,
                 source: "recording",
@@ -244,11 +263,27 @@ export function useEncounterGeneration({
           !capturedAudioStoragePath &&
           !streamingTranscript
         ) {
-          const result = await uploadToStorage(
-            blobToProcess,
-            "recording.webm",
-            { encounterId: visitId },
-          );
+          // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+          let uploadBlob = blobToProcess;
+          const blobMime = blobToProcess.type || "audio/webm";
+          let fileName = `recording${audioMimeToExt(blobMime)}`;
+          let uploadType = blobMime;
+
+          if (blobMime.includes("webm") || blobMime.includes("ogg")) {
+            try {
+              const { convertToWav } =
+                await import("@/lib/audio/convert-to-wav");
+              uploadBlob = await convertToWav(blobToProcess);
+              fileName = "recording.wav";
+              uploadType = "audio/wav";
+            } catch {
+              // Fall back to original
+            }
+          }
+
+          const result = await uploadToStorage(uploadBlob, fileName, {
+            encounterId: visitId,
+          });
           await fetch(`/api/encounters/${visitId}/files`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -256,9 +291,9 @@ export function useEncounterGeneration({
               files: [
                 {
                   id: crypto.randomUUID(),
-                  name: "recording.webm",
-                  size: blobToProcess.size,
-                  type: "audio/webm",
+                  name: fileName,
+                  size: uploadBlob.size,
+                  type: uploadType,
                   path: result.path,
                   source: "recording",
                 },
