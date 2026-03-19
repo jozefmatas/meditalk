@@ -363,10 +363,11 @@ Rules:
             sectionLabels,
           );
 
-          // Save to DB (with clinical analysis metadata)
+          // Save to DB (must complete before sending complete event,
+          // so the email API can read the latest soap_note)
           const existingMetadata =
             (visit.metadata as Record<string, unknown>) || {};
-          supabase
+          const { error: saveError } = await supabase
             .from("visits")
             .update({
               soap_note: generatedNote,
@@ -388,11 +389,10 @@ Rules:
                   : {}),
               },
             })
-            .eq("id", visitId)
-            .then(({ error }) => {
-              if (error)
-                console.error("Failed to save regenerated content:", error);
-            });
+            .eq("id", visitId);
+          if (saveError) {
+            console.error("Failed to save regenerated content:", saveError);
+          }
 
           // Log usage
           logUsage({
