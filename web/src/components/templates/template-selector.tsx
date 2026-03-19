@@ -30,7 +30,7 @@ export function TemplateSelector({
     () =>
       TEMPLATES.map((template) => ({
         value: template.id,
-        label: t(template.nameKey),
+        label: template.name || t(template.nameKey ?? template.id),
       })),
     [t],
   );

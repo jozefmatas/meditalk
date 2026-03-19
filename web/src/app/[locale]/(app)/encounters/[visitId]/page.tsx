@@ -33,6 +33,7 @@ import { useEncounterData } from "@/components/encounters/hooks/use-encounter-da
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
 import { useEncounterGeneration } from "@/components/encounters/hooks/use-encounter-generation";
 import { useSectionEditing } from "@/components/encounters/hooks/use-section-editing";
+import { useDiffTracking } from "@/components/encounters/hooks/use-diff-tracking";
 
 interface PageProps {
   params: Promise<{ visitId: string }>;
@@ -176,6 +177,16 @@ export default function EncounterDetailPage({ params }: PageProps) {
     generatedNoteHtml: generation.generatedNoteHtml,
     setGeneratedNoteHtml: generation.setGeneratedNoteHtml,
     setVisit: data.setVisit,
+  });
+
+  // --- Diff tracking ---
+  const meta = (data.visit?.metadata ?? {}) as Record<string, unknown>;
+  useDiffTracking({
+    visitId,
+    templateId: (meta.template_id as string) ?? undefined,
+    currentNoteHtml: generation.generatedNoteHtml,
+    originalNoteHtml: (meta.original_generated_note as string) ?? undefined,
+    enabled: !!generation.generatedNoteHtml && !!meta.original_generated_note,
   });
 
   // --- Derived state ---

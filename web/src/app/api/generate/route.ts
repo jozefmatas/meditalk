@@ -8,10 +8,17 @@ import {
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import {
+  getStaticTemplateById,
+  getDefaultTemplate,
+  buildSectionLabelsMap,
+} from "@/lib/templates";
+import { dbRowToTemplate } from "@/lib/templates/types";
+import type { DbTemplateRow } from "@/lib/templates/types";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
+import { buildInsightsEnrichedPrompt } from "@/lib/clinical/insights";
 import { logUsage } from "@/lib/usage";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
@@ -197,20 +204,41 @@ export async function POST(request: NextRequest) {
         .eq("id", visitId);
     }
 
-    // Look up the template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Look up the template — try DB first, fall back to static
+    let template;
+    if (templateId) {
+      const { data: dbRow } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("id", templateId)
+        .single();
 
-    // Load section labels from locale messages
+      if (dbRow) {
+        template = dbRowToTemplate(dbRow as DbTemplateRow);
+      } else {
+        template = getStaticTemplateById(templateId) || getDefaultTemplate();
+      }
+    } else {
+      template = getDefaultTemplate();
+    }
+
+    // Fetch template insights for this user + template
+    const { data: insightsRow } = await supabase
+      .from("template_insights")
+      .select("style_guide, preference_summary")
+      .eq("user_id", userId)
+      .eq("template_id", template.id)
+      .single();
+
+    const templateInsights = insightsRow || null;
+
+    // Load section labels — custom templates have labels inline, system use i18n
     const messages = (await import(`../../../../messages/${language}.json`))
       .default;
-    const templateSections: Record<string, string> =
+    const i18nSections: Record<string, string> =
       messages.templates?.sections || {};
+    const sectionLabels = buildSectionLabelsMap(template, i18nSections);
     const allIds = flattenSectionIds(template);
-    const sectionLabels: Record<string, string> = {};
-    for (const id of allIds) {
-      sectionLabels[id] = templateSections[id] || id;
-    }
 
     // Semantic search on legacy transcript chunks + clinical analysis — run in parallel
     let chunkContents: string[] = [];
@@ -332,6 +360,9 @@ export async function POST(request: NextRequest) {
     if (clinicalAnalysis) {
       systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
     }
+
+    // Layer 3: Template insights (doctor's style + preferences)
+    systemPrompt = buildInsightsEnrichedPrompt(systemPrompt, templateInsights);
 
     const userMessage = buildTemplateUserMessage(
       chunkContents,
@@ -512,6 +543,7 @@ export async function POST(request: NextRequest) {
               metadata: {
                 ...existingMetadata,
                 template_id: template.id,
+                original_generated_note: generatedNote,
                 ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
                 ...(clinicalAnalysis
                   ? {

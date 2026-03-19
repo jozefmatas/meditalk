@@ -6,7 +6,13 @@ import {
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import {
+  getStaticTemplateById,
+  getDefaultTemplate,
+  buildSectionLabelsMap,
+} from "@/lib/templates";
+import { dbRowToTemplate } from "@/lib/templates/types";
+import type { DbTemplateRow } from "@/lib/templates/types";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
 import {
@@ -14,6 +20,7 @@ import {
   buildEnrichedSystemPrompt,
   extractJson,
 } from "@/lib/clinical";
+import { buildInsightsEnrichedPrompt } from "@/lib/clinical/insights";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
@@ -115,25 +122,55 @@ export async function POST(request: NextRequest) {
       console.error("Chunk fetch error:", chunksError);
     }
 
-    // Resolve template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Resolve template — try DB first, fall back to static
+    let template;
+    if (templateId) {
+      const { data: dbRow } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("id", templateId)
+        .single();
+
+      if (dbRow) {
+        template = dbRowToTemplate(dbRow as DbTemplateRow);
+      } else {
+        template = getStaticTemplateById(templateId) || getDefaultTemplate();
+      }
+    } else {
+      template = getDefaultTemplate();
+    }
     const allIds = flattenSectionIds(template);
 
-    // Load section labels from locale messages
+    // Fetch template insights
+    const { data: insightsRow } = await supabase
+      .from("template_insights")
+      .select("style_guide, preference_summary")
+      .eq("user_id", userId)
+      .eq("template_id", template.id)
+      .single();
+    const templateInsights = insightsRow || null;
+
+    // Load section labels
     const messages = (await import(`../../../../messages/${language}.json`))
       .default;
-    const templateSections: Record<string, string> =
+    const i18nSections: Record<string, string> =
       messages.templates?.sections || {};
-    const sectionLabels: Record<string, string> = {};
-    for (const id of allIds) {
-      sectionLabels[id] = templateSections[id] || id;
-    }
+    const sectionLabels = buildSectionLabelsMap(template, i18nSections);
 
     // Determine generation path: fast reformat vs full generation
     const existingNote = visit.soap_note as string | null;
     const oldTemplateId = (visitMeta.template_id as string) || null;
-    const oldTemplate = oldTemplateId ? getTemplateById(oldTemplateId) : null;
+    let oldTemplate = null;
+    if (oldTemplateId) {
+      const { data: oldDbRow } = await supabase
+        .from("templates")
+        .select("*")
+        .eq("id", oldTemplateId)
+        .single();
+      oldTemplate = oldDbRow
+        ? dbRowToTemplate(oldDbRow as DbTemplateRow)
+        : getStaticTemplateById(oldTemplateId) || null;
+    }
 
     let clinicalAnalysis: ClinicalAnalysis | null = null;
     const cachedAnalysis = visitMeta.clinical_analysis as
@@ -211,6 +248,8 @@ Rules:
       systemPrompt = clinicalAnalysis
         ? buildEnrichedSystemPrompt(baseSystemPrompt, clinicalAnalysis)
         : baseSystemPrompt;
+      // Layer 3: Template insights
+      systemPrompt = buildInsightsEnrichedPrompt(systemPrompt, templateInsights);
       userMessage = buildTemplateUserMessage(
         chunkContents,
         template,
@@ -374,6 +413,7 @@ Rules:
               metadata: {
                 ...existingMetadata,
                 template_id: template.id,
+                original_generated_note: generatedNote,
                 ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
                 ...(clinicalAnalysis
                   ? {

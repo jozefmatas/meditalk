@@ -86,7 +86,7 @@ function SectionItem({
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
       >
         <span className={depth === 0 ? "font-medium" : "text-muted-foreground"}>
-          {tSections(section.labelKey)}
+          {section.label || tSections(section.labelKey ?? section.id)}
         </span>
       </div>
       {hasSubsections && (

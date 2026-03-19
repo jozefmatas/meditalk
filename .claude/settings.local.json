@@ -127,7 +127,9 @@
       "Bash(npm test:*)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(npm audit:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "WebFetch(domain:diceui.com)",
+      "WebFetch(domain:www.diceui.com)"
     ],
     "deny": [],
     "ask": []

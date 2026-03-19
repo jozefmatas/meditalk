@@ -4,6 +4,9 @@ export const comprehensiveMedicalExam: Template = {
   id: "comprehensive-medical-exam",
   nameKey: "comprehensive-medical-exam.name",
   descriptionKey: "comprehensive-medical-exam.description",
+  specialties: ["general_practice", "internal_medicine"],
+  isSystem: true,
+  sortOrder: 0,
   sections: [
     { id: "reason_for_contact", labelKey: "reason_for_contact" },
     { id: "past_history", labelKey: "past_history" },
