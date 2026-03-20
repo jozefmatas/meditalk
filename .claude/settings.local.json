@@ -127,7 +127,13 @@
       "Bash(npm test:*)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(npm audit:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk branch -a)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log templates-2 --oneline -20)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff main templates-2 -- admin/ --stat)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff main templates-2 -- admin/ --diff-filter=A --name-only)",
+      "Bash(npx shadcn@latest init:*)"
     ],
     "deny": [],
     "ask": []
