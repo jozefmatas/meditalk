@@ -45,3 +45,4 @@ storybook-static
 
 # supabase
 .supabase
+supabase/.temp
