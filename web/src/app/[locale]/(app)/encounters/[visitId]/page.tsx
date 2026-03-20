@@ -25,8 +25,10 @@ import {
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
-import { getTemplateById } from "@/lib/templates";
-import { flattenSectionIds } from "@/lib/templates/html";
+import {
+  getTemplateById,
+  buildSectionLabelsFromTemplate,
+} from "@/lib/templates";
 import type { Encounter, EncounterStatus, EncounterType } from "@/lib/types";
 
 import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
@@ -60,7 +62,6 @@ const DRAFT_STATUSES: EncounterStatus[] = [
 export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
   const t = useTranslations("encounters");
-  const tTemplates = useTranslations("templates");
   const locale = useLocale();
   const router = useRouter();
   const { setPageTitle } = usePageTitle();
@@ -161,12 +162,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const template = getTemplateById(generation.selectedTemplateId);
   const sectionLabels = useMemo(() => {
     if (!template) return {};
-    const labels: Record<string, string> = {};
-    for (const id of flattenSectionIds(template)) {
-      labels[id] = tTemplates(`sections.${id}`);
-    }
-    return labels;
-  }, [template, tTemplates]);
+    return buildSectionLabelsFromTemplate(template, locale);
+  }, [template, locale]);
 
   // --- Section editing hook ---
   const sections = useSectionEditing({
@@ -334,7 +331,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
               onAutoFocused={sections.handleAutoFocused}
               onRetry={handleRetry}
               t={t}
-              tTemplates={tTemplates}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
           </div>
@@ -371,7 +367,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onFilesChange={data.setFiles}
                 onRetry={handleRetry}
                 t={t}
-                tTemplates={tTemplates}
               />
             ) : (
               <ReviewView
@@ -398,7 +393,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onAutoFocused={sections.handleAutoFocused}
                 onRetry={handleRetry}
                 t={t}
-                tTemplates={tTemplates}
               />
             )}
 

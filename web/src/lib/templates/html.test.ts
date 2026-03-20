@@ -4,29 +4,29 @@ import type { Template } from "./types";
 
 const simpleTemplate: Template = {
   id: "simple",
-  nameKey: "simple",
-  descriptionKey: "simple",
+  name: { sk: "Simple" },
+  description: { sk: "Simple" },
   sections: [
-    { id: "subjective", labelKey: "subjective" },
-    { id: "objective", labelKey: "objective" },
-    { id: "plan", labelKey: "plan" },
+    { id: "subjective", labels: { sk: "Subjektívne" } },
+    { id: "objective", labels: { sk: "Objektívne" } },
+    { id: "plan", labels: { sk: "Plán" } },
   ],
 };
 
 const nestedTemplate: Template = {
   id: "nested",
-  nameKey: "nested",
-  descriptionKey: "nested",
+  name: { sk: "Nested" },
+  description: { sk: "Nested" },
   sections: [
     {
       id: "exam",
-      labelKey: "exam",
+      labels: { sk: "Vyšetrenie" },
       subsections: [
-        { id: "vitals", labelKey: "vitals" },
-        { id: "skin", labelKey: "skin" },
+        { id: "vitals", labels: { sk: "Vitálne funkcie" } },
+        { id: "skin", labels: { sk: "Koža" } },
       ],
     },
-    { id: "plan", labelKey: "plan" },
+    { id: "plan", labels: { sk: "Plán" } },
   ],
 };
 
@@ -260,8 +260,8 @@ describe("flattenSectionIds", () => {
   it("returns empty array for template with no sections", () => {
     const empty: Template = {
       id: "empty",
-      nameKey: "empty",
-      descriptionKey: "empty",
+      name: { sk: "Empty" },
+      description: { sk: "Empty" },
       sections: [],
     };
     expect(flattenSectionIds(empty)).toEqual([]);

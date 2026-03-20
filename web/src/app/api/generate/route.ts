@@ -8,7 +8,11 @@ import {
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import {
+  getTemplateById,
+  getDefaultTemplate,
+  buildSectionLabelsFromTemplate,
+} from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
@@ -201,16 +205,9 @@ export async function POST(request: NextRequest) {
     const template =
       (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
 
-    // Load section labels from locale messages
-    const messages = (await import(`../../../../messages/${language}.json`))
-      .default;
-    const templateSections: Record<string, string> =
-      messages.templates?.sections || {};
+    // Build section labels directly from the template
     const allIds = flattenSectionIds(template);
-    const sectionLabels: Record<string, string> = {};
-    for (const id of allIds) {
-      sectionLabels[id] = templateSections[id] || id;
-    }
+    const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
     // Semantic search on legacy transcript chunks + clinical analysis — run in parallel
     let chunkContents: string[] = [];

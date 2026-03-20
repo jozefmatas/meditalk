@@ -11,31 +11,31 @@ import type { Template } from "./templates/types";
 
 const simpleTemplate: Template = {
   id: "simple",
-  nameKey: "simple",
-  descriptionKey: "simple",
+  name: { sk: "Simple" },
+  description: { sk: "Simple" },
   sections: [
-    { id: "subjective", labelKey: "subjective" },
-    { id: "objective", labelKey: "objective" },
-    { id: "assessment", labelKey: "assessment" },
-    { id: "plan", labelKey: "plan" },
+    { id: "subjective", labels: { sk: "Subjektívne" } },
+    { id: "objective", labels: { sk: "Objektívne" } },
+    { id: "assessment", labels: { sk: "Záver" } },
+    { id: "plan", labels: { sk: "Plán" } },
   ],
 };
 
 const templateWithSubs: Template = {
   id: "with-subs",
-  nameKey: "with-subs",
-  descriptionKey: "with-subs",
+  name: { sk: "With Subs" },
+  description: { sk: "With Subs" },
   sections: [
-    { id: "reason", labelKey: "reason" },
+    { id: "reason", labels: { sk: "Dôvod" } },
     {
       id: "exam",
-      labelKey: "exam",
+      labels: { sk: "Vyšetrenie" },
       subsections: [
-        { id: "vitals", labelKey: "vitals" },
-        { id: "skin", labelKey: "skin" },
+        { id: "vitals", labels: { sk: "Vitálne funkcie" } },
+        { id: "skin", labels: { sk: "Koža" } },
       ],
     },
-    { id: "plan", labelKey: "plan" },
+    { id: "plan", labels: { sk: "Plán" } },
   ],
 };
 

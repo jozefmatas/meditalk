@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { TEMPLATES } from "@/lib/templates";
 import { Combobox } from "@/components/shared/combobox";
 
@@ -25,14 +25,15 @@ export function TemplateSelector({
   label,
 }: TemplateSelectorProps) {
   const t = useTranslations("templates");
+  const locale = useLocale();
 
   const options = useMemo(
     () =>
       TEMPLATES.map((template) => ({
         value: template.id,
-        label: t(template.nameKey),
+        label: template.name[locale] ?? template.name.sk ?? template.id,
       })),
-    [t],
+    [locale],
   );
 
   return (

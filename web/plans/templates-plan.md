@@ -54,6 +54,18 @@ UI chrome (button labels, page titles) stays in i18n JSON files. Only template/s
 
 Doctor edits section labels in Slovak → on save, system calls Claude Haiku to batch-translate all labels to en/cs → translations stored in `labels` object → doctor can review before final save.
 
+### Adding a New Language
+
+When adding a new locale (e.g. Polish `"pl"`):
+
+1. Add `"pl"` to `SupportedLanguage` type in `web/src/lib/types.ts`
+2. Create `web/messages/pl.json` for UI chrome
+3. Add next-intl routing config for `pl`
+4. In admin: click "Translate" on each template → the translate API derives target locales from `SupportedLanguage`, automatically includes `pl`
+5. The fallback chain (`labels[locale] ?? labels.sk ?? section.id`) ensures templates work immediately even before translations are populated
+
+The translate API reads `SupportedLanguage` to determine target locales, so no code changes needed in the template system itself — just run the existing translate flow.
+
 ---
 
 ## Step 1: Add `systemPrompt` to Template type + prompt injection

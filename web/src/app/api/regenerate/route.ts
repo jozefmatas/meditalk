@@ -6,7 +6,11 @@ import {
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import {
+  getTemplateById,
+  getDefaultTemplate,
+  buildSectionLabelsFromTemplate,
+} from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
 import {
@@ -120,15 +124,8 @@ export async function POST(request: NextRequest) {
       (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
     const allIds = flattenSectionIds(template);
 
-    // Load section labels from locale messages
-    const messages = (await import(`../../../../messages/${language}.json`))
-      .default;
-    const templateSections: Record<string, string> =
-      messages.templates?.sections || {};
-    const sectionLabels: Record<string, string> = {};
-    for (const id of allIds) {
-      sectionLabels[id] = templateSections[id] || id;
-    }
+    // Build section labels directly from the template
+    const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
     // Determine generation path: fast reformat vs full generation
     const existingNote = visit.soap_note as string | null;

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
 import {
   Card,
@@ -18,6 +18,7 @@ import { flattenSectionIds } from "@/lib/templates/html";
 
 export default function TemplatesPage() {
   const t = useTranslations("templates");
+  const locale = useLocale();
   const getHref = useLocalizedHref();
 
   return (
@@ -43,10 +44,14 @@ export default function TemplatesPage() {
                       </div>
                       <div>
                         <CardTitle className="text-base">
-                          {t(`${template.id}.name`)}
+                          {template.name[locale] ??
+                            template.name.sk ??
+                            template.id}
                         </CardTitle>
                         <p className="text-sm text-muted-foreground">
-                          {t(`${template.id}.description`)}
+                          {template.description[locale] ??
+                            template.description.sk ??
+                            ""}
                         </p>
                       </div>
                     </div>

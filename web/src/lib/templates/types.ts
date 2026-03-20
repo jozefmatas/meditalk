@@ -1,12 +1,18 @@
 export interface TemplateSection {
   id: string;
-  labelKey: string;
+  labels: Record<string, string>;
+  context?: string;
   subsections?: TemplateSection[];
 }
 
 export interface Template {
   id: string;
-  nameKey: string;
-  descriptionKey: string;
+  name: Record<string, string>;
+  description: Record<string, string>;
   sections: TemplateSection[];
+  systemPrompt?: string;
+  styleExamples?: { name: string; text: string }[];
+  specialties?: string[];
+  isSystem?: boolean;
+  sourceTemplateId?: string;
 }

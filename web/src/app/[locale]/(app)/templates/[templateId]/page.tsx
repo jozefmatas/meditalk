@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import {
@@ -12,7 +12,7 @@ import {
 } from "@/components/shared/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NoteIcon } from "@hugeicons/core-free-icons";
-import { getTemplateById } from "@/lib/templates";
+import { getTemplateById, resolveSectionLabel } from "@/lib/templates";
 import type { TemplateSection } from "@/lib/templates";
 
 interface PageProps {
@@ -22,7 +22,7 @@ interface PageProps {
 export default function TemplateDetailPage({ params }: PageProps) {
   const { templateId } = use(params);
   const t = useTranslations("templates");
-  const tSections = useTranslations("templates.sections");
+  const locale = useLocale();
 
   const template = getTemplateById(templateId);
   if (!template) return notFound();
@@ -37,10 +37,10 @@ export default function TemplateDetailPage({ params }: PageProps) {
             </div>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">
-                {t(`${template.id}.name`)}
+                {template.name[locale] ?? template.name.sk ?? template.id}
               </h1>
               <p className="text-muted-foreground">
-                {t(`${template.id}.description`)}
+                {template.description[locale] ?? template.description.sk ?? ""}
               </p>
             </div>
           </div>
@@ -56,7 +56,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
                 <SectionItem
                   key={section.id}
                   section={section}
-                  tSections={tSections}
+                  locale={locale}
                   depth={0}
                 />
               ))}
@@ -70,11 +70,11 @@ export default function TemplateDetailPage({ params }: PageProps) {
 
 function SectionItem({
   section,
-  tSections,
+  locale,
   depth,
 }: {
   section: TemplateSection;
-  tSections: ReturnType<typeof useTranslations>;
+  locale: string;
   depth: number;
 }) {
   const hasSubsections = section.subsections && section.subsections.length > 0;
@@ -86,7 +86,7 @@ function SectionItem({
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
       >
         <span className={depth === 0 ? "font-medium" : "text-muted-foreground"}>
-          {tSections(section.labelKey)}
+          {resolveSectionLabel(section, locale)}
         </span>
       </div>
       {hasSubsections && (
@@ -95,7 +95,7 @@ function SectionItem({
             <SectionItem
               key={sub.id}
               section={sub}
-              tSections={tSections}
+              locale={locale}
               depth={depth + 1}
             />
           ))}
