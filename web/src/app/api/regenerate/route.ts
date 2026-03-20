@@ -11,6 +11,7 @@ import {
   getDefaultTemplate,
   buildSectionLabelsFromTemplate,
 } from "@/lib/templates";
+import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
 import {
@@ -119,9 +120,10 @@ export async function POST(request: NextRequest) {
       console.error("Chunk fetch error:", chunksError);
     }
 
-    // Resolve template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Resolve template (DB with static fallback)
+    const template = templateId
+      ? await resolveTemplate(templateId)
+      : getDefaultTemplate();
     const allIds = flattenSectionIds(template);
 
     // Build section labels directly from the template

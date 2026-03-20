@@ -9,10 +9,10 @@ import {
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import {
-  getTemplateById,
   getDefaultTemplate,
   buildSectionLabelsFromTemplate,
 } from "@/lib/templates";
+import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
@@ -201,9 +201,10 @@ export async function POST(request: NextRequest) {
         .eq("id", visitId);
     }
 
-    // Look up the template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Look up the template (DB with static fallback)
+    const template = templateId
+      ? await resolveTemplate(templateId)
+      : getDefaultTemplate();
 
     // Build section labels directly from the template
     const allIds = flattenSectionIds(template);
