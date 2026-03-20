@@ -127,7 +127,12 @@
       "Bash(npm test:*)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(npm audit:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(npm exec:*)",
+      "Bash(node_modules/.bin/supabase:*)",
+      "Bash(npx shadcn@latest init:*)",
+      "Bash(git ls-tree:*)"
     ],
     "deny": [],
     "ask": []

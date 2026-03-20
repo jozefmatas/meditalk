@@ -32,7 +32,7 @@ import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { IcdPanelContent } from "@/components/encounters/icd-panel";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
-import type { Template } from "@/lib/templates";
+import { resolveSectionLabel, type Template } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
 import {
   parseNoteSections,
@@ -77,6 +77,7 @@ interface ReviewViewProps {
   // i18n
   t: (key: string) => string;
   tTemplates: (key: string) => string;
+  locale: string;
 }
 
 export function ReviewView({
@@ -106,6 +107,7 @@ export function ReviewView({
   onRetry,
   t,
   tTemplates,
+  locale,
 }: ReviewViewProps) {
   // Tab state — desktop uses "resources" | "note" | "add-document", mobile uses "note" | "codes"
   const [activeTab, setActiveTab] = useState("note");
@@ -321,7 +323,7 @@ export function ReviewView({
           const label =
             streamingSectionLabels?.[section.id] ??
             sectionLabels[section.id] ??
-            tTemplates(`sections.${section.labelKey}`);
+            resolveSectionLabel(section, locale, tTemplates);
 
           // Build subsection data with streamed or pending content
           const subsectionData = section.subsections?.map((sub) => {
@@ -329,7 +331,7 @@ export function ReviewView({
             const subLabel =
               streamingSectionLabels?.[sub.id] ??
               sectionLabels[sub.id] ??
-              tTemplates(`sections.${sub.labelKey}`);
+              resolveSectionLabel(sub, locale, tTemplates);
             return {
               id: sub.id,
               title: subLabel,
@@ -411,13 +413,13 @@ export function ReviewView({
             key={section.id}
             id={`note-section-${section.id}`}
             sectionId={section.id}
-            title={tTemplates(`sections.${section.labelKey}`)}
+            title={resolveSectionLabel(section, locale, tTemplates)}
             content={sectionContents[section.id] ?? ""}
             subsections={section.subsections
               ?.filter((sub) => !removedSections.has(sub.id))
               .map((sub) => ({
                 id: sub.id,
-                title: tTemplates(`sections.${sub.labelKey}`),
+                title: resolveSectionLabel(sub, locale, tTemplates),
                 content: sectionContents[sub.id] ?? "",
               }))}
             onContentChange={onSectionContentChange}

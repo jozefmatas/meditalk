@@ -25,7 +25,11 @@ import {
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
-import { getTemplateById } from "@/lib/templates";
+import {
+  getTemplateById,
+  flattenTemplateSections,
+  resolveSectionLabel,
+} from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
 import type { Encounter, EncounterStatus, EncounterType } from "@/lib/types";
 
@@ -162,11 +166,11 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const sectionLabels = useMemo(() => {
     if (!template) return {};
     const labels: Record<string, string> = {};
-    for (const id of flattenSectionIds(template)) {
-      labels[id] = tTemplates(`sections.${id}`);
+    for (const section of flattenTemplateSections(template)) {
+      labels[section.id] = resolveSectionLabel(section, locale, tTemplates);
     }
     return labels;
-  }, [template, tTemplates]);
+  }, [template, locale, tTemplates]);
 
   // --- Section editing hook ---
   const sections = useSectionEditing({
@@ -335,6 +339,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               onRetry={handleRetry}
               t={t}
               tTemplates={tTemplates}
+              locale={locale}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
           </div>
@@ -372,6 +377,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onRetry={handleRetry}
                 t={t}
                 tTemplates={tTemplates}
+                locale={locale}
               />
             ) : (
               <ReviewView
@@ -399,6 +405,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onRetry={handleRetry}
                 t={t}
                 tTemplates={tTemplates}
+                locale={locale}
               />
             )}
 

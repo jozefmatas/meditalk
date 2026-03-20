@@ -24,6 +24,7 @@ export { type Template, type TemplateSection } from "./types";
 export interface FlatSection {
   id: string;
   labelKey: string;
+  labels?: Partial<Record<string, string>>;
   level: 2 | 3;
   parentId?: string;
 }
@@ -35,12 +36,18 @@ export interface FlatSection {
 export function flattenTemplateSections(template: Template): FlatSection[] {
   const result: FlatSection[] = [];
   for (const section of template.sections) {
-    result.push({ id: section.id, labelKey: section.labelKey, level: 2 });
+    result.push({
+      id: section.id,
+      labelKey: section.labelKey,
+      labels: section.labels,
+      level: 2,
+    });
     if (section.subsections) {
       for (const sub of section.subsections) {
         result.push({
           id: sub.id,
           labelKey: sub.labelKey,
+          labels: sub.labels,
           level: 3,
           parentId: section.id,
         });
@@ -48,4 +55,16 @@ export function flattenTemplateSections(template: Template): FlatSection[] {
     }
   }
   return result;
+}
+
+/**
+ * Resolve section display label.
+ * Uses per-locale `labels` when available, falls back to i18n via `tFn`.
+ */
+export function resolveSectionLabel(
+  section: { labelKey: string; labels?: Partial<Record<string, string>> },
+  locale: string,
+  tFn: (key: string) => string,
+): string {
+  return section.labels?.[locale] || tFn(`sections.${section.labelKey}`);
 }

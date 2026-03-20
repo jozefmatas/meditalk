@@ -6,7 +6,11 @@ import {
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import {
+  fetchTemplateById,
+  fetchDefaultTemplate,
+} from "@/lib/templates/db";
+import { getTemplateById } from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
 import {
@@ -115,9 +119,11 @@ export async function POST(request: NextRequest) {
       console.error("Chunk fetch error:", chunksError);
     }
 
-    // Resolve template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Resolve template from DB (falls back to static)
+    const template = templateId
+      ? ((await fetchTemplateById(supabase, templateId)) ??
+        (await fetchDefaultTemplate(supabase)))
+      : await fetchDefaultTemplate(supabase);
     const allIds = flattenSectionIds(template);
 
     // Load section labels from locale messages

@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   CheckmarkCircle01Icon,
   ArrowRight01Icon,
   Add01Icon,
 } from "@hugeicons/core-free-icons";
-import { getTemplateById } from "@/lib/templates";
+import { getTemplateById, resolveSectionLabel } from "@/lib/templates";
 import type { TemplateSection } from "@/lib/templates";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { Button } from "@/components/shared/button";
@@ -104,6 +104,7 @@ function SectionWithSubs({
   onInsertSection,
   onScrollToSection,
   tTemplates,
+  locale,
 }: {
   section: TemplateSection;
   sectionLabel: string;
@@ -112,6 +113,7 @@ function SectionWithSubs({
   onInsertSection?: (sectionId: string, label: string, level: 2 | 3) => void;
   onScrollToSection?: (label: string) => void;
   tTemplates: ReturnType<typeof useTranslations>;
+  locale: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -189,7 +191,7 @@ function SectionWithSubs({
       {open && (
         <div className="flex flex-col">
           {section.subsections?.map((sub) => {
-            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const subLabel = resolveSectionLabel(sub, locale, tTemplates);
             const isSubUsed = usedSectionIds?.has(sub.id) ?? false;
 
             if (isSubUsed) {
@@ -249,6 +251,7 @@ function ReviewSectionWithSubs({
   onAddSection,
   onScrollToSection,
   tTemplates,
+  locale,
 }: {
   section: TemplateSection;
   sectionLabel: string;
@@ -257,6 +260,7 @@ function ReviewSectionWithSubs({
   onAddSection?: (sectionId: string) => void;
   onScrollToSection?: (sectionId: string) => void;
   tTemplates: ReturnType<typeof useTranslations>;
+  locale: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -341,7 +345,7 @@ function ReviewSectionWithSubs({
       {open && !disabled && (
         <div className="flex flex-col">
           {section.subsections?.map((sub) => {
-            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const subLabel = resolveSectionLabel(sub, locale, tTemplates);
             const isSubDocumented = documentedSections?.has(sub.id) ?? false;
 
             if (isSubDocumented) {
@@ -404,6 +408,7 @@ export function TemplateSidebar({
   onAddSection,
   stickyTop = 0,
 }: TemplateSidebarProps) {
+  const locale = useLocale();
   const tTemplates = useTranslations("templates");
   const t = useTranslations("encounters.detail");
   const template = getTemplateById(templateId);
@@ -437,7 +442,7 @@ export function TemplateSidebar({
       {template && isDraft && (
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {template.sections.map((section) => {
-            const sectionLabel = tTemplates(`sections.${section.labelKey}`);
+            const sectionLabel = resolveSectionLabel(section, locale, tTemplates);
             const isSectionUsed = usedSectionIds?.has(section.id) ?? false;
             const hasSubsections =
               section.subsections && section.subsections.length > 0;
@@ -464,6 +469,7 @@ export function TemplateSidebar({
                 onInsertSection={onInsertSection}
                 onScrollToSection={onScrollToSection}
                 tTemplates={tTemplates}
+                locale={locale}
               />
             );
           })}
@@ -474,7 +480,7 @@ export function TemplateSidebar({
       {template && isReview && (
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {template.sections.map((section) => {
-            const sectionLabel = tTemplates(`sections.${section.labelKey}`);
+            const sectionLabel = resolveSectionLabel(section, locale, tTemplates);
             const isDocumented = documentedSections?.has(section.id) ?? false;
             const hasSubsections =
               section.subsections && section.subsections.length > 0;
@@ -502,6 +508,7 @@ export function TemplateSidebar({
                 onAddSection={onAddSection}
                 onScrollToSection={onScrollToSection}
                 tTemplates={tTemplates}
+                locale={locale}
               />
             );
           })}

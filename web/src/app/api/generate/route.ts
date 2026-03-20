@@ -8,7 +8,7 @@ import {
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
-import { getTemplateById, getDefaultTemplate } from "@/lib/templates";
+import { fetchTemplateById, fetchDefaultTemplate } from "@/lib/templates/db";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
@@ -197,9 +197,11 @@ export async function POST(request: NextRequest) {
         .eq("id", visitId);
     }
 
-    // Look up the template
-    const template =
-      (templateId ? getTemplateById(templateId) : null) || getDefaultTemplate();
+    // Look up the template from DB (falls back to static)
+    const template = templateId
+      ? ((await fetchTemplateById(supabase, templateId)) ??
+        (await fetchDefaultTemplate(supabase)))
+      : await fetchDefaultTemplate(supabase);
 
     // Load section labels from locale messages
     const messages = (await import(`../../../../messages/${language}.json`))
