@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './supabase';
+import { supabaseAdmin } from "./supabase";
 
 export interface ModelBreakdown {
   provider: string;
@@ -22,18 +22,29 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const sb = supabaseAdmin();
 
   const { data: rows, error } = await sb
-    .from('api_usage')
-    .select('provider, model, input_tokens, output_tokens, cost_usd, duration_seconds');
+    .from("api_usage")
+    .select(
+      "provider, model, input_tokens, output_tokens, cost_usd, duration_seconds",
+    );
 
   if (error || !rows) {
-    console.error('[admin] getDashboardStats error:', error?.message);
-    return { totalCost: 0, totalRequests: 0, totalInputTokens: 0, totalOutputTokens: 0, byModel: [] };
+    console.error("[admin] getDashboardStats error:", error?.message);
+    return {
+      totalCost: 0,
+      totalRequests: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      byModel: [],
+    };
   }
 
   const totalCost = rows.reduce((s, r) => s + Number(r.cost_usd), 0);
   const totalRequests = rows.length;
   const totalInputTokens = rows.reduce((s, r) => s + (r.input_tokens ?? 0), 0);
-  const totalOutputTokens = rows.reduce((s, r) => s + (r.output_tokens ?? 0), 0);
+  const totalOutputTokens = rows.reduce(
+    (s, r) => s + (r.output_tokens ?? 0),
+    0,
+  );
 
   const modelMap = new Map<string, ModelBreakdown>();
   for (const r of rows) {
@@ -63,7 +74,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     totalRequests,
     totalInputTokens,
     totalOutputTokens,
-    byModel: Array.from(modelMap.values()).sort((a, b) => b.total_cost - a.total_cost),
+    byModel: Array.from(modelMap.values()).sort(
+      (a, b) => b.total_cost - a.total_cost,
+    ),
   };
 }
 
@@ -85,11 +98,11 @@ export async function getUsers(): Promise<UserRow[]> {
 
   // Get aggregated usage per user
   const { data: usageRows, error: usageError } = await sb
-    .from('api_usage')
-    .select('user_id, cost_usd');
+    .from("api_usage")
+    .select("user_id, cost_usd");
 
   if (usageError) {
-    console.error('[admin] getUsers usage error:', usageError.message);
+    console.error("[admin] getUsers usage error:", usageError.message);
   }
 
   const userUsage = new Map<string, { requests: number; cost: number }>();
@@ -103,17 +116,19 @@ export async function getUsers(): Promise<UserRow[]> {
     }
   }
 
-  return authData.users.map((u) => {
-    const usage = userUsage.get(u.id) ?? { requests: 0, cost: 0 };
-    return {
-      id: u.id,
-      email: u.email ?? '',
-      created_at: u.created_at,
-      last_sign_in_at: u.last_sign_in_at ?? null,
-      requests: usage.requests,
-      total_cost: usage.cost,
-    };
-  }).sort((a, b) => b.total_cost - a.total_cost);
+  return authData.users
+    .map((u) => {
+      const usage = userUsage.get(u.id) ?? { requests: 0, cost: 0 };
+      return {
+        id: u.id,
+        email: u.email ?? "",
+        created_at: u.created_at,
+        last_sign_in_at: u.last_sign_in_at ?? null,
+        requests: usage.requests,
+        total_cost: usage.cost,
+      };
+    })
+    .sort((a, b) => b.total_cost - a.total_cost);
 }
 
 export interface UserUsageRow {
@@ -156,22 +171,22 @@ export async function getEncounters(): Promise<EncounterRow[]> {
 
   // Fetch visits
   const { data: visits, error: visitError } = await sb
-    .from('visits')
-    .select('id, title, patient_name, visit_date, status, user_id')
-    .order('visit_date', { ascending: false });
+    .from("visits")
+    .select("id, title, patient_name, visit_date, status, user_id")
+    .order("visit_date", { ascending: false });
 
   if (visitError || !visits) {
-    console.error('[admin] getEncounters error:', visitError?.message);
+    console.error("[admin] getEncounters error:", visitError?.message);
     return [];
   }
 
   // Fetch usage grouped by visit_id
   const { data: usageRows, error: usageError } = await sb
-    .from('api_usage')
-    .select('visit_id, cost_usd');
+    .from("api_usage")
+    .select("visit_id, cost_usd");
 
   if (usageError) {
-    console.error('[admin] getEncounters usage error:', usageError.message);
+    console.error("[admin] getEncounters usage error:", usageError.message);
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
@@ -190,7 +205,7 @@ export async function getEncounters(): Promise<EncounterRow[]> {
   const { data: authData } = await sb.auth.admin.listUsers();
   const emailMap = new Map<string, string>();
   for (const u of authData?.users ?? []) {
-    emailMap.set(u.id, u.email ?? '');
+    emailMap.set(u.id, u.email ?? "");
   }
 
   return visits.map((v) => {
@@ -202,7 +217,7 @@ export async function getEncounters(): Promise<EncounterRow[]> {
       visit_date: v.visit_date,
       status: v.status,
       user_id: v.user_id,
-      user_email: emailMap.get(v.user_id) ?? '',
+      user_email: emailMap.get(v.user_id) ?? "",
       requests: usage.requests,
       total_cost: usage.cost,
     };
@@ -222,27 +237,35 @@ export interface EncounterDetail {
   usage: UserUsageRow[];
 }
 
-export async function getEncounterDetail(encounterId: string): Promise<EncounterDetail> {
+export async function getEncounterDetail(
+  encounterId: string,
+): Promise<EncounterDetail> {
   const sb = supabaseAdmin();
 
   const { data: visit, error: visitError } = await sb
-    .from('visits')
-    .select('id, title, patient_name, visit_date, status, user_id')
-    .eq('id', encounterId)
+    .from("visits")
+    .select("id, title, patient_name, visit_date, status, user_id")
+    .eq("id", encounterId)
     .single();
 
-  if (visitError || !visit) throw visitError ?? new Error('Encounter not found');
+  if (visitError || !visit)
+    throw visitError ?? new Error("Encounter not found");
 
   const { data: authData } = await sb.auth.admin.getUserById(visit.user_id);
 
   const { data: usageRows, error: usageError } = await sb
-    .from('api_usage')
-    .select('id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at')
-    .eq('visit_id', encounterId)
-    .order('created_at', { ascending: false });
+    .from("api_usage")
+    .select(
+      "id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at",
+    )
+    .eq("visit_id", encounterId)
+    .order("created_at", { ascending: false });
 
   if (usageError) {
-    console.error('[admin] getEncounterDetail usage error:', usageError.message);
+    console.error(
+      "[admin] getEncounterDetail usage error:",
+      usageError.message,
+    );
   }
 
   const safeRows = usageRows ?? [];
@@ -255,7 +278,7 @@ export async function getEncounterDetail(encounterId: string): Promise<Encounter
     visit_date: visit.visit_date,
     status: visit.status,
     user_id: visit.user_id,
-    user_email: authData?.user?.email ?? '',
+    user_email: authData?.user?.email ?? "",
     totalCost,
     totalRequests: safeRows.length,
     usage: safeRows.map((r) => ({
@@ -268,29 +291,31 @@ export async function getEncounterDetail(encounterId: string): Promise<Encounter
   };
 }
 
-export async function getUserEncounters(userId: string): Promise<EncounterRow[]> {
+export async function getUserEncounters(
+  userId: string,
+): Promise<EncounterRow[]> {
   const sb = supabaseAdmin();
 
   const { data: visits, error: visitError } = await sb
-    .from('visits')
-    .select('id, title, patient_name, visit_date, status, user_id')
-    .eq('user_id', userId)
-    .order('visit_date', { ascending: false });
+    .from("visits")
+    .select("id, title, patient_name, visit_date, status, user_id")
+    .eq("user_id", userId)
+    .order("visit_date", { ascending: false });
 
   if (visitError || !visits) {
-    console.error('[admin] getUserEncounters error:', visitError?.message);
+    console.error("[admin] getUserEncounters error:", visitError?.message);
     return [];
   }
 
   const visitIds = visits.map((v) => v.id);
 
   const { data: usageRows, error: usageError } = await sb
-    .from('api_usage')
-    .select('visit_id, cost_usd')
-    .in('visit_id', visitIds);
+    .from("api_usage")
+    .select("visit_id, cost_usd")
+    .in("visit_id", visitIds);
 
   if (usageError) {
-    console.error('[admin] getUserEncounters usage error:', usageError.message);
+    console.error("[admin] getUserEncounters usage error:", usageError.message);
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
@@ -314,7 +339,7 @@ export async function getUserEncounters(userId: string): Promise<EncounterRow[]>
       visit_date: v.visit_date,
       status: v.status,
       user_id: v.user_id,
-      user_email: '',
+      user_email: "",
       requests: usage.requests,
       total_cost: usage.cost,
     };
@@ -324,18 +349,21 @@ export async function getUserEncounters(userId: string): Promise<EncounterRow[]>
 export async function getUserDetail(userId: string): Promise<UserDetail> {
   const sb = supabaseAdmin();
 
-  const { data: authData, error: authError } = await sb.auth.admin.getUserById(userId);
+  const { data: authData, error: authError } =
+    await sb.auth.admin.getUserById(userId);
   if (authError) throw authError;
 
   const { data: usageRows, error: usageError } = await sb
-    .from('api_usage')
-    .select('id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .from("api_usage")
+    .select(
+      "id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at",
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
     .limit(200);
 
   if (usageError) {
-    console.error('[admin] getUserDetail usage error:', usageError.message);
+    console.error("[admin] getUserDetail usage error:", usageError.message);
   }
 
   const safeRows = usageRows ?? [];
@@ -343,7 +371,7 @@ export async function getUserDetail(userId: string): Promise<UserDetail> {
 
   return {
     id: authData.user.id,
-    email: authData.user.email ?? '',
+    email: authData.user.email ?? "",
     created_at: authData.user.created_at,
     totalCost,
     totalRequests: safeRows.length,
@@ -358,6 +386,8 @@ export async function getUserDetail(userId: string): Promise<UserDetail> {
 }
 
 // ── Templates ──────────────────────────────────────────────────────
+
+import type { TemplateRow as FullTemplateRow } from "./template-types";
 
 export interface TemplateRow {
   id: string;
@@ -375,14 +405,31 @@ export async function getTemplates(): Promise<TemplateRow[]> {
   const sb = supabaseAdmin();
 
   const { data, error } = await sb
-    .from('templates')
-    .select('id, name, description, specialties, sections, is_system, visible, sort_order, created_at')
-    .order('sort_order');
+    .from("templates")
+    .select(
+      "id, name, description, specialties, sections, is_system, visible, sort_order, created_at",
+    )
+    .order("sort_order");
 
   if (error || !data) {
-    console.error('[admin] getTemplates error:', error?.message);
+    console.error("[admin] getTemplates error:", error?.message);
     return [];
   }
 
   return data as TemplateRow[];
+}
+
+export async function getTemplateById(
+  id: string,
+): Promise<FullTemplateRow | null> {
+  const sb = supabaseAdmin();
+
+  const { data, error } = await sb
+    .from("templates")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) return null;
+  return data as FullTemplateRow;
 }
