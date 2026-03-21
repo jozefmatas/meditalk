@@ -111,15 +111,25 @@ export function ReviewView({
   const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
   const [noteCopied, setNoteCopied] = useState(false);
 
-  // Sticky header height — drives sidebar sticky offset
+  // Sticky header height — drives sidebar sticky offset + scroll-to-section offset
   const stickyHeaderRef = useRef<HTMLDivElement>(null);
+  const noteHeaderRef = useRef<HTMLDivElement>(null);
   const [stickyHeaderHeight, setStickyHeaderHeight] = useState(0);
+  const [noteHeaderHeight, setNoteHeaderHeight] = useState(0);
   useEffect(() => {
     const el = stickyHeaderRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => setStickyHeaderHeight(el.offsetHeight));
     ro.observe(el);
     setStickyHeaderHeight(el.offsetHeight);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = noteHeaderRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setNoteHeaderHeight(el.offsetHeight));
+    ro.observe(el);
+    setNoteHeaderHeight(el.offsetHeight);
     return () => ro.disconnect();
   }, []);
 
@@ -215,33 +225,41 @@ export function ReviewView({
     streamedSections,
   ]);
 
-  // Scroll to a note section card by its template section ID (centered in scroll container)
-  const handleScrollToNoteSection = useCallback((sectionId: string) => {
-    const el = document.getElementById(`note-section-${sectionId}`);
-    if (!el) return;
+  // Scroll to a note section card by its template section ID.
+  // Note: querySelectorAll is used because the same cards are rendered in both
+  // the mobile and desktop layouts, creating duplicate IDs. We pick the visible one.
+  const handleScrollToNoteSection = useCallback(
+    (sectionId: string) => {
+      const matches = document.querySelectorAll<HTMLElement>(
+        `[id="note-section-${sectionId}"]`,
+      );
+      const el = Array.from(matches).find((e) => e.offsetHeight > 0);
+      if (!el) return;
 
-    // Find the nearest scrollable ancestor (overflow-y: auto/scroll)
-    let scrollContainer = el.parentElement;
-    while (scrollContainer) {
-      const { overflowY } = getComputedStyle(scrollContainer);
-      if (overflowY === "auto" || overflowY === "scroll") break;
-      scrollContainer = scrollContainer.parentElement;
-    }
-    if (!scrollContainer) return;
+      // Find the overflow-y:auto scroll container
+      let container: HTMLElement | null = el.parentElement;
+      while (container) {
+        const oy = getComputedStyle(container).overflowY;
+        if (oy === "auto" || oy === "scroll") break;
+        container = container.parentElement;
+      }
 
-    const containerRect = scrollContainer.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
-    const scrollTarget =
-      scrollContainer.scrollTop +
-      (elRect.top - containerRect.top) -
-      containerRect.height / 2 +
-      elRect.height / 2;
-
-    scrollContainer.scrollTo({
-      top: Math.max(0, scrollTarget),
-      behavior: "smooth",
-    });
-  }, []);
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        const target =
+          container.scrollTop +
+          (elRect.top - containerRect.top) -
+          stickyHeaderHeight -
+          noteHeaderHeight -
+          16;
+        container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      } else {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    },
+    [stickyHeaderHeight, noteHeaderHeight],
+  );
 
   // Switch to note tab before regeneration
   const handleRegenerateWithTabSwitch = useCallback(
@@ -672,6 +690,7 @@ export function ReviewView({
             </div>
             <div className="flex flex-1 flex-col">
               <div
+                ref={noteHeaderRef}
                 className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
                 style={{ top: stickyHeaderHeight }}
               >
