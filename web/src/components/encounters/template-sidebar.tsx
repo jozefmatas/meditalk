@@ -117,10 +117,6 @@ function SectionWithSubs({
   const [open, setOpen] = useState(false);
 
   const subCount = section.subsections?.length ?? 0;
-  const allSubsUsed =
-    isSectionUsed &&
-    section.subsections?.every((sub) => usedSectionIds?.has(sub.id));
-
   // Main item: clicking the text inserts the h2 heading, clicking the chevron toggles subsections
   return (
     <div>
@@ -132,8 +128,7 @@ function SectionWithSubs({
             onClick={() => onScrollToSection?.(sectionLabel)}
             className={cn(
               itemClass,
-              "min-w-0 flex-1 cursor-pointer",
-              allSubsUsed ? "text-foreground/30" : "text-foreground",
+              "min-w-0 flex-1 cursor-pointer text-foreground",
               "[&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
             )}
           >
@@ -266,7 +261,6 @@ function ReviewSectionWithSubs({
   const documentedSubCount =
     section.subsections?.filter((sub) => documentedSections?.has(sub.id))
       .length ?? 0;
-  const allSubsDocumented = isDocumented && documentedSubCount === subCount;
 
   return (
     <div>
@@ -281,7 +275,7 @@ function ReviewSectionWithSubs({
             className={cn(
               itemClass,
               "min-w-0 flex-1",
-              allSubsDocumented ? "text-foreground/30" : "text-foreground",
+              "text-foreground",
               !disabled &&
                 "cursor-pointer [&:hover>span.section-label]:underline [&:hover>span.section-label]:underline-offset-2",
             )}
