@@ -20,7 +20,7 @@ import {
 } from "@/components/shared/select";
 import { LiveWaveform } from "@/components/shared/live-waveform";
 import { TemplateSelector } from "@/components/templates/template-selector";
-import { Alert, AlertDescription } from "@/components/shared/alert";
+
 import {
   Dialog,
   DialogContent,
@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from "@/components/shared/dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Mic01Icon, AlertCircleIcon } from "@hugeicons/core-free-icons";
+import { Mic01Icon } from "@hugeicons/core-free-icons";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -650,13 +650,6 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           {micError && (
             <p className="text-sm text-destructive">{t("micError")}</p>
           )}
-          <Alert
-            variant="destructive"
-            className="border-none bg-destructive/10 desktop:hidden"
-          >
-            <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-            <AlertDescription>{t("recordingTip")}</AlertDescription>
-          </Alert>
         </div>
       );
     }
@@ -695,13 +688,6 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
                 {t("pause")}
               </Button>
             </div>
-            <Alert
-              variant="destructive"
-              className="border-none bg-destructive/10 desktop:hidden"
-            >
-              <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-              <AlertDescription>{t("keepScreenOn")}</AlertDescription>
-            </Alert>
           </div>
           {navGuardDialog}
         </>
