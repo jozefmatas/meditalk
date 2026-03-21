@@ -7,8 +7,7 @@ import {
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
 import {
-  getTemplateById,
-  getDefaultTemplate,
+  DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
@@ -120,10 +119,8 @@ export async function POST(request: NextRequest) {
       console.error("Chunk fetch error:", chunksError);
     }
 
-    // Resolve template (DB with static fallback)
-    const template = templateId
-      ? await resolveTemplate(templateId)
-      : getDefaultTemplate();
+    // Resolve template from DB
+    const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
     const allIds = flattenSectionIds(template);
 
     // Build section labels directly from the template
@@ -132,7 +129,9 @@ export async function POST(request: NextRequest) {
     // Determine generation path: fast reformat vs full generation
     const existingNote = visit.soap_note as string | null;
     const oldTemplateId = (visitMeta.template_id as string) || null;
-    const oldTemplate = oldTemplateId ? getTemplateById(oldTemplateId) : null;
+    const oldTemplate = oldTemplateId
+      ? await resolveTemplate(oldTemplateId).catch(() => null)
+      : null;
 
     let clinicalAnalysis: ClinicalAnalysis | null = null;
     const cachedAnalysis = visitMeta.clinical_analysis as

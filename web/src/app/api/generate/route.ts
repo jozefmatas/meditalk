@@ -9,7 +9,7 @@ import {
 } from "@/lib/anthropic";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import {
-  getDefaultTemplate,
+  DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
@@ -202,9 +202,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Look up the template (DB with static fallback)
-    const template = templateId
-      ? await resolveTemplate(templateId)
-      : getDefaultTemplate();
+    const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
 
     // Build section labels directly from the template
     const allIds = flattenSectionIds(template);

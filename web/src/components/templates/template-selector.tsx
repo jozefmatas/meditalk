@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { TEMPLATES } from "@/lib/templates";
 import { Combobox } from "@/components/shared/combobox";
 
 interface TemplateSelectorProps {
@@ -13,6 +12,11 @@ interface TemplateSelectorProps {
   variant?: "default" | "ghost";
   size?: "default" | "sm" | "lg";
   label?: string;
+}
+
+interface TemplateOption {
+  id: string;
+  name: Record<string, string>;
 }
 
 export function TemplateSelector({
@@ -27,13 +31,32 @@ export function TemplateSelector({
   const t = useTranslations("templates");
   const locale = useLocale();
 
+  const [dbTemplates, setDbTemplates] = useState<TemplateOption[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/templates")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: TemplateOption[] | null) => {
+        if (!cancelled && data) setDbTemplates(data);
+      })
+      .catch(() => {
+        // API unavailable — keep using static fallback
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const source = dbTemplates ?? [];
+
   const options = useMemo(
     () =>
-      TEMPLATES.map((template) => ({
+      source.map((template) => ({
         value: template.id,
         label: template.name[locale] ?? template.name.sk ?? template.id,
       })),
-    [locale],
+    [source, locale],
   );
 
   return (

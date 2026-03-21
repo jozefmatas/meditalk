@@ -12,8 +12,10 @@ import {
 } from "@/components/shared/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NoteIcon } from "@hugeicons/core-free-icons";
-import { getTemplateById, resolveSectionLabel } from "@/lib/templates";
+import { resolveSectionLabel } from "@/lib/templates";
 import type { TemplateSection } from "@/lib/templates";
+import { useTemplate } from "@/hooks/use-template";
+import { Skeleton } from "@/components/shared/skeleton";
 
 interface PageProps {
   params: Promise<{ templateId: string }>;
@@ -24,7 +26,19 @@ export default function TemplateDetailPage({ params }: PageProps) {
   const t = useTranslations("templates");
   const locale = useLocale();
 
-  const template = getTemplateById(templateId);
+  const { template, isLoading } = useTemplate(templateId);
+
+  if (isLoading) {
+    return (
+      <AppShell>
+        <div className="max-w-3xl space-y-6">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-64 w-full rounded-xl" />
+        </div>
+      </AppShell>
+    );
+  }
+
   if (!template) return notFound();
 
   return (

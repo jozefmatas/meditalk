@@ -25,10 +25,8 @@ import {
 import { Skeleton } from "@/components/shared/skeleton";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
-import {
-  getTemplateById,
-  buildSectionLabelsFromTemplate,
-} from "@/lib/templates";
+import { buildSectionLabelsFromTemplate } from "@/lib/templates";
+import { useTemplate } from "@/hooks/use-template";
 import type { Encounter, EncounterStatus, EncounterType } from "@/lib/types";
 
 import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
@@ -159,7 +157,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [metadata.title, syncTitle]);
 
   // Template + section labels (shared between generation and section editing)
-  const template = getTemplateById(generation.selectedTemplateId);
+  const { template } = useTemplate(generation.selectedTemplateId);
   const sectionLabels = useMemo(() => {
     if (!template) return {};
     return buildSectionLabelsFromTemplate(template, locale);

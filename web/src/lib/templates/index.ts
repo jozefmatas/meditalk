@@ -1,24 +1,8 @@
 import { nanoid } from "nanoid";
-import { comprehensiveMedicalExam } from "./comprehensive-medical-exam";
-import { basicSoap } from "./basic-soap";
-import { focusedCardiologyExam } from "./focused-cardiology-exam";
-import { comprehensiveCardiologyExam } from "./comprehensive-cardiology-exam";
 import type { Template, TemplateSection } from "./types";
 
-export const TEMPLATES: Template[] = [
-  comprehensiveMedicalExam,
-  basicSoap,
-  focusedCardiologyExam,
-  comprehensiveCardiologyExam,
-];
-
-export function getTemplateById(id: string): Template | undefined {
-  return TEMPLATES.find((t) => t.id === id);
-}
-
-export function getDefaultTemplate(): Template {
-  return comprehensiveMedicalExam;
-}
+/** The default template used for new encounters. */
+export const DEFAULT_TEMPLATE_ID = "t_UjVsxUoQxc";
 
 export { type Template, type TemplateSection } from "./types";
 

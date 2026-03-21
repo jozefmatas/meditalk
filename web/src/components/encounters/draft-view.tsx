@@ -335,6 +335,7 @@ export function DraftView({
       <div className="hidden desktop:flex flex-1 min-h-0 gap-6">
         <TemplateSidebar
           templateId={selectedTemplateId}
+          template={template}
           onTemplateChange={onTemplateChange}
           disabled={isGenerating}
           onInsertSection={handleInsertSection}

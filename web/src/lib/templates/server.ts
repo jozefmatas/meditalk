@@ -1,7 +1,6 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import { getTemplateById, getDefaultTemplate, TEMPLATES } from "./index";
 import type { Template, TemplateSection } from "./types";
 
 /** Convert a DB row (snake_case) to Template type (camelCase). */
@@ -21,41 +20,37 @@ function dbRowToTemplate(row: Record<string, unknown>): Template {
 }
 
 /**
- * Resolve a template by ID: fetch from Supabase, fall back to static.
- * Used by generate/regenerate routes (server-side only).
+ * Resolve a template by ID from the database.
+ * Used by generate/regenerate routes and /api/templates/[id] (server-side only).
  */
 export async function resolveTemplate(id: string): Promise<Template> {
-  try {
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("templates")
-      .select("*")
-      .eq("id", id)
-      .single();
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("templates")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-    if (data) return dbRowToTemplate(data);
-  } catch {
-    // DB unavailable — fall through to static
+  if (error || !data) {
+    throw new Error(`Template not found: ${id}`);
   }
-  return getTemplateById(id) ?? getDefaultTemplate();
+  return dbRowToTemplate(data);
 }
 
 /**
- * Fetch all visible templates: from Supabase, fall back to static TEMPLATES.
- * Used by the templates list page (server-side only).
+ * Fetch all visible templates from the database.
+ * Used by /api/templates route (server-side only).
  */
 export async function resolveAllTemplates(): Promise<Template[]> {
-  try {
-    const supabase = await createClient();
-    const { data } = await supabase
-      .from("templates")
-      .select("*")
-      .eq("visible", true)
-      .order("sort_order");
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("templates")
+    .select("*")
+    .eq("visible", true)
+    .order("sort_order");
 
-    if (data?.length) return data.map(dbRowToTemplate);
-  } catch {
-    // DB unavailable — fall through to static
+  if (error || !data?.length) {
+    throw new Error("No templates found in database");
   }
-  return TEMPLATES;
+  return data.map(dbRowToTemplate);
 }

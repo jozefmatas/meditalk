@@ -659,6 +659,7 @@ export function ReviewView({
             <div className="pt-6">
               <TemplateSidebar
                 templateId={selectedTemplateId}
+                template={template}
                 onTemplateChange={handleRegenerateWithTabSwitch}
                 disabled={isActivelyStreaming}
                 documentedSections={documentedSectionIds}

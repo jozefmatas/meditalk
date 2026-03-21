@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getTemplates } from "@/lib/queries";
+import { VisibilityToggle } from "@/components/visibility-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -91,15 +92,10 @@ export default async function TemplatesPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span
-                    className={`rounded px-2 py-0.5 text-xs font-medium ${
-                      t.visible
-                        ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
-                        : "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
-                    }`}
-                  >
-                    {t.visible ? "Yes" : "No"}
-                  </span>
+                  <VisibilityToggle
+                    templateId={t.id}
+                    initialVisible={t.visible}
+                  />
                 </td>
                 <td className="px-4 py-3">
                   <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">

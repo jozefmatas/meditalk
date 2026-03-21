@@ -16,16 +16,16 @@ Templates are currently static TypeScript objects with section IDs (English slug
 // web/src/lib/templates/types.ts
 
 export interface TemplateSection {
-  id: string;                         // nanoid hash, e.g. "s_a7x9kM3pqR"
-  labels: Record<string, string>;     // { sk: "Srdce", en: "Heart", cs: "Srdce" }
-  context?: string;                   // AI guidance: "Auscultation findings, murmurs, rhythm"
+  id: string; // nanoid hash, e.g. "s_a7x9kM3pqR"
+  labels: Record<string, string>; // { sk: "Srdce", en: "Heart", cs: "Srdce" }
+  context?: string; // AI guidance: "Auscultation findings, murmurs, rhythm"
   subsections?: TemplateSection[];
 }
 
 export interface Template {
-  id: string;                              // uuid from DB
-  name: Record<string, string>;            // { sk: "Základný SOAP", en: "Basic SOAP" }
-  description: Record<string, string>;     // { sk: "...", en: "..." }
+  id: string; // uuid from DB
+  name: Record<string, string>; // { sk: "Základný SOAP", en: "Basic SOAP" }
+  description: Record<string, string>; // { sk: "...", en: "..." }
   sections: TemplateSection[];
   systemPrompt?: string;
   styleExamples?: { name: string; text: string }[];
@@ -36,6 +36,7 @@ export interface Template {
 ```
 
 **Key design decisions:**
+
 - **Section IDs**: Language-neutral nanoid hashes (`s_` + 10 chars), NOT English slugs
 - **Labels**: Per-locale display names stored directly in section JSONB — no i18n file dependency
 - **Context**: Per-section AI guidance injected into generation prompt
@@ -45,8 +46,8 @@ export interface Template {
 
 Labels move from static JSON files (`messages/sk.json → templates.sections.heart`) to the template's `sections` JSONB in the database. This enables admin editing without code deploys.
 
-**Before:** `tTemplates(\`sections.\${section.labelKey}\`)` → next-intl lookup
-**After:** `section.labels[locale] ?? section.labels.sk` → direct object lookup
+**Before:** `tTemplates(\`sections.\${section.labelKey}\`)`→ next-intl lookup
+**After:**`section.labels[locale] ?? section.labels.sk` → direct object lookup
 
 UI chrome (button labels, page titles) stays in i18n JSON files. Only template/section content moves to DB.
 
@@ -99,7 +100,7 @@ _Smallest change with biggest impact — makes prompts per-template configurable
 
 _Transform the data model before creating the DB table._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 3A. Update `TemplateSection` type
 
@@ -120,10 +121,10 @@ _Transform the data model before creating the DB table._
 **File:** `web/src/lib/templates/index.ts`
 
 ```typescript
-function generateSectionId(): string          // "s_" + nanoid(10)
-function resolveSectionLabel(section, locale)  // labels[locale] ?? labels.sk ?? id
-function buildSectionLabelsFromTemplate(template, locale)  // { [id]: label }
-function buildSectionContextsFromTemplate(template)        // { [id]: context }
+function generateSectionId(): string; // "s_" + nanoid(10)
+function resolveSectionLabel(section, locale); // labels[locale] ?? labels.sk ?? id
+function buildSectionLabelsFromTemplate(template, locale); // { [id]: label }
+function buildSectionContextsFromTemplate(template); // { [id]: context }
 ```
 
 Update `FlatSection` type and `flattenTemplateSections()` accordingly.
@@ -156,7 +157,7 @@ Update `FlatSection` type and `flattenTemplateSections()` accordingly.
 
 _Move templates from static code to the database._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 4A. Write migration
 
@@ -217,7 +218,7 @@ Add `resolveTemplate()` — DB fetch with static fallback. Template now carries 
 
 _See and manage templates from admin._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 5A. Add Templates nav item to sidebar
 
@@ -242,6 +243,64 @@ Table: Name (sk) | Sections count | Visible (toggle) | Edit link
 
 ---
 
+## Step 5.5: DB-only templates — remove static fallbacks
+
+_Single source of truth: DB → API → client. No more dual-path static/DB logic._
+
+**Status:** [ ] Not started
+
+### 5.5A. Create `/api/templates/[id]` route
+
+**File:** `web/src/app/api/templates/[id]/route.ts`
+
+GET: returns full Template object by ID via `resolveTemplate()`.
+
+### 5.5B. Update `/api/templates` route
+
+Return full Template objects (not just `{id, name}`), enabling single-fetch cache population.
+
+### 5.5C. Create `useTemplate(id)` hook
+
+**File:** `web/src/hooks/use-template.ts`
+
+- Module-level `Map<string, Template>` cache shared across all instances
+- Deduplicates inflight requests
+- Returns `{ template, isLoading }`
+
+### 5.5D. Clean up `index.ts`
+
+**File:** `web/src/lib/templates/index.ts`
+
+- **Remove:** `TEMPLATES` array, `getTemplateById()`, `getDefaultTemplate()`, all 4 static template imports
+- **Add:** `DEFAULT_TEMPLATE_ID = "t_UjVsxUoQxc"` constant
+- **Keep:** all utility functions and type exports
+
+### 5.5E. Remove static fallbacks from `server.ts`
+
+`resolveTemplate()` and `resolveAllTemplates()` become DB-only (throw on failure).
+
+### 5.5F. Update consumers
+
+- `page.tsx` → `useTemplate(selectedTemplateId)` instead of `getTemplateById()`
+- `use-encounter-generation.ts` → `DEFAULT_TEMPLATE_ID` instead of `getDefaultTemplate().id`
+- `template-sidebar.tsx` → receives `template` as prop (removes redundant internal lookup)
+- `template-selector.tsx` → remove `TEMPLATES` fallback
+- `header.tsx` → `useTemplate` hook for breadcrumb
+- `templates/[templateId]/page.tsx` → `useTemplate` hook
+- `generate/route.ts`, `regenerate/route.ts` → `resolveTemplate(id || DEFAULT_TEMPLATE_ID)`
+
+### 5.5G. Delete static template files
+
+Delete 4 template `.ts` files + `scripts/seed-templates.ts`. Seed SQL is the canonical seed.
+
+### 5.5H. Update tests
+
+Remove tests for deleted functions; add test for `DEFAULT_TEMPLATE_ID`.
+
+**Result:** One data path for templates. No static files, no fallbacks, no dual logic.
+
+---
+
 ## Step 6: Admin template builder — Section editor
 
 _Build/edit template sections from admin._
@@ -255,11 +314,13 @@ _Build/edit template sections from admin._
 Two panels:
 
 **Metadata panel:**
+
 - Name (text input, Slovak)
 - Description (textarea, Slovak)
 - Specialties (tags)
 
 **Section editor panel:**
+
 - Tree view of headers (H2) and subheaders (H3)
 - Each section row:
   - Drag handle (reorder)
@@ -286,6 +347,7 @@ POST: accepts section labels in primary locale, returns translations to en/cs vi
 ### 6D. Duplicate template flow
 
 POST to `admin/app/api/templates/route.ts` with `sourceTemplateId`:
+
 - Deep-clones sections with **new nanoid IDs** for every section
 - Sets `source_template_id` for tracking lineage
 - Appends " (kópia)" to name
@@ -346,22 +408,22 @@ PATCH updates `style_examples` JSONB column.
 
 ## Key Files Summary
 
-| File | Step | Change |
-|------|------|--------|
-| `web/src/lib/templates/types.ts` | 3 | Hash IDs, `labels`, `context`, updated Template shape |
-| `web/src/lib/templates/*.ts` (4 files) | 3 | Migrate to hash IDs + embedded labels |
-| `web/src/lib/templates/index.ts` | 3 | Helpers: resolveSectionLabel, generateSectionId, etc. |
-| `web/src/lib/anthropic.ts` | 1,2,3 | systemPrompt, styleExamples, context injection |
-| `web/src/app/api/generate/route.ts` | 3,4 | Use template labels/context, DB fetch |
-| `web/src/app/api/regenerate/route.ts` | 3,4 | Same as generate |
-| `web/src/components/encounters/*.tsx` | 3 | section.labels[locale] resolution |
-| `web/messages/{sk,en,cs}.json` | 3 | Remove dead templates.sections.* keys |
-| `web/supabase/migrations/006_templates.sql` | 4 | DB table + seed |
-| `web/src/app/api/templates/route.ts` | 4 | GET with DB + static fallback |
-| `admin/components/app-sidebar.tsx` | 5 | Add Templates nav |
-| `admin/app/(admin)/templates/page.tsx` | 5 | Template list |
-| `admin/app/(admin)/templates/[id]/page.tsx` | 6,7,8 | Template builder (sections, prompt, style) |
-| `admin/app/api/templates/*.ts` | 5,6 | CRUD + translate routes |
+| File                                        | Step  | Change                                                |
+| ------------------------------------------- | ----- | ----------------------------------------------------- |
+| `web/src/lib/templates/types.ts`            | 3     | Hash IDs, `labels`, `context`, updated Template shape |
+| `web/src/lib/templates/*.ts` (4 files)      | 3     | Migrate to hash IDs + embedded labels                 |
+| `web/src/lib/templates/index.ts`            | 3     | Helpers: resolveSectionLabel, generateSectionId, etc. |
+| `web/src/lib/anthropic.ts`                  | 1,2,3 | systemPrompt, styleExamples, context injection        |
+| `web/src/app/api/generate/route.ts`         | 3,4   | Use template labels/context, DB fetch                 |
+| `web/src/app/api/regenerate/route.ts`       | 3,4   | Same as generate                                      |
+| `web/src/components/encounters/*.tsx`       | 3     | section.labels[locale] resolution                     |
+| `web/messages/{sk,en,cs}.json`              | 3     | Remove dead templates.sections.\* keys                |
+| `web/supabase/migrations/006_templates.sql` | 4     | DB table + seed                                       |
+| `web/src/app/api/templates/route.ts`        | 4     | GET with DB + static fallback                         |
+| `admin/components/app-sidebar.tsx`          | 5     | Add Templates nav                                     |
+| `admin/app/(admin)/templates/page.tsx`      | 5     | Template list                                         |
+| `admin/app/(admin)/templates/[id]/page.tsx` | 6,7,8 | Template builder (sections, prompt, style)            |
+| `admin/app/api/templates/*.ts`              | 5,6   | CRUD + translate routes                               |
 
 ## Verification per step
 

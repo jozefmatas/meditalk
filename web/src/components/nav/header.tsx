@@ -7,7 +7,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { usePageTitle } from "./page-title-context";
 import { useHeaderActions } from "./header-actions-context";
-import { getTemplateById } from "@/lib/templates";
+import { useTemplate } from "@/hooks/use-template";
 import { SidebarTrigger } from "@/components/shared/sidebar";
 import { Separator } from "@/components/shared/separator";
 import {
@@ -33,12 +33,16 @@ export function Header() {
   const { pageTitle } = usePageTitle();
   const { headerActions } = useHeaderActions();
 
-  const buildBreadcrumbs = (): BreadcrumbData[] => {
-    const cleanPath = pathname
-      .replace(/^\/(sk|cs|en)(?=\/|$)/, "")
-      .replace(/^\//, "");
-    const segments = cleanPath.split("/").filter(Boolean);
+  // Extract template ID from path for breadcrumb (only on /templates/[id] pages)
+  const cleanPath = pathname
+    .replace(/^\/(sk|cs|en)(?=\/|$)/, "")
+    .replace(/^\//, "");
+  const segments = cleanPath.split("/").filter(Boolean);
+  const templateSegmentId =
+    segments[0] === "templates" && segments[1] ? segments[1] : undefined;
+  const { template: breadcrumbTemplate } = useTemplate(templateSegmentId);
 
+  const buildBreadcrumbs = (): BreadcrumbData[] => {
     if (segments[0] === "encounters") {
       const crumbs: BreadcrumbData[] = [
         { label: t("encounters"), href: getHref("") },
@@ -59,9 +63,11 @@ export function Header() {
       ];
 
       if (segments[1]) {
-        const tmpl = getTemplateById(segments[1]);
         crumbs.push({
-          label: tmpl?.name[locale] ?? tmpl?.name.sk ?? segments[1],
+          label:
+            breadcrumbTemplate?.name[locale] ??
+            breadcrumbTemplate?.name.sk ??
+            segments[1],
         });
       }
 

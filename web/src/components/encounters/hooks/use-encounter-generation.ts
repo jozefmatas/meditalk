@@ -8,7 +8,7 @@ import {
   audioMimeToExt,
 } from "@/components/encounters/recording-bar";
 import type { NoteSection } from "@/lib/parse-note-sections";
-import { getDefaultTemplate } from "@/lib/templates";
+import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -21,7 +21,10 @@ const CLIENT_RETRY_DELAY = 3000;
 function isTransientError(err: unknown, status?: number): boolean {
   if (err instanceof TypeError) return true; // Network failure
   if (status && [408, 429, 502, 503, 504].includes(status)) return true;
-  if (err instanceof Error && /network|aborted|failed to fetch/i.test(err.message))
+  if (
+    err instanceof Error &&
+    /network|aborted|failed to fetch/i.test(err.message)
+  )
     return true;
   return false;
 }
@@ -50,9 +53,8 @@ export function useEncounterGeneration({
     useState<SupportedLanguage>("sk");
 
   // Template + generation
-  const [selectedTemplateId, setSelectedTemplateId] = useState(
-    getDefaultTemplate().id,
-  );
+  const [selectedTemplateId, setSelectedTemplateId] =
+    useState(DEFAULT_TEMPLATE_ID);
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(() =>
@@ -443,10 +445,7 @@ export function useEncounterGeneration({
 
             break; // Stream completed successfully
           } catch (err) {
-            if (
-              isTransientError(err) &&
-              attempt < CLIENT_MAX_RETRIES
-            ) {
+            if (isTransientError(err) && attempt < CLIENT_MAX_RETRIES) {
               continue;
             }
             throw err;
@@ -740,8 +739,7 @@ export function useEncounterGeneration({
 
         // Revert template selection so the old note + template stay consistent
         setSelectedTemplateId(previousTemplateId);
-        const cachedPrev =
-          templateCacheRef.current.get(previousTemplateId);
+        const cachedPrev = templateCacheRef.current.get(previousTemplateId);
         if (cachedPrev) {
           setGeneratedNoteHtml(cachedPrev.generatedNote);
           setVisit((prev) =>
@@ -794,7 +792,7 @@ export function useEncounterGeneration({
     if (data.soap_note) {
       setGeneratedNoteHtml(data.soap_note);
       // Seed cache with the initially loaded template's note
-      const tid = (meta?.template_id as string) || getDefaultTemplate().id;
+      const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
       templateCacheRef.current.set(tid, {
         generatedNote: data.soap_note,
         letter: data.patient_letter || "",

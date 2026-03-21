@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  TEMPLATES,
-  getTemplateById,
-  getDefaultTemplate,
+  DEFAULT_TEMPLATE_ID,
   flattenTemplateSections,
   generateSectionId,
   resolveSectionLabel,
@@ -11,49 +9,10 @@ import {
 } from "./index";
 import type { Template, TemplateSection } from "./types";
 
-describe("TEMPLATES", () => {
-  it("contains at least one template", () => {
-    expect(TEMPLATES.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("each template has required fields", () => {
-    for (const t of TEMPLATES) {
-      expect(t.id).toBeTruthy();
-      expect(t.name.sk).toBeTruthy();
-      expect(t.description.sk).toBeTruthy();
-      expect(Array.isArray(t.sections)).toBe(true);
-      expect(t.sections.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("has unique template IDs", () => {
-    const ids = TEMPLATES.map((t) => t.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-});
-
-describe("getTemplateById", () => {
-  it("returns template for valid id", () => {
-    const first = TEMPLATES[0];
-    const found = getTemplateById(first.id);
-    expect(found).toBe(first);
-  });
-
-  it("returns undefined for unknown id", () => {
-    expect(getTemplateById("nonexistent-template")).toBeUndefined();
-  });
-});
-
-describe("getDefaultTemplate", () => {
-  it("returns a valid template", () => {
-    const def = getDefaultTemplate();
-    expect(def.id).toBeTruthy();
-    expect(def.sections.length).toBeGreaterThan(0);
-  });
-
-  it("returns a template that exists in TEMPLATES", () => {
-    const def = getDefaultTemplate();
-    expect(TEMPLATES).toContain(def);
+describe("DEFAULT_TEMPLATE_ID", () => {
+  it("is a valid template ID string", () => {
+    expect(DEFAULT_TEMPLATE_ID).toMatch(/^t_/);
+    expect(DEFAULT_TEMPLATE_ID.length).toBeGreaterThan(3);
   });
 });
 
@@ -205,19 +164,6 @@ describe("flattenTemplateSections", () => {
     for (const s of subs) {
       expect(s.level).toBe(3);
       expect(s.parentId).toBe("top2");
-    }
-  });
-
-  it("works with real templates", () => {
-    for (const t of TEMPLATES) {
-      const flat = flattenTemplateSections(t);
-      expect(flat.length).toBeGreaterThan(0);
-      // Every section should have an id and labels
-      for (const s of flat) {
-        expect(s.id).toBeTruthy();
-        expect(s.labels).toBeTruthy();
-        expect(typeof s.labels).toBe("object");
-      }
     }
   });
 });

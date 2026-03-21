@@ -8,14 +8,15 @@ import {
   ArrowRight01Icon,
   Add01Icon,
 } from "@hugeicons/core-free-icons";
-import { getTemplateById, resolveSectionLabel } from "@/lib/templates";
-import type { TemplateSection } from "@/lib/templates";
+import { resolveSectionLabel } from "@/lib/templates";
+import type { Template, TemplateSection } from "@/lib/templates";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { Button } from "@/components/shared/button";
 import { cn } from "@/lib/utils";
 
 interface TemplateSidebarProps {
   templateId: string;
+  template: Template | undefined;
   onTemplateChange: (id: string) => void;
   disabled?: boolean;
   /** Set of section IDs that have generated content (review mode). */
@@ -395,6 +396,7 @@ function ReviewSectionWithSubs({
 
 export function TemplateSidebar({
   templateId,
+  template,
   onTemplateChange,
   disabled,
   documentedSections,
@@ -406,7 +408,6 @@ export function TemplateSidebar({
 }: TemplateSidebarProps) {
   const t = useTranslations("encounters.detail");
   const locale = useLocale();
-  const template = getTemplateById(templateId);
   const isReview = !!documentedSections;
   const isDraft = !isReview;
 
