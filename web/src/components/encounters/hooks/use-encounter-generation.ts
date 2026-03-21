@@ -162,23 +162,22 @@ export function useEncounterGeneration({
 
       // Upload directly to Supabase Storage (bypasses Vercel 4.5 MB limit)
       try {
-        // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+        // Convert to WAV for reliable ElevenLabs compatibility
+        // (MediaRecorder m4a/webm blobs can have malformed containers)
         let uploadBlob = blob;
         let fileName = `recording${audioMimeToExt(blob.type || "audio/webm")}`;
         let contentType = blob.type || "audio/webm";
 
-        if (contentType.includes("webm") || contentType.includes("ogg")) {
-          try {
-            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-            uploadBlob = await convertToWav(blob);
-            fileName = "recording.wav";
-            contentType = "audio/wav";
-          } catch (convErr) {
-            console.warn(
-              "[recording] WAV conversion failed, uploading original:",
-              convErr,
-            );
-          }
+        try {
+          const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+          uploadBlob = await convertToWav(blob);
+          fileName = "recording.wav";
+          contentType = "audio/wav";
+        } catch (convErr) {
+          console.warn(
+            "[recording] WAV conversion failed, uploading original:",
+            convErr,
+          );
         }
 
         const { path, fileId } = await uploadToStorage(uploadBlob, fileName, {
@@ -282,22 +281,18 @@ export function useEncounterGeneration({
           !capturedAudioStoragePath &&
           !streamingTranscript
         ) {
-          // Convert WebM/OGG to WAV for reliable ElevenLabs compatibility
+          // Convert to WAV for reliable ElevenLabs compatibility
           let uploadBlob = blobToProcess;
-          const blobMime = blobToProcess.type || "audio/webm";
-          let fileName = `recording${audioMimeToExt(blobMime)}`;
-          let uploadType = blobMime;
+          let fileName = `recording${audioMimeToExt(blobToProcess.type || "audio/webm")}`;
+          let uploadType = blobToProcess.type || "audio/webm";
 
-          if (blobMime.includes("webm") || blobMime.includes("ogg")) {
-            try {
-              const { convertToWav } =
-                await import("@/lib/audio/convert-to-wav");
-              uploadBlob = await convertToWav(blobToProcess);
-              fileName = "recording.wav";
-              uploadType = "audio/wav";
-            } catch {
-              // Fall back to original
-            }
+          try {
+            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+            uploadBlob = await convertToWav(blobToProcess);
+            fileName = "recording.wav";
+            uploadType = "audio/wav";
+          } catch {
+            // Fall back to original
           }
 
           const result = await uploadToStorage(uploadBlob, fileName, {

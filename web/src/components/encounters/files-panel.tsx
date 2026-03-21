@@ -192,7 +192,7 @@ export function FilesContent({
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,audio/*"
+        accept=".pdf,.png,.jpg,.jpeg,.mp3,.m4a,.mp4,.wav,.aac,.ogg,.webm,.caf,audio/*"
         className="hidden"
         onChange={(e) => {
           if (e.target.files?.length) uploadFiles(e.target.files);
