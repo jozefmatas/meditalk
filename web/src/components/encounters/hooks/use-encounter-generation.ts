@@ -8,7 +8,11 @@ import {
   audioMimeToExt,
 } from "@/components/encounters/recording-bar";
 import type { NoteSection } from "@/lib/parse-note-sections";
-import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
+import {
+  DEFAULT_TEMPLATE_ID,
+  getPreferredTemplateId,
+  setPreferredTemplateId,
+} from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -52,9 +56,10 @@ export function useEncounterGeneration({
   const [generationLanguage, setGenerationLanguage] =
     useState<SupportedLanguage>("sk");
 
-  // Template + generation
-  const [selectedTemplateId, setSelectedTemplateId] =
-    useState(DEFAULT_TEMPLATE_ID);
+  // Template + generation (reads last-used template from localStorage)
+  const [selectedTemplateId, setSelectedTemplateId] = useState(
+    getPreferredTemplateId,
+  );
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
   const [isGenerating, setIsGenerating] = useState(() =>
@@ -543,10 +548,11 @@ export function useEncounterGeneration({
     [visitId, setVisit],
   );
 
-  // Persist template selection
+  // Persist template selection (encounter metadata + localStorage for next time)
   const handleTemplateChange = useCallback(
     (id: string) => {
       setSelectedTemplateId(id);
+      setPreferredTemplateId(id);
       if (!visit) return;
       const meta = (visit.metadata || {}) as Record<string, unknown>;
       fetch(`/api/encounters/${visitId}`, {

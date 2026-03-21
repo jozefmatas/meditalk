@@ -4,6 +4,20 @@ import type { Template, TemplateSection } from "./types";
 /** The default template used for new encounters. */
 export const DEFAULT_TEMPLATE_ID = "t_UjVsxUoQxc";
 
+const TEMPLATE_PREFERENCE_KEY = "meditalk:preferred-template";
+
+/** Read the user's preferred template ID from localStorage (falls back to DEFAULT). */
+export function getPreferredTemplateId(): string {
+  if (typeof window === "undefined") return DEFAULT_TEMPLATE_ID;
+  return localStorage.getItem(TEMPLATE_PREFERENCE_KEY) || DEFAULT_TEMPLATE_ID;
+}
+
+/** Persist the user's template selection for future new encounters. */
+export function setPreferredTemplateId(id: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(TEMPLATE_PREFERENCE_KEY, id);
+}
+
 export { type Template, type TemplateSection } from "./types";
 
 /** Generate a unique section ID: "s_" + 10-char nanoid. */

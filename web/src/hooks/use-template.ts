@@ -7,6 +7,13 @@ import type { Template } from "@/lib/templates";
 const cache = new Map<string, Template>();
 const inflight = new Map<string, Promise<Template | null>>();
 
+/** Pre-populate the cache with templates (e.g. from the list endpoint). */
+export function populateTemplateCache(templates: Template[]): void {
+  for (const t of templates) {
+    cache.set(t.id, t);
+  }
+}
+
 /**
  * Fetch and cache a single template by ID from the API.
  * Returns `{ template, isLoading }`.
