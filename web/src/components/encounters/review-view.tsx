@@ -76,7 +76,6 @@ interface ReviewViewProps {
   onRetry?: () => void;
   // i18n
   t: (key: string) => string;
-  tTemplates: (key: string) => string;
 }
 
 export function ReviewView({
@@ -105,7 +104,6 @@ export function ReviewView({
   onAutoFocused,
   onRetry,
   t,
-  tTemplates,
 }: ReviewViewProps) {
   // Tab state — desktop uses "resources" | "note" | "add-document", mobile uses "note" | "codes"
   const [activeTab, setActiveTab] = useState("note");
@@ -321,7 +319,7 @@ export function ReviewView({
           const label =
             streamingSectionLabels?.[section.id] ??
             sectionLabels[section.id] ??
-            tTemplates(`sections.${section.labelKey}`);
+            section.id;
 
           // Build subsection data with streamed or pending content
           const subsectionData = section.subsections?.map((sub) => {
@@ -329,7 +327,7 @@ export function ReviewView({
             const subLabel =
               streamingSectionLabels?.[sub.id] ??
               sectionLabels[sub.id] ??
-              tTemplates(`sections.${sub.labelKey}`);
+              sub.id;
             return {
               id: sub.id,
               title: subLabel,
@@ -411,13 +409,13 @@ export function ReviewView({
             key={section.id}
             id={`note-section-${section.id}`}
             sectionId={section.id}
-            title={tTemplates(`sections.${section.labelKey}`)}
+            title={sectionLabels[section.id] ?? section.id}
             content={sectionContents[section.id] ?? ""}
             subsections={section.subsections
               ?.filter((sub) => !removedSections.has(sub.id))
               .map((sub) => ({
                 id: sub.id,
-                title: tTemplates(`sections.${sub.labelKey}`),
+                title: sectionLabels[sub.id] ?? sub.id,
                 content: sectionContents[sub.id] ?? "",
               }))}
             onContentChange={onSectionContentChange}

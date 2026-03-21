@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   CheckmarkCircle01Icon,
   ArrowRight01Icon,
   Add01Icon,
 } from "@hugeicons/core-free-icons";
-import { getTemplateById } from "@/lib/templates";
+import { getTemplateById, resolveSectionLabel } from "@/lib/templates";
 import type { TemplateSection } from "@/lib/templates";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { Button } from "@/components/shared/button";
@@ -103,7 +103,7 @@ function SectionWithSubs({
   usedSectionIds,
   onInsertSection,
   onScrollToSection,
-  tTemplates,
+  locale,
 }: {
   section: TemplateSection;
   sectionLabel: string;
@@ -111,7 +111,7 @@ function SectionWithSubs({
   usedSectionIds?: Set<string>;
   onInsertSection?: (sectionId: string, label: string, level: 2 | 3) => void;
   onScrollToSection?: (label: string) => void;
-  tTemplates: ReturnType<typeof useTranslations>;
+  locale: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -189,7 +189,7 @@ function SectionWithSubs({
       {open && (
         <div className="flex flex-col">
           {section.subsections?.map((sub) => {
-            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const subLabel = resolveSectionLabel(sub, locale);
             const isSubUsed = usedSectionIds?.has(sub.id) ?? false;
 
             if (isSubUsed) {
@@ -248,7 +248,7 @@ function ReviewSectionWithSubs({
   documentedSections,
   onAddSection,
   onScrollToSection,
-  tTemplates,
+  locale,
 }: {
   section: TemplateSection;
   sectionLabel: string;
@@ -256,7 +256,7 @@ function ReviewSectionWithSubs({
   documentedSections?: Set<string>;
   onAddSection?: (sectionId: string) => void;
   onScrollToSection?: (sectionId: string) => void;
-  tTemplates: ReturnType<typeof useTranslations>;
+  locale: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -341,7 +341,7 @@ function ReviewSectionWithSubs({
       {open && !disabled && (
         <div className="flex flex-col">
           {section.subsections?.map((sub) => {
-            const subLabel = tTemplates(`sections.${sub.labelKey}`);
+            const subLabel = resolveSectionLabel(sub, locale);
             const isSubDocumented = documentedSections?.has(sub.id) ?? false;
 
             if (isSubDocumented) {
@@ -404,8 +404,8 @@ export function TemplateSidebar({
   onAddSection,
   stickyTop = 0,
 }: TemplateSidebarProps) {
-  const tTemplates = useTranslations("templates");
   const t = useTranslations("encounters.detail");
+  const locale = useLocale();
   const template = getTemplateById(templateId);
   const isReview = !!documentedSections;
   const isDraft = !isReview;
@@ -437,7 +437,7 @@ export function TemplateSidebar({
       {template && isDraft && (
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {template.sections.map((section) => {
-            const sectionLabel = tTemplates(`sections.${section.labelKey}`);
+            const sectionLabel = resolveSectionLabel(section, locale);
             const isSectionUsed = usedSectionIds?.has(section.id) ?? false;
             const hasSubsections =
               section.subsections && section.subsections.length > 0;
@@ -463,7 +463,7 @@ export function TemplateSidebar({
                 usedSectionIds={usedSectionIds}
                 onInsertSection={onInsertSection}
                 onScrollToSection={onScrollToSection}
-                tTemplates={tTemplates}
+                locale={locale}
               />
             );
           })}
@@ -474,7 +474,7 @@ export function TemplateSidebar({
       {template && isReview && (
         <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
           {template.sections.map((section) => {
-            const sectionLabel = tTemplates(`sections.${section.labelKey}`);
+            const sectionLabel = resolveSectionLabel(section, locale);
             const isDocumented = documentedSections?.has(section.id) ?? false;
             const hasSubsections =
               section.subsections && section.subsections.length > 0;
@@ -501,7 +501,7 @@ export function TemplateSidebar({
                 documentedSections={documentedSections}
                 onAddSection={onAddSection}
                 onScrollToSection={onScrollToSection}
-                tTemplates={tTemplates}
+                locale={locale}
               />
             );
           })}

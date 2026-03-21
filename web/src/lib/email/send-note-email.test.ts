@@ -1,4 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("resend", () => ({
+  Resend: vi.fn(),
+}));
+
 import { buildSubject } from "./send-note-email";
 
 describe("buildSubject", () => {

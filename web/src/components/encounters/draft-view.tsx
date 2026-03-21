@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo } from "react";
+import { useTranslations, useLocale } from "next-intl";
 import { Textarea } from "@/components/shared/textarea";
 import { Badge } from "@/components/shared/badge";
 import { ErrorAlert } from "@/components/shared/error-alert";
@@ -24,7 +25,11 @@ import {
   type Editor,
   type SlashCommandItem,
 } from "@/components/editor/tiptap-editor";
-import { flattenTemplateSections, type Template } from "@/lib/templates";
+import {
+  flattenTemplateSections,
+  resolveSectionLabel,
+  type Template,
+} from "@/lib/templates";
 import type { Encounter } from "@/lib/types";
 
 interface DraftViewProps {
@@ -54,7 +59,6 @@ interface DraftViewProps {
   onRetry?: () => void;
   // i18n
   t: (key: string) => string;
-  tTemplates: (key: string) => string;
 }
 
 export function DraftView({
@@ -78,8 +82,10 @@ export function DraftView({
   onFilesChange,
   onRetry,
   t,
-  tTemplates,
 }: DraftViewProps) {
+  const tTemplates = useTranslations("templates");
+  const locale = useLocale();
+
   // Mobile tab state
   const [mobileTab, setMobileTab] = useState<"files" | "notes">("files");
 
@@ -106,12 +112,12 @@ export function DraftView({
       const text = h.textContent?.trim();
       if (!text) return;
       const match = flatSections.find(
-        (s) => tTemplates(`sections.${s.labelKey}`) === text,
+        (s) => resolveSectionLabel(s, locale) === text,
       );
       if (match) used.add(match.id);
     });
     return used;
-  }, [doctorNotes, flatSections, tTemplates]);
+  }, [doctorNotes, flatSections, locale]);
 
   // Build slash command items (only unused sections)
   const slashCommandItems: SlashCommandItem[] = useMemo(() => {
@@ -119,18 +125,19 @@ export function DraftView({
       .filter((s) => !usedSectionIds.has(s.id))
       .map((s) => ({
         id: s.id,
-        label: tTemplates(`sections.${s.labelKey}`),
+        label: resolveSectionLabel(s, locale),
         level: s.level,
         parentLabel: s.parentId
-          ? tTemplates(
-              `sections.${flatSections.find((p) => p.id === s.parentId)?.labelKey ?? s.labelKey}`,
+          ? resolveSectionLabel(
+              flatSections.find((p) => p.id === s.parentId) ?? s,
+              locale,
             )
           : undefined,
         needsParentHeading: s.parentId
           ? !usedSectionIds.has(s.parentId)
           : false,
       }));
-  }, [flatSections, usedSectionIds, tTemplates]);
+  }, [flatSections, usedSectionIds, locale]);
 
   // Insert a heading into the editor at cursor position
   const handleInsertSection = useCallback(
@@ -152,7 +159,7 @@ export function DraftView({
               content: [
                 {
                   type: "text",
-                  text: tTemplates(`sections.${parent.labelKey}`),
+                  text: resolveSectionLabel(parent, locale),
                 },
               ],
             });
@@ -171,7 +178,7 @@ export function DraftView({
 
       editor.chain().focus().insertContent(content).run();
     },
-    [flatSections, usedSectionIds, tTemplates],
+    [flatSections, usedSectionIds, locale],
   );
 
   // Scroll to an existing heading in the editor and place cursor at its end

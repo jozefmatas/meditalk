@@ -1,7 +1,5 @@
-"use client";
-
 import Link from "next/link";
-import { useTranslations } from "next-intl";
+import { getTranslations } from "next-intl/server";
 import { AppShell } from "@/components/nav/app-shell";
 import {
   Card,
@@ -12,13 +10,20 @@ import {
 import { Button } from "@/components/shared/button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, NoteIcon } from "@hugeicons/core-free-icons";
-import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { TEMPLATES } from "@/lib/templates";
+import { routing } from "@/i18n/routing";
+import { resolveAllTemplates } from "@/lib/templates/server";
 import { flattenSectionIds } from "@/lib/templates/html";
 
-export default function TemplatesPage() {
-  const t = useTranslations("templates");
-  const getHref = useLocalizedHref();
+export default async function TemplatesPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const t = await getTranslations("templates");
+  const templates = await resolveAllTemplates();
+
+  const prefix = locale === routing.defaultLocale ? "" : `/${locale}`;
 
   return (
     <AppShell>
@@ -31,7 +36,7 @@ export default function TemplatesPage() {
         </div>
 
         <div className="space-y-4">
-          {TEMPLATES.map((template) => {
+          {templates.map((template) => {
             const sectionCount = flattenSectionIds(template).length;
             return (
               <Card key={template.id}>
@@ -43,15 +48,19 @@ export default function TemplatesPage() {
                       </div>
                       <div>
                         <CardTitle className="text-base">
-                          {t(`${template.id}.name`)}
+                          {template.name[locale] ??
+                            template.name.sk ??
+                            template.id}
                         </CardTitle>
                         <p className="text-sm text-muted-foreground">
-                          {t(`${template.id}.description`)}
+                          {template.description[locale] ??
+                            template.description.sk ??
+                            ""}
                         </p>
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" asChild>
-                      <Link href={getHref(`/templates/${template.id}`)}>
+                      <Link href={`${prefix}/templates/${template.id}`}>
                         {t("viewTemplate")}
                         <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
                       </Link>

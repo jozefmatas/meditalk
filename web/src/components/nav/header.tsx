@@ -3,10 +3,11 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
 import { usePageTitle } from "./page-title-context";
 import { useHeaderActions } from "./header-actions-context";
+import { getTemplateById } from "@/lib/templates";
 import { SidebarTrigger } from "@/components/shared/sidebar";
 import { Separator } from "@/components/shared/separator";
 import {
@@ -26,7 +27,7 @@ interface BreadcrumbData {
 export function Header() {
   const t = useTranslations("nav");
   const tEncounters = useTranslations("encounters");
-  const tTemplates = useTranslations("templates");
+  const locale = useLocale();
   const pathname = usePathname();
   const getHref = useLocalizedHref();
   const { pageTitle } = usePageTitle();
@@ -58,7 +59,10 @@ export function Header() {
       ];
 
       if (segments[1]) {
-        crumbs.push({ label: tTemplates(`${segments[1]}.name`) });
+        const tmpl = getTemplateById(segments[1]);
+        crumbs.push({
+          label: tmpl?.name[locale] ?? tmpl?.name.sk ?? segments[1],
+        });
       }
 
       return crumbs;
