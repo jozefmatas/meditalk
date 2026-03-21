@@ -269,7 +269,7 @@ export function useEncounterGeneration({
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
       const capturedAudioStoragePath = audioStoragePath;
-      const finalized = recordingBarRef.current?.finalize();
+      const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
 

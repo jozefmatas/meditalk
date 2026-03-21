@@ -36,7 +36,7 @@ type RecordingState = "idle" | "recording" | "paused";
 
 export interface RecordingBarRef {
   /** Stop recorder + Scribe stream, return blob and pre-transcribed text. */
-  finalize: () => { blob: Blob | null; transcript: string | null };
+  finalize: () => Promise<{ blob: Blob | null; transcript: string | null }>;
 }
 
 interface RecordingBarProps {
@@ -54,18 +54,20 @@ function formatDuration(seconds: number) {
 }
 
 function getSupportedMimeType(): string {
-  // Prefer MP4/AAC — better compatibility with ElevenLabs than WebM from Android Chrome
+  // Prefer WebM — handles chunked recording (timeslice) correctly.
+  // MP4 (Safari-only) fragments don't concatenate into valid files,
+  // so we use it only as a last resort and skip timeslice for it.
   const types = [
-    "audio/mp4",
     "audio/webm;codecs=opus",
     "audio/webm",
     "audio/ogg;codecs=opus",
     "audio/ogg",
+    "audio/mp4",
   ];
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
-  return "audio/mp4";
+  return "";
 }
 
 /** Map recording MIME type to file extension. */
@@ -404,33 +406,61 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       ref,
       () => ({
         finalize: () => {
-          const recorder = mediaRecorderRef.current;
-          if (recorder && recorder.state !== "inactive") {
-            recorder.stop();
-          }
-          // Stop the recording stream we own
-          if (recordingStreamRef.current) {
-            recordingStreamRef.current.getTracks().forEach((t) => t.stop());
-            recordingStreamRef.current = null;
-            setRecordingStream(null);
-          }
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
-
           // Stop Scribe and grab transcript
           stopScribe();
           const transcript = transcriptRef.current || null;
           transcriptRef.current = "";
 
-          releaseWakeLock();
-          setState("idle");
-          setDuration(0);
-          elapsedBeforePauseRef.current = 0;
-          const blob = buildBlob();
-          chunksRef.current = [];
-          return { blob, transcript };
+          const recorder = mediaRecorderRef.current;
+
+          // If recorder is already stopped or never started, resolve immediately
+          if (!recorder || recorder.state === "inactive") {
+            const blob = buildBlob();
+            chunksRef.current = [];
+            // Cleanup
+            if (recordingStreamRef.current) {
+              recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+              recordingStreamRef.current = null;
+              setRecordingStream(null);
+            }
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            releaseWakeLock();
+            setState("idle");
+            setDuration(0);
+            elapsedBeforePauseRef.current = 0;
+            return Promise.resolve({ blob, transcript });
+          }
+
+          // Wait for onstop to fire (ensures all data is flushed, especially
+          // for mp4 which doesn't use timeslice and delivers all data at stop)
+          return new Promise<{
+            blob: Blob | null;
+            transcript: string | null;
+          }>((resolve) => {
+            recorder.onstop = () => {
+              const blob = buildBlob();
+              chunksRef.current = [];
+              resolve({ blob, transcript });
+            };
+            recorder.stop();
+            // Cleanup resources while waiting for onstop
+            if (recordingStreamRef.current) {
+              recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+              recordingStreamRef.current = null;
+              setRecordingStream(null);
+            }
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            releaseWakeLock();
+            setState("idle");
+            setDuration(0);
+            elapsedBeforePauseRef.current = 0;
+          });
         },
       }),
       [buildBlob, stopScribe, releaseWakeLock],
@@ -498,7 +528,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           if (blob) onRecordingComplete(blob);
         };
 
-        recorder.start(1000);
+        // MP4 (Safari) produces invalid files when using timeslice — fragmented
+        // MP4 chunks don't concatenate properly. Use no timeslice so stop()
+        // delivers a single valid file. WebM/OGG handle timeslice correctly.
+        if (mimeType.includes("mp4")) {
+          recorder.start();
+        } else {
+          recorder.start(1000);
+        }
 
         // Start Scribe streaming from the same mic stream (non-blocking)
         startScribe(stream);
