@@ -31,11 +31,16 @@ function LabeledSwitch({ label, className, id, ...props }: LabeledSwitchProps) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="group/switch flex items-center gap-2">
       <Switch id={switchId} className={className} {...props} />
       <label
         htmlFor={switchId}
-        className="cursor-pointer text-sm font-normal text-foreground/65 peer-data-checked:text-foreground"
+        className={cn(
+          "text-sm font-normal text-foreground/65",
+          props.disabled
+            ? "cursor-not-allowed opacity-50"
+            : "cursor-pointer group-has-[button[data-state=checked]]/switch:text-foreground",
+        )}
       >
         {label}
       </label>

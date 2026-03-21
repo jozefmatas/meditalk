@@ -2,7 +2,7 @@ import { nanoid } from "nanoid";
 import type { Template, TemplateSection } from "./types";
 
 /** The default template used for new encounters. */
-export const DEFAULT_TEMPLATE_ID = "t_UjVsxUoQxc";
+export const DEFAULT_TEMPLATE_ID = "t_KZPRXwjQye";
 
 const TEMPLATE_PREFERENCE_KEY = "meditalk:preferred-template";
 
