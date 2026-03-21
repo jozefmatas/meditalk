@@ -1,7 +1,7 @@
 import type { Template } from "./types";
 
 export const basicSoap: Template = {
-  id: "basic-soap",
+  id: "t_X2cOl91J5A",
   name: {
     sk: "Základná SOAP poznámka",
     en: "Basic SOAP Note",

@@ -1,7 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { LayoutDashboardIcon, UsersIcon, FileTextIcon } from "lucide-react";
+import {
+  LayoutDashboardIcon,
+  UsersIcon,
+  FileTextIcon,
+  LayoutTemplateIcon,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -19,6 +24,7 @@ const NAV_ITEMS = [
   { label: "Dashboard", href: "/", icon: LayoutDashboardIcon },
   { label: "Users", href: "/users", icon: UsersIcon },
   { label: "Encounters", href: "/encounters", icon: FileTextIcon },
+  { label: "Templates", href: "/templates", icon: LayoutTemplateIcon },
 ];
 
 export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {

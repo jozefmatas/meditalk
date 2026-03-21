@@ -356,3 +356,33 @@ export async function getUserDetail(userId: string): Promise<UserDetail> {
     })),
   };
 }
+
+// ── Templates ──────────────────────────────────────────────────────
+
+export interface TemplateRow {
+  id: string;
+  name: Record<string, string>;
+  description: Record<string, string>;
+  specialties: string[];
+  sections: unknown[];
+  is_system: boolean;
+  visible: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export async function getTemplates(): Promise<TemplateRow[]> {
+  const sb = supabaseAdmin();
+
+  const { data, error } = await sb
+    .from('templates')
+    .select('id, name, description, specialties, sections, is_system, visible, sort_order, created_at')
+    .order('sort_order');
+
+  if (error || !data) {
+    console.error('[admin] getTemplates error:', error?.message);
+    return [];
+  }
+
+  return data as TemplateRow[];
+}

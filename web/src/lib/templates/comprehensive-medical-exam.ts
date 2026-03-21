@@ -1,7 +1,7 @@
 import type { Template } from "./types";
 
 export const comprehensiveMedicalExam: Template = {
-  id: "comprehensive-medical-exam",
+  id: "t_UjVsxUoQxc",
   name: {
     sk: "Komplexné lekárske vyšetrenie",
     en: "Comprehensive Medical Exam",

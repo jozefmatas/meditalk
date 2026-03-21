@@ -1,7 +1,7 @@
 import type { Template } from "./types";
 
 export const comprehensiveCardiologyExam: Template = {
-  id: "comprehensive-cardiology-exam",
+  id: "t_PuUApaFmlk",
   name: {
     sk: "Komplexné kardiologické vyšetrenie",
     en: "Comprehensive Cardiology Examination",

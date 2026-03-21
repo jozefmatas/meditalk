@@ -1,7 +1,7 @@
 import type { Template } from "./types";
 
 export const focusedCardiologyExam: Template = {
-  id: "focused-cardiology-exam",
+  id: "t_KZPRXwjQye",
   name: {
     sk: "Cielené kardiologické vyšetrenie",
     en: "Focused Cardiology Examination",
