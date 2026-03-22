@@ -352,11 +352,25 @@ export async function POST(request: NextRequest) {
       async start(controller) {
         let inputTokens = 0;
         let outputTokens = 0;
+        let clientDisconnected = false;
 
         function sendEvent(data: Record<string, unknown>) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
-          );
+          if (clientDisconnected) return;
+          try {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
+            );
+          } catch {
+            clientDisconnected = true;
+          }
+        }
+
+        function safeClose() {
+          try {
+            safeClose();
+          } catch {
+            /* already closed or cancelled */
+          }
         }
 
         // Notify client that clinical analysis is complete
@@ -488,7 +502,7 @@ export async function POST(request: NextRequest) {
               const rawParsed = extractJson<Record<string, unknown>>(fullText);
               if (rawParsed.insufficient_context === true) {
                 sendEvent({ type: "error", error: "insufficient_context" });
-                controller.close();
+                safeClose();
                 return;
               }
             } catch {
@@ -501,7 +515,7 @@ export async function POST(request: NextRequest) {
             parsed = extractJson<Record<string, string>>(fullText);
           } catch {
             sendEvent({ type: "error", error: "Failed to parse response" });
-            controller.close();
+            safeClose();
             return;
           }
 
@@ -559,7 +573,7 @@ export async function POST(request: NextRequest) {
           if (saveError) {
             console.error("Failed to save generated content:", saveError);
             sendEvent({ type: "error", error: "save_failed" });
-            controller.close();
+            safeClose();
             return;
           }
 
@@ -596,15 +610,21 @@ export async function POST(request: NextRequest) {
           });
 
           lap("total");
-          controller.close();
+          safeClose();
         } catch (err) {
           console.error("Generate stream error:", err);
           sendEvent({
             type: "error",
             error: err instanceof Error ? err.message : "Generation failed",
           });
-          controller.close();
+          safeClose();
         }
+      },
+      cancel() {
+        // Client disconnected — generation continues in start()
+        console.log(
+          "[generate] Client disconnected, generation continues server-side",
+        );
       },
     });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
 import {
@@ -81,6 +82,11 @@ export function useEncounterGeneration({
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
+  // Navigation guard state
+  const router = useRouter();
+  const [navDialogOpen, setNavDialogOpen] = useState(false);
+  const pendingNavUrlRef = useRef<string | null>(null);
+
   const initialDoctorNotesRef = useRef("");
 
   // Client-side cache: templateId → { generatedNote, letter }
@@ -100,15 +106,51 @@ export function useEncounterGeneration({
     titleRef.current = t;
   }, []);
 
-  // Prevent accidental navigation during processing
+  // Prevent accidental navigation during generation
   useEffect(() => {
     if (!isGenerating) return;
-    const handler = (e: BeforeUnloadEvent) => {
+
+    // Tab close / page refresh — browser shows native "Leave site?" dialog
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    // Client-side link clicks — show custom dialog instead of navigating
+    const handleClick = (e: MouseEvent) => {
+      const anchor = (e.target as Element).closest("a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href === "#") return;
+      try {
+        const url = new URL(href, location.origin);
+        if (
+          url.origin === location.origin &&
+          url.pathname !== location.pathname
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          pendingNavUrlRef.current = href;
+          setNavDialogOpen(true);
+        }
+      } catch {
+        // invalid URL, ignore
+      }
+    };
+    document.addEventListener("click", handleClick, true);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleClick, true);
+    };
   }, [isGenerating]);
+
+  const handleConfirmLeave = useCallback(() => {
+    setNavDialogOpen(false);
+    const url = pendingNavUrlRef.current;
+    pendingNavUrlRef.current = null;
+    if (url) router.push(url);
+  }, [router]);
 
   // Re-fetch encounter when a background generation completes
   useEffect(() => {
@@ -825,5 +867,8 @@ export function useEncounterGeneration({
     handleLanguageChange,
     handleTemplateChange,
     handleRegenerate,
+    navDialogOpen,
+    setNavDialogOpen,
+    handleConfirmLeave,
   };
 }

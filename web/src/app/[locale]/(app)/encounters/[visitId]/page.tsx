@@ -443,6 +443,35 @@ export default function EncounterDetailPage({ params }: PageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Navigation guard during generation */}
+      <Dialog
+        open={generation.navDialogOpen}
+        onOpenChange={generation.setNavDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("detail.leaveWhileGeneratingTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("detail.leaveWhileGeneratingDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => generation.setNavDialogOpen(false)}
+            >
+              {t("detail.leaveWhileGeneratingStay")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={generation.handleConfirmLeave}
+            >
+              {t("detail.leaveWhileGeneratingLeave")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
