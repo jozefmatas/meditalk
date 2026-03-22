@@ -81,11 +81,11 @@ export function useSectionEditing({
           await fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ soap_note: html }),
+            body: JSON.stringify({ encounter_note: html }),
           });
           // Update local state so copy works with latest
           setGeneratedNoteHtml(html);
-          setVisit((prev) => (prev ? { ...prev, soap_note: html } : prev));
+          setVisit((prev) => (prev ? { ...prev, encounter_note: html } : prev));
         } catch {
           // Silent fail
         }

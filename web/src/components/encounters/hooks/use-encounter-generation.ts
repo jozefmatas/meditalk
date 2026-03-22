@@ -166,7 +166,7 @@ export function useEncounterGeneration({
           const data: Encounter = await res.json();
           setVisit(data);
           if (data.title) updateTitleRef.current(data.title);
-          if (data.soap_note) setGeneratedNoteHtml(data.soap_note);
+          if (data.encounter_note) setGeneratedNoteHtml(data.encounter_note);
         } catch {
           /* silent */
         }
@@ -458,7 +458,7 @@ export function useEncounterGeneration({
                       >;
                       return {
                         ...prev,
-                        soap_note: event.generatedNote,
+                        encounter_note: event.generatedNote,
                         patient_letter: event.letter,
                         ...(streamingTranscript
                           ? { raw_text: streamingTranscript }
@@ -610,9 +610,9 @@ export function useEncounterGeneration({
       const previousTemplateId = selectedTemplateId;
 
       // Cache current template's note before switching
-      if (visit?.soap_note) {
+      if (visit?.encounter_note) {
         templateCacheRef.current.set(selectedTemplateId, {
-          generatedNote: visit.soap_note,
+          generatedNote: visit.encounter_note,
           letter: visit.patient_letter || "",
         });
       }
@@ -627,7 +627,7 @@ export function useEncounterGeneration({
           prev
             ? {
                 ...prev,
-                soap_note: cached.generatedNote,
+                encounter_note: cached.generatedNote,
                 patient_letter: cached.letter,
               }
             : prev,
@@ -638,7 +638,7 @@ export function useEncounterGeneration({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            soap_note: cached.generatedNote,
+            encounter_note: cached.generatedNote,
             patient_letter: cached.letter,
             metadata: { ...meta, template_id: newTemplateId },
           }),
@@ -745,7 +745,7 @@ export function useEncounterGeneration({
                       prev
                         ? {
                             ...prev,
-                            soap_note: event.generatedNote,
+                            encounter_note: event.generatedNote,
                             patient_letter: event.letter,
                           }
                         : prev,
@@ -789,7 +789,7 @@ export function useEncounterGeneration({
             prev
               ? {
                   ...prev,
-                  soap_note: cachedPrev.generatedNote,
+                  encounter_note: cachedPrev.generatedNote,
                   patient_letter: cachedPrev.letter,
                 }
               : prev,
@@ -822,26 +822,104 @@ export function useEncounterGeneration({
   );
 
   /** Initialize state from fetched visit data */
-  const initFromVisit = useCallback((data: Encounter) => {
-    setGenerationLanguage((data.language as SupportedLanguage) || "sk");
-    const meta = data.metadata as Record<string, unknown>;
-    if (meta?.template_id) {
-      setSelectedTemplateId(meta.template_id as string);
-    }
-    if (meta?.doctor_notes) {
-      setDoctorNotes(meta.doctor_notes as string);
-      initialDoctorNotesRef.current = meta.doctor_notes as string;
-    }
-    if (data.soap_note) {
-      setGeneratedNoteHtml(data.soap_note);
-      // Seed cache with the initially loaded template's note
-      const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
-      templateCacheRef.current.set(tid, {
-        generatedNote: data.soap_note,
-        letter: data.patient_letter || "",
-      });
+  // Poll for server-side generation completion when page loads mid-generation
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
   }, []);
+
+  // Clean up polling on unmount
+  useEffect(() => stopPolling, [stopPolling]);
+
+  const initFromVisit = useCallback(
+    (data: Encounter) => {
+      setGenerationLanguage((data.language as SupportedLanguage) || "sk");
+      const meta = data.metadata as Record<string, unknown>;
+      if (meta?.template_id) {
+        setSelectedTemplateId(meta.template_id as string);
+      }
+      if (meta?.doctor_notes) {
+        setDoctorNotes(meta.doctor_notes as string);
+        initialDoctorNotesRef.current = meta.doctor_notes as string;
+      }
+      if (data.encounter_note) {
+        setGeneratedNoteHtml(data.encounter_note);
+        // Seed cache with the initially loaded template's note
+        const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
+        templateCacheRef.current.set(tid, {
+          generatedNote: data.encounter_note,
+          letter: data.patient_letter || "",
+        });
+      }
+
+      // Server-side generation still running — show processing overlay and poll
+      if (data.status === "processing" && !data.encounter_note) {
+        setIsGenerating(true);
+        setIsStreaming(false);
+        stopPolling();
+        const pollStart = Date.now();
+        const POLL_TIMEOUT_MS = 90_000; // give up after 90s
+        pollingRef.current = setInterval(async () => {
+          // Timeout — server likely failed; reset to "started" so user can retry
+          if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
+            stopPolling();
+            setIsGenerating(false);
+            setVisit((prev) =>
+              prev ? { ...prev, status: "started" as const } : prev,
+            );
+            fetch(`/api/encounters/${visitId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "started" }),
+            }).catch(() => {});
+            window.dispatchEvent(
+              new CustomEvent("encounter-update", {
+                detail: { id: visitId, status: "started" },
+              }),
+            );
+            return;
+          }
+          try {
+            const res = await fetch(`/api/encounters/${visitId}`);
+            if (!res.ok) return;
+            const updated: Encounter = await res.json();
+            if (updated.encounter_note || updated.status !== "processing") {
+              stopPolling();
+              setIsGenerating(false);
+              setVisit(updated);
+              if (updated.encounter_note) {
+                setGeneratedNoteHtml(updated.encounter_note);
+                const tid =
+                  ((updated.metadata as Record<string, unknown>)
+                    ?.template_id as string) || DEFAULT_TEMPLATE_ID;
+                templateCacheRef.current.set(tid, {
+                  generatedNote: updated.encounter_note,
+                  letter: updated.patient_letter || "",
+                });
+              }
+              if (updated.title) updateTitleRef.current(updated.title);
+              window.dispatchEvent(
+                new CustomEvent("encounter-update", {
+                  detail: {
+                    id: visitId,
+                    status: updated.status,
+                    ...(updated.title ? { title: updated.title } : {}),
+                  },
+                }),
+              );
+            }
+          } catch {
+            /* silent — retry next interval */
+          }
+        }, 3000);
+      }
+    },
+    [visitId, setVisit, stopPolling],
+  );
 
   return {
     generationLanguage,

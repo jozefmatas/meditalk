@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     // Fetch encounter
     const { data: encounter, error: fetchError } = await supabase
       .from("visits")
-      .select("title, soap_note, language")
+      .select("title, encounter_note, language")
       .eq("id", visitId)
       .eq("user_id", userId)
       .single();
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!encounter.soap_note) {
+    if (!encounter.encounter_note) {
       return NextResponse.json(
         { error: "No generated note to send" },
         { status: 400 },
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     await sendNoteEmail({
       to: user.email,
       title: encounter.title || "Untitled",
-      noteHtml: filterEmptySectionsHtml(encounter.soap_note),
+      noteHtml: filterEmptySectionsHtml(encounter.encounter_note),
       viewUrl,
       language,
     });

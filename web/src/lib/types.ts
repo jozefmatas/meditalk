@@ -29,7 +29,7 @@ export interface Encounter {
   patient_id: string | null;
   visit_type: EncounterType;
   status: EncounterStatus;
-  soap_note: string | null;
+  encounter_note: string | null;
   patient_letter: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -72,7 +72,7 @@ export interface UpdateEncounterRequest {
   visit_date?: string;
   status?: EncounterStatus;
   language?: SupportedLanguage;
-  soap_note?: string;
+  encounter_note?: string;
   patient_letter?: string;
   metadata?: Record<string, unknown>;
 }

@@ -81,7 +81,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (body.visit_date !== undefined) updateData.visit_date = body.visit_date;
     if (body.status !== undefined) updateData.status = body.status;
     if (body.language !== undefined) updateData.language = body.language;
-    if (body.soap_note !== undefined) updateData.soap_note = body.soap_note;
+    if (body.encounter_note !== undefined)
+      updateData.encounter_note = body.encounter_note;
     if (body.patient_letter !== undefined)
       updateData.patient_letter = body.patient_letter;
     if (body.metadata !== undefined) updateData.metadata = body.metadata;

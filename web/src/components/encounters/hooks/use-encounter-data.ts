@@ -57,18 +57,27 @@ export function useEncounterData({
         if (!res.ok) throw new Error("Visit not found");
 
         const data: Encounter = await res.json();
-        // Recording/processing states aren't persisted across page loads — reset to started
-        if (data.status === "recording" || data.status === "processing") {
-          const wasProcessing = data.status === "processing";
+        // Recording state isn't persisted across page loads — reset to started
+        if (data.status === "recording") {
           data.status = "started";
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "started" }),
           }).catch(() => {});
-          if (wasProcessing) {
-            setError("generation_interrupted");
+        }
+        // Processing: server-side generation may still be running
+        if (data.status === "processing") {
+          if (data.encounter_note) {
+            // Server finished but status wasn't updated (pre-fix encounters) — auto-correct
+            data.status = "to_review";
+            fetch(`/api/encounters/${visitId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "to_review" }),
+            }).catch(() => {});
           }
+          // else: server is still generating — keep "processing", generation hook will poll
         }
         setVisit(data);
 

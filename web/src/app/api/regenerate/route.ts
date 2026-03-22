@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     // Fetch visit metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("id, language, metadata, soap_note, patient_letter")
+      .select("id, language, metadata, encounter_note, patient_letter")
       .eq("id", visitId)
       .single();
 
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
     // Determine generation path: fast reformat vs full generation
-    const existingNote = visit.soap_note as string | null;
+    const existingNote = visit.encounter_note as string | null;
     const oldTemplateId = (visitMeta.template_id as string) || null;
     const oldTemplate = oldTemplateId
       ? await resolveTemplate(oldTemplateId).catch(() => null)
@@ -394,13 +394,13 @@ Rules:
           );
 
           // Save to DB (must complete before sending complete event,
-          // so the email API can read the latest soap_note)
+          // so the email API can read the latest encounter_note)
           const existingMetadata =
             (visit.metadata as Record<string, unknown>) || {};
           const { error: saveError } = await supabase
             .from("visits")
             .update({
-              soap_note: generatedNote,
+              encounter_note: generatedNote,
               patient_letter: letter,
               metadata: {
                 ...existingMetadata,

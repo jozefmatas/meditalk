@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     // Fetch the visit to get its language and existing metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("id, language, metadata")
+      .select("id, title, language, metadata")
       .eq("id", visitId)
       .single();
 
@@ -544,14 +544,20 @@ export async function POST(request: NextRequest) {
           );
 
           // Save to DB (must complete before sending complete event,
-          // so the email API can read the latest soap_note)
+          // so the email API can read the latest encounter_note)
           const existingMetadata =
             (visit.metadata as Record<string, unknown>) || {};
+          // Auto-set title if the visit has none and AI suggested one
+          const autoTitle =
+            suggestedTitle && !visit.title ? suggestedTitle : undefined;
+
           const { error: saveError } = await supabase
             .from("visits")
             .update({
-              soap_note: generatedNote,
+              encounter_note: generatedNote,
               patient_letter: letter,
+              status: "to_review",
+              ...(autoTitle ? { title: autoTitle } : {}),
               metadata: {
                 ...existingMetadata,
                 template_id: template.id,

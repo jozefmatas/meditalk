@@ -18,7 +18,7 @@ const makeVisit = (overrides: Partial<Encounter> = {}): Encounter => ({
   patient_id: null,
   visit_type: "consultation",
   status: "started",
-  soap_note: null,
+  encounter_note: null,
   patient_letter: null,
   metadata: {},
   created_at: "2025-01-15T10:00:00Z",
