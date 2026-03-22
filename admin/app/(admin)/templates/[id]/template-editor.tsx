@@ -48,6 +48,31 @@ import type {
   Locale,
 } from "@/lib/template-types";
 import { LOCALES, PRIMARY_LOCALE } from "@/lib/template-types";
+import { SpecialtyCombobox } from "@/components/specialty-combobox";
+
+// ── Default system prompt (with {{variables}} for interpolation) ────
+
+const DEFAULT_SYSTEM_PROMPT = `You are a medical documentation assistant. You MUST follow these rules strictly:
+
+1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
+
+2. STRICT GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, estimate, or hallucinate any medical facts. If a value (age, duration, measurement, dosage, etc.) is not explicitly stated, do NOT guess — omit it entirely.
+
+3. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+
+4. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
+
+5. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items — they are much easier to scan. For diagnoses/ICD codes, put the code first, then the name (e.g. "- I10 Esenciálna hypertenzia"). For plans and recommendations, use one bullet per action. Narrative sections (history, examination findings) should remain as flowing prose paragraphs — do not bullet-ify everything.
+
+6. FORMAT: Return valid JSON with the following keys:
+   - One key for each section ID listed below, with the section content as a string value (or "" if no information).
+   - A "letter" key with a patient-friendly summary letter.
+   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in {{language}}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
+
+TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
+{{sections}}
+
+`;
 
 // ── ID generators ───────────────────────────────────────────────────
 
@@ -328,7 +353,7 @@ function SectionRow({
           onChange={(e) => onUpdateContext(topIndex, subIndex, e.target.value)}
           placeholder="AI context — What should go in this section? (e.g. 'Auscultation findings, murmurs, rhythm')"
           rows={2}
-          className="ml-10 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="ml-10 w-[calc(100%-2.5rem)] resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         />
       )}
     </div>
@@ -345,28 +370,49 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   const [sections, setSections] = useState<TemplateSection[]>(
     initialData.sections,
   );
-  const [newSpecialty, setNewSpecialty] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState(
+    initialData.system_prompt ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize prompt textarea to hug content
+  const resizePrompt = useCallback(() => {
+    const el = promptRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    resizePrompt();
+  }, [systemPrompt, resizePrompt]);
 
   // ── Dirty tracking ──
 
-  const savedSnapshot = useRef(
+  const [savedSnapshot, setSavedSnapshot] = useState(() =>
     JSON.stringify({
       name: initialData.name,
       description: initialData.description,
       specialties: initialData.specialties,
       sections: initialData.sections,
+      system_prompt: initialData.system_prompt ?? "",
     }),
   );
 
   const isDirty = useMemo(
     () =>
-      JSON.stringify({ name, description, specialties, sections }) !==
-      savedSnapshot.current,
-    [name, description, specialties, sections],
+      JSON.stringify({
+        name,
+        description,
+        specialties,
+        sections,
+        system_prompt: systemPrompt,
+      }) !== savedSnapshot,
+    [name, description, specialties, sections, systemPrompt, savedSnapshot],
   );
 
   // Unsaved changes dialog state
@@ -513,6 +559,11 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         description: finalDesc,
         specialties,
         sections: finalSections,
+        system_prompt:
+          !systemPrompt.trim() ||
+          systemPrompt.trim() === DEFAULT_SYSTEM_PROMPT.trim()
+            ? null
+            : systemPrompt.trim(),
       };
       const res = await fetch(`/api/templates/${initialData.id}`, {
         method: "PATCH",
@@ -521,7 +572,15 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       });
 
       if (res.ok) {
-        savedSnapshot.current = JSON.stringify(body);
+        setSavedSnapshot(
+          JSON.stringify({
+            name: finalName,
+            description: finalDesc,
+            specialties,
+            sections: finalSections,
+            system_prompt: systemPrompt,
+          }),
+        );
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }
@@ -559,15 +618,6 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       window.location.href = "/templates";
     }
     setDeleting(false);
-  }
-
-  // ── Specialties ──
-
-  function handleAddSpecialty() {
-    const value = newSpecialty.trim().toLowerCase();
-    if (!value || specialties.includes(value)) return;
-    setSpecialties((prev) => [...prev, value]);
-    setNewSpecialty("");
   }
 
   // ── Drag-and-drop ──
@@ -681,7 +731,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
 
       {/* Two-column layout */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Left: Metadata */}
+        {/* Left: Metadata + Sections */}
         <div className="space-y-5">
           <div className="rounded-lg border border-border p-4 space-y-4">
             <h2 className="text-sm font-medium text-muted-foreground">
@@ -724,134 +774,138 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
 
             <div className="space-y-1.5">
               <Label>Specialties</Label>
-              <div className="flex flex-wrap gap-1.5">
-                {specialties.map((s) => (
-                  <span
-                    key={s}
-                    className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 text-xs font-medium"
-                  >
-                    {s}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSpecialties((prev) => prev.filter((sp) => sp !== s))
-                      }
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      &times;
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-1.5">
-                <Input
-                  value={newSpecialty}
-                  onChange={(e) => setNewSpecialty(e.target.value)}
-                  placeholder="Add specialty..."
-                  className="flex-1"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddSpecialty();
-                    }
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddSpecialty}
-                >
-                  Add
-                </Button>
-              </div>
+              <SpecialtyCombobox
+                value={specialties}
+                onChange={setSpecialties}
+              />
             </div>
+          </div>
+
+          {/* Section editor */}
+          <div className="rounded-lg border border-border p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Sections ({sections.length} headers,{" "}
+                {sections.reduce(
+                  (sum, s) => sum + (s.subsections?.length ?? 0),
+                  0,
+                )}{" "}
+                subheaders)
+              </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setSections((prev) => addHeader(prev, editLocale))
+                }
+              >
+                <Plus /> Add header
+              </Button>
+            </div>
+
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleTopDragEnd}
+            >
+              <SortableContext
+                items={sections.map((s) => s.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="divide-y divide-border">
+                  {sections.map((section, topIndex) => (
+                    <div key={section.id}>
+                      <SectionRow
+                        section={section}
+                        level={2}
+                        locale={editLocale}
+                        topIndex={topIndex}
+                        subIndex={undefined}
+                        onUpdateLabel={handleUpdateLabel}
+                        onUpdateContext={handleUpdateContext}
+                        onDelete={handleDelete}
+                        onAddSub={() =>
+                          setSections((prev) =>
+                            addSubsection(prev, topIndex, editLocale),
+                          )
+                        }
+                      />
+                      {section.subsections &&
+                        section.subsections.length > 0 && (
+                          <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={handleSubDragEnd(topIndex)}
+                          >
+                            <SortableContext
+                              items={section.subsections.map((s) => s.id)}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              {section.subsections.map((sub, subIndex) => (
+                                <SectionRow
+                                  key={sub.id}
+                                  section={sub}
+                                  level={3}
+                                  locale={editLocale}
+                                  topIndex={topIndex}
+                                  subIndex={subIndex}
+                                  onUpdateLabel={handleUpdateLabel}
+                                  onUpdateContext={handleUpdateContext}
+                                  onDelete={handleDelete}
+                                />
+                              ))}
+                            </SortableContext>
+                          </DndContext>
+                        )}
+                    </div>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+
+            {sections.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No sections yet. Click &ldquo;Add header&rdquo; to start.
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Right: Section editor */}
-        <div className="rounded-lg border border-border p-4">
-          <div className="mb-3 flex items-center justify-between">
+        {/* Right: System prompt */}
+        <div className="rounded-lg border border-border p-4 space-y-3 self-start">
+          <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-muted-foreground">
-              Sections ({sections.length} headers,{" "}
-              {sections.reduce(
-                (sum, s) => sum + (s.subsections?.length ?? 0),
-                0,
-              )}{" "}
-              subheaders)
+              System Prompt
             </h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSections((prev) => addHeader(prev, editLocale))}
-            >
-              <Plus /> Add header
-            </Button>
+            {systemPrompt !== DEFAULT_SYSTEM_PROMPT && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
+                className="h-6 text-xs text-muted-foreground"
+              >
+                Reset to default
+              </Button>
+            )}
           </div>
-
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleTopDragEnd}
-          >
-            <SortableContext
-              items={sections.map((s) => s.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="divide-y divide-border">
-                {sections.map((section, topIndex) => (
-                  <div key={section.id}>
-                    <SectionRow
-                      section={section}
-                      level={2}
-                      locale={editLocale}
-                      topIndex={topIndex}
-                      subIndex={undefined}
-                      onUpdateLabel={handleUpdateLabel}
-                      onUpdateContext={handleUpdateContext}
-                      onDelete={handleDelete}
-                      onAddSub={() =>
-                        setSections((prev) =>
-                          addSubsection(prev, topIndex, editLocale),
-                        )
-                      }
-                    />
-                    {section.subsections && section.subsections.length > 0 && (
-                      <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleSubDragEnd(topIndex)}
-                      >
-                        <SortableContext
-                          items={section.subsections.map((s) => s.id)}
-                          strategy={verticalListSortingStrategy}
-                        >
-                          {section.subsections.map((sub, subIndex) => (
-                            <SectionRow
-                              key={sub.id}
-                              section={sub}
-                              level={3}
-                              locale={editLocale}
-                              topIndex={topIndex}
-                              subIndex={subIndex}
-                              onUpdateLabel={handleUpdateLabel}
-                              onUpdateContext={handleUpdateContext}
-                              onDelete={handleDelete}
-                            />
-                          ))}
-                        </SortableContext>
-                      </DndContext>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-
-          {sections.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No sections yet. Click &ldquo;Add header&rdquo; to start.
-            </p>
-          )}
+          <textarea
+            ref={promptRef}
+            value={systemPrompt || DEFAULT_SYSTEM_PROMPT}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            className="w-full resize-none overflow-hidden rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-xs leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+          <p className="text-xs text-muted-foreground">
+            Variables interpolated at generation time:{" "}
+            <code className="rounded bg-muted px-1 py-0.5">
+              {"{{sections}}"}
+            </code>{" "}
+            <code className="rounded bg-muted px-1 py-0.5">
+              {"{{language}}"}
+            </code>{" "}
+            <code className="rounded bg-muted px-1 py-0.5">
+              {"{{languageCode}}"}
+            </code>
+          </p>
         </div>
       </div>
 
