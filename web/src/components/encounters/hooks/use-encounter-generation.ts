@@ -473,26 +473,27 @@ export function useEncounterGeneration({
           // Email is now sent server-side in /api/generate after saving to DB
         }
       } catch (err) {
-        // Use structured error keys for i18n translation
         const msg = err instanceof Error ? err.message : "";
-        const errorKey =
-          msg === "insufficient_context" || msg === "save_failed"
-            ? msg
-            : isTransientError(err)
-              ? "network_error"
-              : "generation_failed";
-        setError(errorKey);
-        setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
-        window.dispatchEvent(
-          new CustomEvent("encounter-update", {
-            detail: { id: visitId, status: "started" },
-          }),
-        );
-        fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "started" }),
-        }).catch(() => {});
+        // Server returned a definitive error — generation won't produce a result
+        const isServerError =
+          msg === "insufficient_context" || msg === "save_failed";
+
+        if (isServerError) {
+          setError(msg);
+          setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: { id: visitId, status: "started" },
+            }),
+          );
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "started" }),
+          }).catch(() => {});
+        }
+        // Connection lost (browser backgrounded, network error) — server is still
+        // generating. Keep "processing" so polling recovers when user returns.
       } finally {
         activeGenerations.delete(visitId);
 
