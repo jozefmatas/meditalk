@@ -313,6 +313,7 @@ export function useEncounterGeneration({
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
         let completedEvent: Record<string, unknown> | null = null;
+        let streamingStarted = false;
 
         for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
           if (attempt > 0) {
@@ -381,6 +382,7 @@ export function useEncounterGeneration({
                   const event = JSON.parse(jsonStr);
 
                   if (event.type === "streaming_start") {
+                    streamingStarted = true;
                     setIsStreaming(true);
                     setStreamedSections([]);
                     setStreamingSectionIds(event.sectionIds);
@@ -438,6 +440,9 @@ export function useEncounterGeneration({
 
             break; // Stream completed successfully
           } catch (err) {
+            // Once streaming started, the server IS generating. Don't retry —
+            // retrying would start a SECOND generation. Let polling recover instead.
+            if (streamingStarted) break;
             if (isTransientError(err) && attempt < CLIENT_MAX_RETRIES) {
               continue;
             }
