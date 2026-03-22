@@ -367,7 +367,7 @@ export async function POST(request: NextRequest) {
 
         function safeClose() {
           try {
-            safeClose();
+            controller.close();
           } catch {
             /* already closed or cancelled */
           }
