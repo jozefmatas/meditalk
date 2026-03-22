@@ -72,5 +72,8 @@ export function logUsage(params: UsageParams): void {
     })
     .then(({ error }: { error: { message: string } | null }) => {
       if (error) console.error("[usage-log] Insert failed:", error.message);
+    })
+    .catch(() => {
+      // Network-level fetch failure — nothing we can do, silently drop
     });
 }
