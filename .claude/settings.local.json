@@ -133,7 +133,20 @@
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk log templates-2 --oneline -20)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff main templates-2 -- admin/ --stat)",
       "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk diff main templates-2 -- admin/ --diff-filter=A --name-only)",
-      "Bash(npx shadcn@latest init:*)"
+      "Bash(npx shadcn@latest init:*)",
+      "Bash(git stash:*)",
+      "Bash(npx tsx:*)",
+      "Bash(pnpm build:*)",
+      "Bash(git status:*)",
+      "Bash(gh pr create:*)",
+      "Bash(brew install:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr view:*)",
+      "Bash(git pull:*)",
+      "Bash(git branch:*)",
+      "Bash(pkill:*)",
+      "Bash(git grep:*)"
     ],
     "deny": [],
     "ask": []
