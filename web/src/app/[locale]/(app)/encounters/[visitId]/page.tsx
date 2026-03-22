@@ -27,7 +27,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import { buildSectionLabelsFromTemplate } from "@/lib/templates";
 import { useTemplate } from "@/hooks/use-template";
-import type { Encounter, EncounterStatus, EncounterType } from "@/lib/types";
+import type { Encounter, EncounterType } from "@/lib/types";
 
 import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
@@ -49,13 +49,6 @@ function formatVisitDate(dateString: string, locale: string) {
   });
   return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
-
-/** Statuses that show the draft-mode editor layout */
-const DRAFT_STATUSES: EncounterStatus[] = [
-  "started",
-  "recording",
-  "processing",
-];
 
 export default function EncounterDetailPage({ params }: PageProps) {
   const { visitId } = use(params);
@@ -188,7 +181,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     generation.hasActiveRecording
   );
   const isDraft = data.visit
-    ? DRAFT_STATUSES.includes(data.visit.status)
+    ? data.visit.status === "started" || data.visit.status === "recording"
     : true;
   const formattedDate = data.visit
     ? formatVisitDate(data.visit.visit_date, locale)
@@ -291,16 +284,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
         onMarkComplete={handleMarkComplete}
         onDelete={handleDelete}
         canGenerate={canGenerate}
-        isGenerating={generation.isGenerating}
       />
 
-      {/* Processing overlay — only during pre-processing (before streaming starts) */}
-      {generation.isGenerating && !generation.isStreaming && (
-        <ProcessingOverlay />
-      )}
-
       {/* Streaming generation view — show sections progressively */}
-      {generation.isGenerating && generation.isStreaming && (
+      {generation.isStreaming ? (
         <div className="flex flex-1 justify-center overflow-y-auto px-4 pb-6 desktop:px-6">
           <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-full">
             <ReviewView
@@ -333,17 +320,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
             <div aria-hidden className="min-h-32 shrink-0" />
           </div>
         </div>
-      )}
-
-      {/* Main content area — hidden during generation */}
-      {!generation.isGenerating && (
-        <div
-          className={`flex flex-1 justify-center px-4 pb-6 desktop:px-6 ${isDraft ? "overflow-hidden" : "overflow-y-auto"}`}
-        >
-          <div
-            className={`flex w-full max-w-[960px] flex-col gap-6 ${isDraft ? "min-h-0" : "min-h-full"}`}
-          >
-            {isDraft ? (
+      ) : data.visit.status === "processing" ? (
+        /* Processing overlay — server generating, SSE not connected */
+        <ProcessingOverlay />
+      ) : isDraft ? (
+        /* Draft mode — recording + editor */
+        <>
+          <div className="flex flex-1 justify-center px-4 pb-6 desktop:px-6 overflow-hidden">
+            <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-0">
               <DraftView
                 visit={data.visit}
                 title={metadata.title}
@@ -352,7 +336,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 formattedDate={formattedDate}
                 error={data.error}
                 recordingBarRef={generation.recordingBarRef}
-                isGenerating={generation.isGenerating}
                 onRecordingComplete={generation.handleRecordingComplete}
                 onRecordingStateChange={generation.handleRecordingStateChange}
                 selectedTemplateId={generation.selectedTemplateId}
@@ -366,7 +349,29 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onRetry={handleRetry}
                 t={t}
               />
-            ) : (
+            </div>
+          </div>
+
+          {/* Mobile bottom bar — draft only */}
+          <MobileDraftBottomBar
+            generationLanguage={generation.generationLanguage}
+            onLanguageChange={generation.handleLanguageChange}
+            onGenerate={generation.handleGenerate}
+            canGenerate={canGenerate}
+          />
+
+          {/* Right panel — files */}
+          <FilesPanel
+            visitId={visitId}
+            files={data.files}
+            onFilesChange={data.setFiles}
+          />
+        </>
+      ) : (
+        /* Review mode — generated note */
+        <>
+          <div className="flex flex-1 justify-center px-4 pb-6 desktop:px-6 overflow-y-auto">
+            <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-full">
               <ReviewView
                 visit={data.visit}
                 setVisit={data.setVisit}
@@ -392,36 +397,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onRetry={handleRetry}
                 t={t}
               />
-            )}
-
-            {/* Bottom scroll inset (review mode only) */}
-            {!isDraft && <div aria-hidden className="min-h-32 shrink-0" />}
+              <div aria-hidden className="min-h-32 shrink-0" />
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Mobile bottom bar — draft only */}
-      {!generation.isGenerating && isDraft && (
-        <MobileDraftBottomBar
-          generationLanguage={generation.generationLanguage}
-          onLanguageChange={generation.handleLanguageChange}
-          onGenerate={generation.handleGenerate}
-          canGenerate={canGenerate}
-          isGenerating={generation.isGenerating}
-        />
-      )}
-
-      {/* Right panel — hidden during generation, hidden on mobile */}
-      {!generation.isGenerating &&
-        (isDraft ? (
-          <FilesPanel
-            visitId={visitId}
-            files={data.files}
-            onFilesChange={data.setFiles}
-          />
-        ) : (
+          {/* Right panel — ICD codes */}
           <IcdPanel visit={data.visit} setVisit={data.setVisit} />
-        ))}
+        </>
+      )}
 
       {/* Delete confirmation dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
@@ -439,35 +422,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
             </Button>
             <Button variant="destructive" onClick={confirmDelete}>
               {t("delete.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Navigation guard during generation */}
-      <Dialog
-        open={generation.navDialogOpen}
-        onOpenChange={generation.setNavDialogOpen}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("detail.leaveWhileGeneratingTitle")}</DialogTitle>
-            <DialogDescription>
-              {t("detail.leaveWhileGeneratingDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => generation.setNavDialogOpen(false)}
-            >
-              {t("detail.leaveWhileGeneratingStay")}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={generation.handleConfirmLeave}
-            >
-              {t("detail.leaveWhileGeneratingLeave")}
             </Button>
           </DialogFooter>
         </DialogContent>

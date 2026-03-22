@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
 import {
@@ -63,9 +62,6 @@ export function useEncounterGeneration({
   );
   const [doctorNotes, setDoctorNotes] = useState("");
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
-  const [isGenerating, setIsGenerating] = useState(() =>
-    activeGenerations.has(visitId),
-  );
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamedSections, setStreamedSections] = useState<NoteSection[]>([]);
@@ -81,11 +77,6 @@ export function useEncounterGeneration({
   const [audioStoragePath, setAudioStoragePath] = useState<string | null>(null);
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
-
-  // Navigation guard state
-  const router = useRouter();
-  const [navDialogOpen, setNavDialogOpen] = useState(false);
-  const pendingNavUrlRef = useRef<string | null>(null);
 
   const initialDoctorNotesRef = useRef("");
 
@@ -106,58 +97,12 @@ export function useEncounterGeneration({
     titleRef.current = t;
   }, []);
 
-  // Prevent accidental navigation during generation
-  useEffect(() => {
-    if (!isGenerating) return;
-
-    // Tab close / page refresh — browser shows native "Leave site?" dialog
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
-    // Client-side link clicks — show custom dialog instead of navigating
-    const handleClick = (e: MouseEvent) => {
-      const anchor = (e.target as Element).closest("a");
-      if (!anchor) return;
-      const href = anchor.getAttribute("href");
-      if (!href || href === "#") return;
-      try {
-        const url = new URL(href, location.origin);
-        if (
-          url.origin === location.origin &&
-          url.pathname !== location.pathname
-        ) {
-          e.preventDefault();
-          e.stopPropagation();
-          pendingNavUrlRef.current = href;
-          setNavDialogOpen(true);
-        }
-      } catch {
-        // invalid URL, ignore
-      }
-    };
-    document.addEventListener("click", handleClick, true);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      document.removeEventListener("click", handleClick, true);
-    };
-  }, [isGenerating]);
-
-  const handleConfirmLeave = useCallback(() => {
-    setNavDialogOpen(false);
-    const url = pendingNavUrlRef.current;
-    pendingNavUrlRef.current = null;
-    if (url) router.push(url);
-  }, [router]);
-
   // Re-fetch encounter when a background generation completes
   useEffect(() => {
     const handler = (e: Event) => {
       const { visitId: doneId } = (e as CustomEvent).detail;
       if (doneId !== visitId) return;
-      setIsGenerating(false);
+
       // Re-fetch encounter to pick up generated note + updated status
       (async () => {
         try {
@@ -266,6 +211,9 @@ export function useEncounterGeneration({
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
       setHasActiveRecording(recordingState !== "idle");
+      // Don't override status during generation — finalize() triggers an "idle"
+      // state change that would overwrite "processing" and break the UI flow.
+      if (activeGenerations.has(visitId)) return;
       const status = recordingState === "recording" ? "recording" : "started";
       setVisit((prev) => (prev ? { ...prev, status } : prev));
       window.dispatchEvent(
@@ -285,16 +233,23 @@ export function useEncounterGeneration({
 
   const handleGenerate = useCallback(
     async (options?: { sendAsEmail?: boolean }) => {
-      if (!visitId) return;
+      if (!visitId || activeGenerations.has(visitId)) return;
       activeGenerations.add(visitId);
-      setIsGenerating(true);
       setIsStreaming(false);
       setStreamedSections([]);
       setStreamingSectionIds([]);
       setStreamingSectionLabels({});
       setError(null);
 
-      // Reflect processing state in sidebar + persist to DB
+      // Capture values at call time so the chain works even after unmount
+      const capturedTemplateId = selectedTemplateId;
+      const capturedDoctorNotes = doctorNotes;
+      const capturedTitle = titleRef.current;
+      const capturedAudioStoragePath = audioStoragePath;
+
+      // Set processing state immediately — the activeGenerations guard in
+      // handleRecordingStateChange prevents finalize()'s "idle" from overriding this.
+      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, status: "processing" },
@@ -306,11 +261,6 @@ export function useEncounterGeneration({
         body: JSON.stringify({ status: "processing" }),
       }).catch(() => {});
 
-      // Capture values at call time so the chain works even after unmount
-      const capturedTemplateId = selectedTemplateId;
-      const capturedDoctorNotes = doctorNotes;
-      const capturedTitle = titleRef.current;
-      const capturedAudioStoragePath = audioStoragePath;
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
@@ -385,6 +335,7 @@ export function useEncounterGeneration({
                 templateId: capturedTemplateId,
                 doctorNotes: capturedDoctorNotes || undefined,
                 transcriptText: streamingTranscript || undefined,
+                sendAsEmail: options?.sendAsEmail || false,
               }),
             });
 
@@ -519,13 +470,7 @@ export function useEncounterGeneration({
             }),
           );
 
-          if (options?.sendAsEmail) {
-            fetch("/api/send-note-email", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ visitId }),
-            }).catch(() => {});
-          }
+          // Email is now sent server-side in /api/generate after saving to DB
         }
       } catch (err) {
         // Use structured error keys for i18n translation
@@ -550,7 +495,7 @@ export function useEncounterGeneration({
         }).catch(() => {});
       } finally {
         activeGenerations.delete(visitId);
-        setIsGenerating(false);
+
         setIsStreaming(false);
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
@@ -835,91 +780,89 @@ export function useEncounterGeneration({
   // Clean up polling on unmount
   useEffect(() => stopPolling, [stopPolling]);
 
-  const initFromVisit = useCallback(
-    (data: Encounter) => {
-      setGenerationLanguage((data.language as SupportedLanguage) || "sk");
-      const meta = data.metadata as Record<string, unknown>;
-      if (meta?.template_id) {
-        setSelectedTemplateId(meta.template_id as string);
-      }
-      if (meta?.doctor_notes) {
-        setDoctorNotes(meta.doctor_notes as string);
-        initialDoctorNotesRef.current = meta.doctor_notes as string;
-      }
-      if (data.encounter_note) {
-        setGeneratedNoteHtml(data.encounter_note);
-        // Seed cache with the initially loaded template's note
-        const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
-        templateCacheRef.current.set(tid, {
-          generatedNote: data.encounter_note,
-          letter: data.patient_letter || "",
-        });
-      }
+  const initFromVisit = useCallback((data: Encounter) => {
+    setGenerationLanguage((data.language as SupportedLanguage) || "sk");
+    const meta = data.metadata as Record<string, unknown>;
+    if (meta?.template_id) {
+      setSelectedTemplateId(meta.template_id as string);
+    }
+    if (meta?.doctor_notes) {
+      setDoctorNotes(meta.doctor_notes as string);
+      initialDoctorNotesRef.current = meta.doctor_notes as string;
+    }
+    if (data.encounter_note) {
+      setGeneratedNoteHtml(data.encounter_note);
+      // Seed cache with the initially loaded template's note
+      const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
+      templateCacheRef.current.set(tid, {
+        generatedNote: data.encounter_note,
+        letter: data.patient_letter || "",
+      });
+    }
+    // Polling for "processing" status is handled by the reactive useEffect below
+  }, []);
 
-      // Server-side generation still running — show processing overlay and poll
-      if (data.status === "processing" && !data.encounter_note) {
-        setIsGenerating(true);
-        setIsStreaming(false);
+  // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
+  const POLL_TIMEOUT_MS = 90_000;
+  useEffect(() => {
+    if (visit?.status !== "processing" || isStreaming) {
+      stopPolling();
+      return;
+    }
+    const pollStart = Date.now();
+    pollingRef.current = setInterval(async () => {
+      // Timeout — server likely failed; reset to "started" so user can retry
+      if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
         stopPolling();
-        const pollStart = Date.now();
-        const POLL_TIMEOUT_MS = 90_000; // give up after 90s
-        pollingRef.current = setInterval(async () => {
-          // Timeout — server likely failed; reset to "started" so user can retry
-          if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
-            stopPolling();
-            setIsGenerating(false);
-            setVisit((prev) =>
-              prev ? { ...prev, status: "started" as const } : prev,
-            );
-            fetch(`/api/encounters/${visitId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ status: "started" }),
-            }).catch(() => {});
-            window.dispatchEvent(
-              new CustomEvent("encounter-update", {
-                detail: { id: visitId, status: "started" },
-              }),
-            );
-            return;
-          }
-          try {
-            const res = await fetch(`/api/encounters/${visitId}`);
-            if (!res.ok) return;
-            const updated: Encounter = await res.json();
-            if (updated.encounter_note || updated.status !== "processing") {
-              stopPolling();
-              setIsGenerating(false);
-              setVisit(updated);
-              if (updated.encounter_note) {
-                setGeneratedNoteHtml(updated.encounter_note);
-                const tid =
-                  ((updated.metadata as Record<string, unknown>)
-                    ?.template_id as string) || DEFAULT_TEMPLATE_ID;
-                templateCacheRef.current.set(tid, {
-                  generatedNote: updated.encounter_note,
-                  letter: updated.patient_letter || "",
-                });
-              }
-              if (updated.title) updateTitleRef.current(updated.title);
-              window.dispatchEvent(
-                new CustomEvent("encounter-update", {
-                  detail: {
-                    id: visitId,
-                    status: updated.status,
-                    ...(updated.title ? { title: updated.title } : {}),
-                  },
-                }),
-              );
-            }
-          } catch {
-            /* silent — retry next interval */
-          }
-        }, 3000);
+        setVisit((prev) =>
+          prev ? { ...prev, status: "started" as const } : prev,
+        );
+        fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "started" }),
+        }).catch(() => {});
+        window.dispatchEvent(
+          new CustomEvent("encounter-update", {
+            detail: { id: visitId, status: "started" },
+          }),
+        );
+        return;
       }
-    },
-    [visitId, setVisit, stopPolling],
-  );
+      try {
+        const res = await fetch(`/api/encounters/${visitId}`);
+        if (!res.ok) return;
+        const updated: Encounter = await res.json();
+        if (updated.encounter_note || updated.status !== "processing") {
+          stopPolling();
+          setVisit(updated);
+          if (updated.encounter_note) {
+            setGeneratedNoteHtml(updated.encounter_note);
+            const tid =
+              ((updated.metadata as Record<string, unknown>)
+                ?.template_id as string) || DEFAULT_TEMPLATE_ID;
+            templateCacheRef.current.set(tid, {
+              generatedNote: updated.encounter_note,
+              letter: updated.patient_letter || "",
+            });
+          }
+          if (updated.title) updateTitleRef.current(updated.title);
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: {
+                id: visitId,
+                status: updated.status,
+                ...(updated.title ? { title: updated.title } : {}),
+              },
+            }),
+          );
+        }
+      } catch {
+        /* silent — retry next interval */
+      }
+    }, 3000);
+    return () => stopPolling();
+  }, [visit?.status, isStreaming, visitId, setVisit, stopPolling]);
 
   return {
     generationLanguage,
@@ -928,7 +871,6 @@ export function useEncounterGeneration({
     setDoctorNotes,
     generatedNoteHtml,
     setGeneratedNoteHtml,
-    isGenerating,
     isStreaming,
     isRegenerating,
     streamedSections,
@@ -945,8 +887,5 @@ export function useEncounterGeneration({
     handleLanguageChange,
     handleTemplateChange,
     handleRegenerate,
-    navDialogOpen,
-    setNavDialogOpen,
-    handleConfirmLeave,
   };
 }

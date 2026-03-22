@@ -17,6 +17,9 @@ import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
 import { logUsage } from "@/lib/usage";
+import { sendNoteEmail } from "@/lib/email/send-note-email";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 
@@ -55,6 +58,7 @@ export async function POST(request: NextRequest) {
     const doctorNotes: string | undefined = body.doctorNotes;
     // Scribe real-time transcript (used for recording files instead of Whisper)
     const transcriptText: string | undefined = body.transcriptText;
+    const sendAsEmail: boolean = body.sendAsEmail === true;
 
     console.log(
       `[generate] transcriptText: ${transcriptText ? `${transcriptText.length} chars` : "NONE"}`,
@@ -593,6 +597,45 @@ export async function POST(request: NextRequest) {
             inputTokens,
             outputTokens,
           });
+
+          // Send email (fire-and-forget, server-side so it works even if client disconnects)
+          if (sendAsEmail) {
+            (async () => {
+              try {
+                const {
+                  data: { user },
+                } = await supabase.auth.getUser();
+                if (!user?.email) {
+                  console.error("[email] User email not found");
+                  return;
+                }
+                const encounterPath = `/${language}/encounters/${visitId}`;
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+                const redirectTo = `${appUrl}${encounterPath}`;
+
+                const admin = createAdminClient();
+                const { data: linkData } = await admin.auth.admin.generateLink({
+                  type: "magiclink",
+                  email: user.email,
+                  options: { redirectTo },
+                });
+                const viewUrl =
+                  linkData?.properties?.action_link ||
+                  `${appUrl}${encounterPath}`;
+
+                await sendNoteEmail({
+                  to: user.email,
+                  title: autoTitle || visit.title || "Untitled",
+                  noteHtml: filterEmptySectionsHtml(generatedNote),
+                  viewUrl,
+                  language,
+                });
+                console.log("[email] Note email sent to", user.email);
+              } catch (err) {
+                console.error("[email] Failed to send note email:", err);
+              }
+            })();
+          }
 
           // Send final complete event
           sendEvent({

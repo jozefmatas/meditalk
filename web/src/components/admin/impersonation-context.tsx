@@ -52,6 +52,8 @@ export function ImpersonationProvider({
   }, []);
 
   useEffect(() => {
+    // Skip on login page — no session means 401 noise in devtools
+    if (window.location.pathname.endsWith("/login")) return;
     // All setState calls in fetchStatus happen asynchronously (after await)
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStatus();

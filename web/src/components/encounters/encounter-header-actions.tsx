@@ -42,14 +42,7 @@ interface EncounterHeaderActionsProps {
   onMarkComplete: () => void;
   onDelete: () => void;
   canGenerate: boolean;
-  isGenerating: boolean;
 }
-
-const DRAFT_STATUSES: EncounterStatus[] = [
-  "started",
-  "recording",
-  "processing",
-];
 
 export function EncounterHeaderActions({
   status,
@@ -59,12 +52,12 @@ export function EncounterHeaderActions({
   onMarkComplete,
   onDelete,
   canGenerate,
-  isGenerating,
 }: EncounterHeaderActionsProps) {
   const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
   const { setHeaderActions } = useHeaderActions();
-  const isDraft = DRAFT_STATUSES.includes(status);
+  const isProcessing = status === "processing";
+  const isDraft = status === "started" || status === "recording";
   const [sendAsEmail, setSendAsEmail] = useState(() => {
     if (typeof window === "undefined") return true;
     const stored = localStorage.getItem("meditalk:sendAsEmail");
@@ -82,7 +75,7 @@ export function EncounterHeaderActions({
         {/* 3-dot menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon-lg" disabled={isGenerating}>
+            <Button variant="outline" size="icon-lg" disabled={isProcessing}>
               <HugeiconsIcon icon={MoreVerticalIcon} size={16} />
             </Button>
           </DropdownMenuTrigger>
@@ -106,7 +99,7 @@ export function EncounterHeaderActions({
             <Select
               value={generationLanguage}
               onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
-              disabled={isGenerating}
+              disabled={isProcessing}
             >
               <SelectTrigger
                 className="w-auto"
@@ -132,7 +125,7 @@ export function EncounterHeaderActions({
               label={t("detail.sendAsEmail")}
               checked={sendAsEmail}
               onCheckedChange={handleSendAsEmailChange}
-              disabled={isGenerating}
+              disabled={isProcessing}
               className="**:data-[slot=switch-thumb]:data-checked:translate-x-[calc(100%-2px)]!"
             />
           </div>
@@ -143,15 +136,15 @@ export function EncounterHeaderActions({
           <Button
             size="lg"
             onClick={() => onGenerate({ sendAsEmail })}
-            disabled={isGenerating || !canGenerate}
+            disabled={isProcessing || !canGenerate}
             className="hidden desktop:inline-flex"
           >
             <HugeiconsIcon
-              icon={isGenerating ? Loading03Icon : SparklesIcon}
+              icon={isProcessing ? Loading03Icon : SparklesIcon}
               size={16}
-              className={isGenerating ? "animate-spin" : ""}
+              className={isProcessing ? "animate-spin" : ""}
             />
-            {isGenerating ? t("detail.generating") : t("detail.generate")}
+            {isProcessing ? t("detail.generating") : t("detail.generate")}
           </Button>
         )}
       </>,
@@ -161,9 +154,9 @@ export function EncounterHeaderActions({
   }, [
     status,
     isDraft,
+    isProcessing,
     generationLanguage,
     canGenerate,
-    isGenerating,
     sendAsEmail,
     onLanguageChange,
     onGenerate,

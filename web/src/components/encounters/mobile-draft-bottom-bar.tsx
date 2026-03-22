@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { SparklesIcon, Loading03Icon } from "@hugeicons/core-free-icons";
+import { SparklesIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/shared/button";
 import {
   Select,
@@ -26,7 +26,6 @@ interface MobileDraftBottomBarProps {
   onLanguageChange: (lang: SupportedLanguage) => void;
   onGenerate: (options?: { sendAsEmail?: boolean }) => void;
   canGenerate: boolean;
-  isGenerating: boolean;
 }
 
 export function MobileDraftBottomBar({
@@ -34,7 +33,6 @@ export function MobileDraftBottomBar({
   onLanguageChange,
   onGenerate,
   canGenerate,
-  isGenerating,
 }: MobileDraftBottomBarProps) {
   const t = useTranslations("encounters");
 
@@ -56,27 +54,21 @@ export function MobileDraftBottomBar({
           label={t("detail.sendAsEmail")}
           checked={sendAsEmail}
           onCheckedChange={handleSendAsEmailChange}
-          disabled={isGenerating}
         />
         <Button
           size="lg"
           className="flex-1"
           onClick={() => onGenerate({ sendAsEmail })}
-          disabled={isGenerating || !canGenerate}
+          disabled={!canGenerate}
         >
-          <HugeiconsIcon
-            icon={isGenerating ? Loading03Icon : SparklesIcon}
-            size={16}
-            className={isGenerating ? "animate-spin" : ""}
-          />
-          {isGenerating ? t("detail.generating") : t("detail.generate")}
+          <HugeiconsIcon icon={SparklesIcon} size={16} />
+          {t("detail.generate")}
         </Button>
       </div>
 
       <Select
         value={generationLanguage}
         onValueChange={(v) => onLanguageChange(v as SupportedLanguage)}
-        disabled={isGenerating}
       >
         <SelectTrigger className="w-full" label={t("detail.noteLanguage")}>
           <SelectValue />

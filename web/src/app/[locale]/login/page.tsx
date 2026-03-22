@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/shared/button";
 import {
@@ -28,7 +27,6 @@ import {
 
 export default function LoginPage() {
   const t = useTranslations("login");
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -77,7 +75,9 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    // Full page navigation ensures auth cookies are sent on the server round-trip
+    // (router.push does a soft navigation that can fail on mobile Safari)
+    window.location.assign("/");
   };
 
   const handleOtpChange = (index: number, value: string) => {
