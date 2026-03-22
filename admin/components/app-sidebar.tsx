@@ -32,7 +32,7 @@ export function AppSidebar(props: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar {...props}>
-      <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
+      <SidebarHeader className="border-b border-sidebar-border px-4 h-14 justify-center">
         <span className="text-base font-bold tracking-tight">
           MediTalk Admin
         </span>

@@ -146,7 +146,11 @@
       "Bash(git pull:*)",
       "Bash(git branch:*)",
       "Bash(pkill:*)",
-      "Bash(git grep:*)"
+      "Bash(git grep:*)",
+      "Bash(vercel --version:*)",
+      "Bash(vercel project ls:*)",
+      "Bash(vercel env ls:*)",
+      "Bash(vercel:*)"
     ],
     "deny": [],
     "ask": []
