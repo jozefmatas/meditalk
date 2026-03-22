@@ -435,7 +435,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           }
 
           // Wait for onstop to fire (ensures all data is flushed, especially
-          // for mp4 which doesn't use timeslice and delivers all data at stop)
+          // for mp4 which doesn't use timeslice and delivers all data at stop).
+          // IMPORTANT: cleanup (mic track stop, etc.) must happen INSIDE onstop —
+          // killing the stream before the recorder finalizes truncates the file.
           return new Promise<{
             blob: Blob | null;
             transcript: string | null;
@@ -443,23 +445,23 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             recorder.onstop = () => {
               const blob = buildBlob();
               chunksRef.current = [];
+              // Cleanup AFTER data is fully flushed
+              if (recordingStreamRef.current) {
+                recordingStreamRef.current.getTracks().forEach((t) => t.stop());
+                recordingStreamRef.current = null;
+                setRecordingStream(null);
+              }
+              if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+              }
+              releaseWakeLock();
+              setState("idle");
+              setDuration(0);
+              elapsedBeforePauseRef.current = 0;
               resolve({ blob, transcript });
             };
             recorder.stop();
-            // Cleanup resources while waiting for onstop
-            if (recordingStreamRef.current) {
-              recordingStreamRef.current.getTracks().forEach((t) => t.stop());
-              recordingStreamRef.current = null;
-              setRecordingStream(null);
-            }
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
-            }
-            releaseWakeLock();
-            setState("idle");
-            setDuration(0);
-            elapsedBeforePauseRef.current = 0;
           });
         },
       }),
