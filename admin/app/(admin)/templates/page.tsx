@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTemplates } from "@/lib/queries";
 import { VisibilityToggle } from "@/components/visibility-toggle";
+import { NewTemplateButton } from "@/components/new-template-button";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,10 @@ export default async function TemplatesPage() {
 
   return (
     <div className="max-w-6xl space-y-6">
-      <h1 className="text-2xl font-bold">Templates</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Templates</h1>
+        <NewTemplateButton />
+      </div>
 
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
