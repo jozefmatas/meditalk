@@ -5,7 +5,7 @@ import type { SearchResponse } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
-    const { supabase } = await requireAuth();
+    const { userId, supabase } = await requireAuth();
 
     const body = await request.json();
     // Support both visitId (new) and transcriptId (legacy)
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Embed the search query
-    const queryEmbedding = await embedText(query);
+    const queryEmbedding = await embedText(query, { userId, visitId });
 
     // Semantic search via match_chunks RPC
     const { data: matches, error: rpcError } = await supabase.rpc(

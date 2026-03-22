@@ -10,12 +10,24 @@ export interface ModelBreakdown {
   total_duration_seconds: number;
 }
 
+export interface OperationBreakdown {
+  operation: string;
+  requests: number;
+  total_cost: number;
+}
+
 export interface DashboardStats {
   totalCost: number;
   totalRequests: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalEncounters: number;
+  avgCostPerEncounter: number;
+  totalRecordingMinutes: number;
+  costPerRecordingMinute: number;
+  avgTimePerEncounterSeconds: number;
   byModel: ModelBreakdown[];
+  byOperation: OperationBreakdown[];
 }
 
 export async function getDashboardStats(): Promise<DashboardStats> {
@@ -24,7 +36,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   const { data: rows, error } = await sb
     .from("api_usage")
     .select(
-      "provider, model, input_tokens, output_tokens, cost_usd, duration_seconds",
+      "provider, model, operation, input_tokens, output_tokens, cost_usd, duration_seconds, visit_id",
     );
 
   if (error || !rows) {
@@ -34,7 +46,13 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       totalRequests: 0,
       totalInputTokens: 0,
       totalOutputTokens: 0,
+      totalEncounters: 0,
+      avgCostPerEncounter: 0,
+      totalRecordingMinutes: 0,
+      costPerRecordingMinute: 0,
+      avgTimePerEncounterSeconds: 0,
       byModel: [],
+      byOperation: [],
     };
   }
 
@@ -46,6 +64,29 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     0,
   );
 
+  // Unique encounters (visit_ids)
+  const visitIds = new Set<string>();
+  for (const r of rows) {
+    if (r.visit_id) visitIds.add(r.visit_id);
+  }
+  const totalEncounters = visitIds.size;
+  const avgCostPerEncounter =
+    totalEncounters > 0 ? totalCost / totalEncounters : 0;
+
+  // Total recording minutes (from Scribe transcription duration)
+  let totalRecordingSeconds = 0;
+  for (const r of rows) {
+    if (r.operation === "transcribe" && r.duration_seconds) {
+      totalRecordingSeconds += Number(r.duration_seconds);
+    }
+  }
+  const totalRecordingMinutes = totalRecordingSeconds / 60;
+  const costPerRecordingMinute =
+    totalRecordingMinutes > 0 ? totalCost / totalRecordingMinutes : 0;
+  const avgTimePerEncounterSeconds =
+    totalEncounters > 0 ? totalRecordingSeconds / totalEncounters : 0;
+
+  // By model
   const modelMap = new Map<string, ModelBreakdown>();
   for (const r of rows) {
     const key = `${r.provider}:${r.model}`;
@@ -69,12 +110,36 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     }
   }
 
+  // By operation
+  const opMap = new Map<string, OperationBreakdown>();
+  for (const r of rows) {
+    const existing = opMap.get(r.operation);
+    if (existing) {
+      existing.requests++;
+      existing.total_cost += Number(r.cost_usd);
+    } else {
+      opMap.set(r.operation, {
+        operation: r.operation,
+        requests: 1,
+        total_cost: Number(r.cost_usd),
+      });
+    }
+  }
+
   return {
     totalCost,
     totalRequests,
     totalInputTokens,
     totalOutputTokens,
+    totalEncounters,
+    avgCostPerEncounter,
+    totalRecordingMinutes,
+    costPerRecordingMinute,
+    avgTimePerEncounterSeconds,
     byModel: Array.from(modelMap.values()).sort(
+      (a, b) => b.total_cost - a.total_cost,
+    ),
+    byOperation: Array.from(opMap.values()).sort(
       (a, b) => b.total_cost - a.total_cost,
     ),
   };
