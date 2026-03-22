@@ -598,46 +598,7 @@ export async function POST(request: NextRequest) {
             outputTokens,
           });
 
-          // Send email (fire-and-forget, server-side so it works even if client disconnects)
-          if (sendAsEmail) {
-            (async () => {
-              try {
-                const {
-                  data: { user },
-                } = await supabase.auth.getUser();
-                if (!user?.email) {
-                  console.error("[email] User email not found");
-                  return;
-                }
-                const encounterPath = `/${language}/encounters/${visitId}`;
-                const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
-                const redirectTo = `${appUrl}${encounterPath}`;
-
-                const admin = createAdminClient();
-                const { data: linkData } = await admin.auth.admin.generateLink({
-                  type: "magiclink",
-                  email: user.email,
-                  options: { redirectTo },
-                });
-                const viewUrl =
-                  linkData?.properties?.action_link ||
-                  `${appUrl}${encounterPath}`;
-
-                await sendNoteEmail({
-                  to: user.email,
-                  title: autoTitle || visit.title || "Untitled",
-                  noteHtml: filterEmptySectionsHtml(generatedNote),
-                  viewUrl,
-                  language,
-                });
-                console.log("[email] Note email sent to", user.email);
-              } catch (err) {
-                console.error("[email] Failed to send note email:", err);
-              }
-            })();
-          }
-
-          // Send final complete event
+          // Send final complete event and close stream so client gets response immediately
           sendEvent({
             type: "complete",
             generatedNote,
@@ -660,6 +621,42 @@ export async function POST(request: NextRequest) {
 
           lap("total");
           safeClose();
+
+          // Send email AFTER closing the stream — awaited so the serverless function
+          // stays alive until the email is sent (even if client disconnected)
+          if (sendAsEmail) {
+            try {
+              const {
+                data: { user },
+              } = await supabase.auth.getUser();
+              if (user?.email) {
+                const encounterPath = `/${language}/encounters/${visitId}`;
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+                const redirectTo = `${appUrl}${encounterPath}`;
+
+                const admin = createAdminClient();
+                const { data: linkData } = await admin.auth.admin.generateLink({
+                  type: "magiclink",
+                  email: user.email,
+                  options: { redirectTo },
+                });
+                const viewUrl =
+                  linkData?.properties?.action_link ||
+                  `${appUrl}${encounterPath}`;
+
+                await sendNoteEmail({
+                  to: user.email,
+                  title: autoTitle || visit.title || "Untitled",
+                  noteHtml: filterEmptySectionsHtml(generatedNote),
+                  viewUrl,
+                  language,
+                });
+                lap("email-sent");
+              }
+            } catch (err) {
+              console.error("[email] Failed to send note email:", err);
+            }
+          }
         } catch (err) {
           console.error("Generate stream error:", err);
           sendEvent({
