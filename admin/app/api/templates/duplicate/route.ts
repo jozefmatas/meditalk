@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       system_prompt: original.system_prompt,
       style_examples: original.style_examples,
       specialties: original.specialties,
-      is_system: false,
+      is_system: true,
       visible: false,
       sort_order: nextSort,
       source_template_id: sourceTemplateId,

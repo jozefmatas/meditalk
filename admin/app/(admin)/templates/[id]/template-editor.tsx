@@ -349,6 +349,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // ── Dirty tracking ──
 
@@ -546,6 +547,20 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     setDuplicating(false);
   }
 
+  // ── Delete template ──
+
+  async function handleDeleteTemplate() {
+    if (!confirm("Delete this template? This cannot be undone.")) return;
+    setDeleting(true);
+    const res = await fetch(`/api/templates/${initialData.id}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      window.location.href = "/templates";
+    }
+    setDeleting(false);
+  }
+
   // ── Specialties ──
 
   function handleAddSpecialty() {
@@ -647,6 +662,15 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
           >
             {duplicating ? <Loader2 className="animate-spin" /> : <Copy />}
             Duplicate
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDeleteTemplate}
+            disabled={deleting}
+          >
+            {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            Delete
           </Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />}

@@ -40,9 +40,6 @@ export default async function TemplatesPage() {
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Visible
               </th>
-              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                Type
-              </th>
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                 Sort
               </th>
@@ -97,11 +94,6 @@ export default async function TemplatesPage() {
                     initialVisible={t.visible}
                   />
                 </td>
-                <td className="px-4 py-3">
-                  <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
-                    {t.is_system ? "System" : "Custom"}
-                  </span>
-                </td>
                 <td className="px-4 py-3 text-right">{t.sort_order}</td>
                 <td className="px-4 py-3 text-muted-foreground">
                   {new Date(t.created_at).toLocaleDateString()}
@@ -111,7 +103,7 @@ export default async function TemplatesPage() {
             {templates.length === 0 && (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={6}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   No templates found
