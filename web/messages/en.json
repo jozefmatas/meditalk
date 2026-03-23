@@ -133,7 +133,7 @@
       "note": "Note",
       "addDocument": "Add document",
       "copyNote": "Copy note",
-      "sendAsEmail": "Send email",
+      "sendAsEmail": "Send via email",
       "emailSent": "Email sent!",
       "emailFailed": "Failed to send",
       "noteCopied": "Copied!",
