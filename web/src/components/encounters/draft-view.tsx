@@ -297,33 +297,42 @@ export function DraftView({
         <Tabs
           value={mobileTab}
           onValueChange={(v) => setMobileTab(v as "files" | "notes")}
+          className="flex flex-1 min-h-0 flex-col"
         >
-          <div className="border-b border-border">
+          <div className="shrink-0 border-b border-border">
             <TabsList variant="line">
               <TabsTrigger value="files">{t("detail.filesTab")}</TabsTrigger>
               <TabsTrigger value="notes">{t("detail.notesTab")}</TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="files" className="flex-1 overflow-y-auto py-4">
+          <TabsContent
+            value="files"
+            className="flex-1 min-h-0 overflow-y-auto pt-4"
+          >
             <div className="flex flex-col gap-4">
               <FilesContent
                 visitId={visitId}
                 files={files}
                 onFilesChange={onFilesChange}
               />
+              <div aria-hidden className="min-h-40 shrink-0" />
             </div>
           </TabsContent>
 
-          <TabsContent value="notes" className="flex-1 min-h-0">
+          <TabsContent
+            value="notes"
+            className="flex flex-1 min-h-0 flex-col overflow-y-auto pt-4"
+          >
             <TiptapEditor
               content={doctorNotes}
               onChange={onDoctorNotesChange}
               placeholder={tTemplates("doctorNotesPlaceholder")}
-              className="flex-1 overflow-y-auto rounded-2xl"
+              className="flex-1 rounded-2xl"
               onEditorReady={handleEditorReady}
               slashCommandItems={slashCommandItems}
             />
+            <div aria-hidden className="min-h-40 shrink-0" />
           </TabsContent>
         </Tabs>
       </div>

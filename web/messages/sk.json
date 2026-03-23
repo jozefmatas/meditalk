@@ -134,6 +134,8 @@
       "addDocument": "Pridať dokument",
       "copyNote": "Kopírovať správu",
       "sendAsEmail": "Poslať email",
+      "emailSent": "Email odoslaný!",
+      "emailFailed": "Odoslanie zlyhalo",
       "noteCopied": "Skopírované!",
       "addTemplateHeader": "Pridať hlavičku šablóny",
       "markComplete": "Označiť ako dokončenú",

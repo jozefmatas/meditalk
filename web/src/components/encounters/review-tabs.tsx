@@ -3,14 +3,14 @@
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 
-export type ReviewTab = "transcript" | "note" | "add-document";
+export type ReviewTab = "transcript" | "note";
 
 interface ReviewTabsProps {
   activeTab: ReviewTab;
   onTabChange: (tab: ReviewTab) => void;
 }
 
-const TABS: ReviewTab[] = ["transcript", "note", "add-document"];
+const TABS: ReviewTab[] = ["transcript", "note"];
 
 export function ReviewTabs({ activeTab, onTabChange }: ReviewTabsProps) {
   const t = useTranslations("encounters.detail");
@@ -18,7 +18,6 @@ export function ReviewTabs({ activeTab, onTabChange }: ReviewTabsProps) {
   const labels: Record<ReviewTab, string> = {
     transcript: t("transcript"),
     note: t("note"),
-    "add-document": t("addDocument"),
   };
 
   return (

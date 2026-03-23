@@ -15,23 +15,23 @@ import {
   type TabOption,
 } from "@/components/shared/tabs";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/shared/dropdown-menu";
-import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/shared/collapsible";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Cancel01Icon, ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import {
+  Cancel01Icon,
+  ArrowDown01Icon,
+  Mail01Icon,
+  Tick02Icon,
+  Loading03Icon,
+  AlertCircleIcon,
+} from "@hugeicons/core-free-icons";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { IcdPanelContent } from "@/components/encounters/icd-panel";
-import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import type { Template } from "@/lib/templates";
 import { flattenSectionIds } from "@/lib/templates/html";
 import {
@@ -110,6 +110,59 @@ export function ReviewView({
   const [mobileTab, setMobileTab] = useState<"note" | "codes">("note");
   const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
   const [noteCopied, setNoteCopied] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<
+    "idle" | "sending" | "sent" | "failed"
+  >("idle");
+
+  // Mobile header collapse on scroll — hide everything except tabs when scrolling down.
+  // Locks during CSS transition so the animation always completes before reversing.
+  const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
+  const mobileCollapsibleRef = useRef<HTMLDivElement>(null);
+  const anchorY = useRef(0);
+  const isHidden = useRef(false);
+  const transitioning = useRef(false);
+
+  const onCollapsibleTransitionEnd = useCallback(() => {
+    transitioning.current = false;
+  }, []);
+
+  useEffect(() => {
+    const scrollParent = mobileCollapsibleRef.current?.closest(
+      "[style*='overflow'], .overflow-y-auto, .overflow-auto",
+    ) as HTMLElement | null;
+    const target = scrollParent || window;
+
+    const getScrollY = () =>
+      scrollParent ? scrollParent.scrollTop : window.scrollY;
+
+    anchorY.current = getScrollY();
+
+    const handleScroll = () => {
+      if (transitioning.current) return;
+
+      const currentY = getScrollY();
+      const delta = currentY - anchorY.current;
+
+      if (!isHidden.current && delta > 40 && currentY > 80) {
+        isHidden.current = true;
+        transitioning.current = true;
+        setMobileHeaderHidden(true);
+        anchorY.current = currentY;
+      } else if (isHidden.current && delta < -30) {
+        isHidden.current = false;
+        transitioning.current = true;
+        setMobileHeaderHidden(false);
+        anchorY.current = currentY;
+      }
+
+      // Move anchor when continuing same direction
+      if (isHidden.current && delta > 0) anchorY.current = currentY;
+      if (!isHidden.current && delta < 0) anchorY.current = currentY;
+    };
+
+    target.addEventListener("scroll", handleScroll, { passive: true });
+    return () => target.removeEventListener("scroll", handleScroll);
+  }, []);
 
   // Sticky header height — drives sidebar sticky offset + scroll-to-section offset
   const stickyHeaderRef = useRef<HTMLDivElement>(null);
@@ -138,32 +191,14 @@ export function ReviewView({
     () => [
       { value: "resources", label: t("detail.resources") },
       { value: "note", label: t("detail.note") },
-      { value: "add-document", label: t("detail.addDocument") },
     ],
     [t],
   );
 
-  const defaultVisibleTabs = useMemo(
-    () => allTabs.filter((tab) => tab.value !== "add-document"),
-    [allTabs],
-  );
+  const defaultVisibleTabs = allTabs;
 
   const currentVisibleTabs =
     visibleTabs.length > 0 ? visibleTabs : defaultVisibleTabs;
-
-  const handleAddTab = useCallback(
-    (value: string) => {
-      const tab = allTabs.find((t) => t.value === value);
-      if (tab) {
-        setVisibleTabs((prev) => {
-          const base = prev.length > 0 ? prev : defaultVisibleTabs;
-          return [...base, tab];
-        });
-        setActiveTab(value);
-      }
-    },
-    [allTabs, defaultVisibleTabs],
-  );
 
   const handleRemoveTab = useCallback(
     (value: string) => {
@@ -306,6 +341,25 @@ export function ReviewView({
     sectionLabels,
     generatedNoteHtml,
   ]);
+
+  // Send current note via email
+  const handleSendEmail = useCallback(async () => {
+    if (emailStatus === "sending") return;
+    setEmailStatus("sending");
+    try {
+      const res = await fetch("/api/send-note-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visitId: visit.id }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setEmailStatus("sent");
+      setTimeout(() => setEmailStatus("idle"), 3000);
+    } catch {
+      setEmailStatus("failed");
+      setTimeout(() => setEmailStatus("idle"), 3000);
+    }
+  }, [visit.id, emailStatus]);
 
   // Note section cards — shared between desktop note tab and mobile note tab
   const isActivelyStreaming = isRegenerating || isStreamingGeneration;
@@ -451,66 +505,121 @@ export function ReviewView({
       {/* ── MOBILE LAYOUT (< desktop breakpoint) ── */}
       <div className="flex flex-col gap-0 desktop:hidden">
         {/* Sticky header */}
-        <div className="sticky top-0 z-10 flex flex-col gap-4 bg-background pt-4">
-          <div className="flex min-w-0 flex-col gap-1">
-            <Textarea
-              value={title}
-              onChange={(e) => onTitleChange(e.target.value)}
-              onBlur={onMetadataBlur}
-              placeholder={t("untitled")}
-              rows={1}
-              className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-              onInput={(e) => {
-                const target = e.currentTarget;
-                target.style.height = "auto";
-                target.style.height = `${target.scrollHeight}px`;
-              }}
-              ref={(el) => {
-                if (el) {
-                  el.style.height = "auto";
-                  el.style.height = `${el.scrollHeight}px`;
-                }
-              }}
-            />
-            <div className="flex items-center gap-3">
-              <Badge variant={`status-${visit.status}` as "status-started"}>
-                {t(`status.${visit.status}`)}
-              </Badge>
-              <span className="text-sm text-foreground/65">
-                {formattedDate}
-              </span>
+        <div className="sticky top-0 z-10 flex flex-col bg-background">
+          {/* Collapsible part: title, date, template, buttons */}
+          <div
+            ref={mobileCollapsibleRef}
+            className="grid transition-[grid-template-rows] duration-200 ease-out"
+            style={{
+              gridTemplateRows: mobileHeaderHidden ? "0fr" : "1fr",
+            }}
+            onTransitionEnd={onCollapsibleTransitionEnd}
+          >
+            <div className="overflow-hidden">
+              <div className="flex flex-col gap-4 pt-4 pb-2">
+                <div className="flex min-w-0 flex-col gap-1">
+                  <Textarea
+                    value={title}
+                    onChange={(e) => onTitleChange(e.target.value)}
+                    onBlur={onMetadataBlur}
+                    placeholder={t("untitled")}
+                    rows={1}
+                    className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
+                    onInput={(e) => {
+                      const target = e.currentTarget;
+                      target.style.height = "auto";
+                      target.style.height = `${target.scrollHeight}px`;
+                    }}
+                    ref={(el) => {
+                      if (el) {
+                        el.style.height = "auto";
+                        el.style.height = `${el.scrollHeight}px`;
+                      }
+                    }}
+                  />
+                  <div className="flex items-center gap-3">
+                    <Badge
+                      variant={`status-${visit.status}` as "status-started"}
+                    >
+                      {t(`status.${visit.status}`)}
+                    </Badge>
+                    <span className="text-sm text-foreground/65">
+                      {formattedDate}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Template picker + action buttons */}
+                <div className="flex flex-col gap-2">
+                  <TemplateSelector
+                    value={selectedTemplateId}
+                    onChange={handleRegenerateWithTabSwitch}
+                    disabled={isActivelyStreaming}
+                    size="lg"
+                    label={t("detail.templateLabel")}
+                  />
+                  {isActivelyStreaming ? (
+                    <TextShimmer
+                      className="py-2 text-center text-sm"
+                      duration={3}
+                    >
+                      {isStreamingGeneration
+                        ? t("detail.generatingEncounter")
+                        : t("detail.regenerating")}
+                    </TextShimmer>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="lg"
+                        className="flex-1"
+                        onClick={handleSendEmail}
+                        disabled={
+                          !generatedNoteHtml || emailStatus === "sending"
+                        }
+                      >
+                        <HugeiconsIcon
+                          icon={
+                            emailStatus === "sending"
+                              ? Loading03Icon
+                              : emailStatus === "sent"
+                                ? Tick02Icon
+                                : emailStatus === "failed"
+                                  ? AlertCircleIcon
+                                  : Mail01Icon
+                          }
+                          size={16}
+                          className={
+                            emailStatus === "sending"
+                              ? "animate-spin"
+                              : undefined
+                          }
+                        />
+                        {emailStatus === "sent"
+                          ? t("detail.emailSent")
+                          : emailStatus === "failed"
+                            ? t("detail.emailFailed")
+                            : t("detail.sendAsEmail")}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="lg"
+                        className="flex-1"
+                        onClick={handleCopyNote}
+                        disabled={!generatedNoteHtml}
+                      >
+                        {noteCopied
+                          ? t("detail.noteCopied")
+                          : t("detail.copyNote")}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Template picker + copy note */}
-          <div className="flex flex-col gap-2">
-            <TemplateSelector
-              value={selectedTemplateId}
-              onChange={handleRegenerateWithTabSwitch}
-              disabled={isActivelyStreaming}
-              size="lg"
-              label={t("detail.templateLabel")}
-            />
-            {isActivelyStreaming ? (
-              <TextShimmer className="py-2 text-center text-sm" duration={3}>
-                {isStreamingGeneration
-                  ? t("detail.generatingEncounter")
-                  : t("detail.regenerating")}
-              </TextShimmer>
-            ) : (
-              <Button
-                variant="secondary"
-                size="lg"
-                className="w-full"
-                onClick={handleCopyNote}
-                disabled={!generatedNoteHtml}
-              >
-                {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
-              </Button>
-            )}
-          </div>
-
-          {/* Mobile tabs: Note | Codes */}
+          {/* Always-visible tabs */}
           <div className="border-b border-border">
             <Tabs
               value={mobileTab}
@@ -620,35 +729,6 @@ export function ReviewView({
                 </TabsTrigger>
               ))}
             </TabsList>
-            {allTabs.filter(
-              (opt) => !currentVisibleTabs.some((t) => t.value === opt.value),
-            ).length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="text-foreground/65 hover:text-foreground"
-                  >
-                    + {t("detail.addDocument")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {allTabs
-                    .filter(
-                      (opt) =>
-                        !currentVisibleTabs.some((t) => t.value === opt.value),
-                    )
-                    .map((tab) => (
-                      <DropdownMenuItem
-                        key={tab.value}
-                        onClick={() => handleAddTab(tab.value)}
-                      >
-                        {tab.label}
-                      </DropdownMenuItem>
-                    ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
           </div>
         </div>
 
@@ -702,14 +782,45 @@ export function ReviewView({
                       : t("detail.regenerating")}
                   </TextShimmer>
                 ) : (
-                  <Button
-                    variant="secondary"
-                    size="lg"
-                    onClick={handleCopyNote}
-                    disabled={!generatedNoteHtml}
-                  >
-                    {noteCopied ? t("detail.noteCopied") : t("detail.copyNote")}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={handleSendEmail}
+                      disabled={!generatedNoteHtml || emailStatus === "sending"}
+                    >
+                      <HugeiconsIcon
+                        icon={
+                          emailStatus === "sending"
+                            ? Loading03Icon
+                            : emailStatus === "sent"
+                              ? Tick02Icon
+                              : emailStatus === "failed"
+                                ? AlertCircleIcon
+                                : Mail01Icon
+                        }
+                        size={16}
+                        className={
+                          emailStatus === "sending" ? "animate-spin" : undefined
+                        }
+                      />
+                      {emailStatus === "sent"
+                        ? t("detail.emailSent")
+                        : emailStatus === "failed"
+                          ? t("detail.emailFailed")
+                          : t("detail.sendAsEmail")}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      onClick={handleCopyNote}
+                      disabled={!generatedNoteHtml}
+                    >
+                      {noteCopied
+                        ? t("detail.noteCopied")
+                        : t("detail.copyNote")}
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="flex flex-col gap-2">{noteSectionCards}</div>
@@ -719,17 +830,6 @@ export function ReviewView({
 
         <TabsContent value="resources" className="pt-6">
           <ResourcesPanel visit={visit} t={t} />
-        </TabsContent>
-
-        <TabsContent value="add-document">
-          <div className="flex-1">
-            <TiptapEditor
-              content=""
-              onChange={() => {}}
-              placeholder={t("detail.addDocument")}
-              className="flex-1 rounded-2xl"
-            />
-          </div>
         </TabsContent>
       </Tabs>
     </>

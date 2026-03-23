@@ -134,6 +134,8 @@
       "addDocument": "Add document",
       "copyNote": "Copy note",
       "sendAsEmail": "Send email",
+      "emailSent": "Email sent!",
+      "emailFailed": "Failed to send",
       "noteCopied": "Copied!",
       "addTemplateHeader": "Add template header",
       "markComplete": "Mark complete",

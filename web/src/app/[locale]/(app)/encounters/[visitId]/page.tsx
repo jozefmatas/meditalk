@@ -327,7 +327,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         /* Draft mode — recording + editor */
         <>
           <div className="flex flex-1 justify-center px-4 pb-6 desktop:px-6 overflow-hidden">
-            <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-0">
+            <div className="flex w-full max-w-[960px] flex-col gap-3 min-h-0 desktop:gap-6">
               <DraftView
                 visit={data.visit}
                 title={metadata.title}
