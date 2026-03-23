@@ -150,9 +150,14 @@ export function EncounterHeaderActions({
           </Button>
         )}
 
-        {/* Adjust button — review mode only */}
+        {/* Adjust button — review mode only, desktop only */}
         {!isDraft && onAdjust && (
-          <Button size="lg" onClick={onAdjust} disabled={isProcessing}>
+          <Button
+            size="lg"
+            onClick={onAdjust}
+            disabled={isProcessing}
+            className="hidden desktop:inline-flex"
+          >
             <HugeiconsIcon
               icon={isProcessing ? Loading03Icon : SparklesIcon}
               size={16}

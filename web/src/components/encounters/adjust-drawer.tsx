@@ -195,7 +195,8 @@ export function AdjustDrawer({
             </div>
 
             <DrawerFooter>
-              <div className="flex items-center gap-2">
+              {/* Desktop: horizontal layout */}
+              <div className="hidden items-center gap-2 desktop:flex">
                 <Select
                   value={generationLanguage}
                   onValueChange={(v) =>
@@ -230,6 +231,44 @@ export function AdjustDrawer({
                   />
                   {t("detail.adjustRegenerate")}
                 </Button>
+              </div>
+
+              {/* Mobile: vertical layout */}
+              <div className="flex flex-col gap-2 desktop:hidden">
+                <Button
+                  size="lg"
+                  onClick={handleRegenerate}
+                  disabled={isProcessing || !hasContent}
+                  className="w-full"
+                >
+                  <HugeiconsIcon
+                    icon={isProcessing ? Loading03Icon : SparklesIcon}
+                    size={16}
+                    className={isProcessing ? "animate-spin" : undefined}
+                  />
+                  {t("detail.adjustRegenerate")}
+                </Button>
+                <Select
+                  value={generationLanguage}
+                  onValueChange={(v) =>
+                    onLanguageChange(v as SupportedLanguage)
+                  }
+                  disabled={isProcessing}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    label={t("detail.noteLanguage")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GENERATION_LANGUAGES.map((lang) => (
+                      <SelectItem key={lang.value} value={lang.value}>
+                        {lang.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </DrawerFooter>
           </div>

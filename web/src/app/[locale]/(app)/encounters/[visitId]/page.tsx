@@ -12,6 +12,7 @@ import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
 import { ReviewView } from "@/components/encounters/review-view";
 import { MobileDraftBottomBar } from "@/components/encounters/mobile-draft-bottom-bar";
+import { MobileReviewBottomBar } from "@/components/encounters/mobile-review-bottom-bar";
 import { Alert, AlertDescription } from "@/components/shared/alert";
 import { Button } from "@/components/shared/button";
 import {
@@ -418,6 +419,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
               <div aria-hidden className="min-h-32 shrink-0" />
             </div>
           </div>
+
+          {/* Mobile bottom bar — review mode only */}
+          <MobileReviewBottomBar
+            onAdjust={() => setAdjustDrawerOpen(true)}
+            isProcessing={generation.isRegenerating}
+          />
 
           {/* Right panel — ICD codes */}
           <IcdPanel visit={data.visit} setVisit={data.setVisit} />
