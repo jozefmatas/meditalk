@@ -15,18 +15,22 @@ import {
   type TabOption,
 } from "@/components/shared/tabs";
 import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@/components/shared/collapsible";
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from "@/components/shared/accordion";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Cancel01Icon,
-  ArrowDown01Icon,
   Mail01Icon,
   Tick02Icon,
   Loading03Icon,
   AlertCircleIcon,
+  Mic01Icon,
+  Note01Icon,
+  File01Icon,
+  Image01Icon,
 } from "@hugeicons/core-free-icons";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
@@ -871,6 +875,20 @@ interface EncounterFile {
   name: string;
   type: string;
   extracted_text?: string | null;
+  source?: string;
+}
+
+function iconForFileType(type: string) {
+  if (type.startsWith("audio/")) return Mic01Icon;
+  if (type.startsWith("image/")) return Image01Icon;
+  return File01Icon;
+}
+
+function resourceTypeLabelKey(file: EncounterFile): string {
+  if (file.source === "recording") return "detail.resourceTypeRecording";
+  if (file.type.startsWith("audio/")) return "detail.resourceTypeAudio";
+  if (file.type.startsWith("image/")) return "detail.resourceTypeImage";
+  return "detail.resourceTypeFile";
 }
 
 function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
@@ -887,26 +905,13 @@ function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   const hasAnything = hasTranscript || hasDoctorNotes || hasFiles;
 
   // First non-empty section starts open
-  const firstOpen = hasTranscript
-    ? "transcript"
+  const defaultOpen = hasTranscript
+    ? ["transcript"]
     : hasDoctorNotes
-      ? "notes"
+      ? ["notes"]
       : hasFiles
-        ? "files"
-        : null;
-
-  const [openSections, setOpenSections] = useState<Set<string>>(
-    () => new Set(firstOpen ? [firstOpen] : []),
-  );
-
-  const toggle = useCallback((id: string) => {
-    setOpenSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+        ? ["file-0"]
+        : [];
 
   if (!hasAnything) {
     return (
@@ -915,74 +920,54 @@ function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <Accordion
+      type="multiple"
+      defaultValue={defaultOpen}
+      className="flex flex-col gap-3"
+    >
       {hasTranscript && (
-        <ResourceCollapsible
-          id="transcript"
-          label={t("detail.recordingTranscript")}
-          content={transcript}
-          open={openSections.has("transcript")}
-          onToggle={toggle}
-        />
+        <AccordionItem value="transcript" variant="bordered">
+          <AccordionTrigger icon={Mic01Icon}>
+            {t("detail.recordingTranscript")}
+          </AccordionTrigger>
+          <AccordionContent>
+            <pre className="whitespace-pre-wrap text-sm text-foreground/80 font-sans">
+              {transcript}
+            </pre>
+          </AccordionContent>
+        </AccordionItem>
       )}
       {hasDoctorNotes && (
-        <ResourceCollapsible
-          id="notes"
-          label={t("detail.doctorNotes")}
-          content={doctorNotes}
-          open={openSections.has("notes")}
-          onToggle={toggle}
-        />
+        <AccordionItem value="notes" variant="bordered">
+          <AccordionTrigger icon={Note01Icon}>
+            {t("detail.doctorNotes")}
+          </AccordionTrigger>
+          <AccordionContent>
+            <pre className="whitespace-pre-wrap text-sm text-foreground/80 font-sans">
+              {doctorNotes}
+            </pre>
+          </AccordionContent>
+        </AccordionItem>
       )}
       {files.map((file, i) => (
-        <ResourceCollapsible
+        <AccordionItem
           key={file.name + i}
-          id={`file-${i}`}
-          label={file.name}
-          content={file.extracted_text!}
-          open={openSections.has(`file-${i}`)}
-          onToggle={toggle}
-        />
+          value={`file-${i}`}
+          variant="bordered"
+        >
+          <AccordionTrigger icon={iconForFileType(file.type)}>
+            <span className="truncate">{file.name}</span>
+            <Badge variant="status-started" className="ml-2 shrink-0">
+              {t(resourceTypeLabelKey(file))}
+            </Badge>
+          </AccordionTrigger>
+          <AccordionContent>
+            <pre className="whitespace-pre-wrap text-sm text-foreground/80 font-sans">
+              {file.extracted_text}
+            </pre>
+          </AccordionContent>
+        </AccordionItem>
       ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  ResourceCollapsible                                                */
-/* ------------------------------------------------------------------ */
-
-interface ResourceCollapsibleProps {
-  id: string;
-  label: string;
-  content: string;
-  open: boolean;
-  onToggle: (id: string) => void;
-}
-
-function ResourceCollapsible({
-  id,
-  label,
-  content,
-  open,
-  onToggle,
-}: ResourceCollapsibleProps) {
-  return (
-    <Collapsible open={open} onOpenChange={() => onToggle(id)}>
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm font-medium hover:bg-accent/50 transition-colors">
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          className={`size-4 shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
-        />
-        <span className="truncate">{label}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="rounded-b-lg border border-t-0 border-border bg-card px-4 py-3">
-          <pre className="whitespace-pre-wrap text-sm text-foreground/80 font-sans">
-            {content}
-          </pre>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    </Accordion>
   );
 }
