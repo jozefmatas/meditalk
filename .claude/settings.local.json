@@ -150,7 +150,8 @@
       "Bash(vercel --version:*)",
       "Bash(vercel project ls:*)",
       "Bash(vercel env ls:*)",
-      "Bash(vercel:*)"
+      "Bash(vercel:*)",
+      "Bash(PGHOST=\"db.glrmfkdlkrdpwmcwrzbv.supabase.co\" PGPORT=\"5432\" PGUSER=\"cli_login_postgres\" PGPASSWORD=\"TyMsvLLsmkrModGUJJikNgRarQjvYDSL\" psql:*)"
     ],
     "deny": [],
     "ask": []

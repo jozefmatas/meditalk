@@ -148,7 +148,7 @@ export function ReviewView({
         transitioning.current = true;
         setMobileHeaderHidden(true);
         anchorY.current = currentY;
-      } else if (isHidden.current && delta < -30) {
+      } else if (isHidden.current && (delta < -30 || currentY < 40)) {
         isHidden.current = false;
         transitioning.current = true;
         setMobileHeaderHidden(false);
@@ -509,7 +509,7 @@ export function ReviewView({
           {/* Collapsible part: title, date, template, buttons */}
           <div
             ref={mobileCollapsibleRef}
-            className="grid transition-[grid-template-rows] duration-200 ease-out"
+            className="grid transition-[grid-template-rows] duration-300 ease-in-out"
             style={{
               gridTemplateRows: mobileHeaderHidden ? "0fr" : "1fr",
             }}
