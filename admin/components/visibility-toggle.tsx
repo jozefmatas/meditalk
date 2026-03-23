@@ -40,7 +40,7 @@ export function VisibilityToggle({
     >
       <span
         className={`pointer-events-none block size-4 rounded-full bg-white shadow-sm transition-transform ${
-          visible ? "translate-x-[18px]" : "translate-x-0.5"
+          visible ? "translate-x-4.5" : "translate-x-0.5"
         }`}
       />
     </button>
