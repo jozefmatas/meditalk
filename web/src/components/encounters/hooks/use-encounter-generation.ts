@@ -519,6 +519,234 @@ export function useEncounterGeneration({
     ],
   );
 
+  /* ------------------------------------------------------------------ */
+  /*  handleAdjustGenerate — re-generate from review view with new data  */
+  /* ------------------------------------------------------------------ */
+
+  const handleAdjustGenerate = useCallback(
+    async (opts: {
+      adjustRecordingBarRef: React.RefObject<RecordingBarRef | null>;
+      additionalNotes?: string;
+    }) => {
+      if (!visitId || activeGenerations.has(visitId)) return;
+      activeGenerations.add(visitId);
+      setIsStreaming(false);
+      setStreamedSections([]);
+      setStreamingSectionIds([]);
+      setStreamingSectionLabels({});
+      setError(null);
+
+      const capturedTemplateId = selectedTemplateId;
+
+      // Merge additional notes into existing doctor notes
+      const mergedNotes = [doctorNotes, opts.additionalNotes]
+        .filter(Boolean)
+        .join("\n\n");
+
+      // Set processing state
+      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
+      window.dispatchEvent(
+        new CustomEvent("encounter-update", {
+          detail: { id: visitId, status: "processing" },
+        }),
+      );
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "processing" }),
+      }).catch(() => {});
+
+      // Finalize any recording in the adjust drawer
+      const finalized = await opts.adjustRecordingBarRef.current?.finalize();
+      const blobToProcess = finalized?.blob ?? null;
+      const streamingTranscript = finalized?.transcript ?? null;
+
+      try {
+        // Upload adjust recording if exists
+        if (blobToProcess && !streamingTranscript) {
+          let uploadBlob: Blob = blobToProcess;
+          let fileName = `recording${audioMimeToExt(blobToProcess.type || "audio/webm")}`;
+          let uploadType = blobToProcess.type || "audio/webm";
+
+          try {
+            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+            uploadBlob = await convertToWav(blobToProcess);
+            fileName = "recording.wav";
+            uploadType = "audio/wav";
+          } catch {
+            // Fall back to original
+          }
+
+          const result = await uploadToStorage(uploadBlob, fileName, {
+            encounterId: visitId,
+          });
+          await fetch(`/api/encounters/${visitId}/files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: [
+                {
+                  id: crypto.randomUUID(),
+                  name: fileName,
+                  size: uploadBlob.size,
+                  type: uploadType,
+                  path: result.path,
+                  source: "recording",
+                },
+              ],
+            }),
+          });
+        }
+
+        // Clear template cache — new context invalidates previous outputs
+        templateCacheRef.current.clear();
+
+        // Re-generate via SSE (same as handleGenerate but no retry logic)
+        let completedEvent: Record<string, unknown> | null = null;
+
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            visitId,
+            templateId: capturedTemplateId,
+            doctorNotes: mergedNotes || undefined,
+            transcriptText: streamingTranscript || undefined,
+          }),
+        });
+
+        if (!res.ok) {
+          let message = "generation_failed";
+          try {
+            const data = await res.json();
+            message = data.error || message;
+          } catch {
+            /* non-JSON response */
+          }
+          throw new Error(message);
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("generation_failed");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6);
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (event.type === "streaming_start") {
+                setIsStreaming(true);
+                setStreamedSections([]);
+                setStreamingSectionIds(event.sectionIds);
+                setStreamingSectionLabels(event.sectionLabels);
+              } else if (event.type === "section") {
+                setStreamedSections((prev) => [
+                  ...prev,
+                  {
+                    id: event.id,
+                    title: event.title,
+                    content: event.content,
+                  },
+                ]);
+              } else if (event.type === "complete") {
+                completedEvent = event;
+                templateCacheRef.current.set(capturedTemplateId, {
+                  generatedNote: event.generatedNote,
+                  letter: event.letter || "",
+                });
+                setGeneratedNoteHtml(event.generatedNote);
+                setVisit((prev) => {
+                  if (!prev) return prev;
+                  const existingMeta = (prev.metadata ?? {}) as Record<
+                    string,
+                    unknown
+                  >;
+                  return {
+                    ...prev,
+                    encounter_note: event.generatedNote,
+                    patient_letter: event.letter,
+                    ...(streamingTranscript
+                      ? { raw_text: streamingTranscript }
+                      : {}),
+                    metadata: {
+                      ...existingMeta,
+                      ...(event.clinicalAnalysis
+                        ? { clinical_analysis: event.clinicalAnalysis }
+                        : {}),
+                    },
+                  };
+                });
+              } else if (event.type === "error") {
+                throw new Error(event.error);
+              }
+            } catch (parseErr) {
+              if (
+                parseErr instanceof Error &&
+                parseErr.message !== "Unexpected end of JSON input"
+              ) {
+                throw parseErr;
+              }
+            }
+          }
+        }
+
+        // Post-generation: transition to to_review
+        if (completedEvent) {
+          await fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "to_review" }),
+          });
+          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: { id: visitId, status: "to_review" },
+            }),
+          );
+        }
+
+        // Update doctor notes to include merged version
+        if (mergedNotes) {
+          setDoctorNotes(mergedNotes);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        const isServerError =
+          msg === "insufficient_context" || msg === "save_failed";
+        if (isServerError) {
+          setError(msg);
+          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: { id: visitId, status: "to_review" },
+            }),
+          );
+        }
+      } finally {
+        activeGenerations.delete(visitId);
+        setIsStreaming(false);
+        window.dispatchEvent(
+          new CustomEvent("generation-done", { detail: { visitId } }),
+        );
+      }
+    },
+    [visitId, selectedTemplateId, doctorNotes, setVisit, setError],
+  );
+
   const handleLanguageChange = useCallback(
     async (lang: SupportedLanguage) => {
       setGenerationLanguage(lang);
@@ -893,5 +1121,6 @@ export function useEncounterGeneration({
     handleLanguageChange,
     handleTemplateChange,
     handleRegenerate,
+    handleAdjustGenerate,
   };
 }

@@ -43,8 +43,8 @@ interface RecordingBarProps {
   disabled?: boolean;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange?: (state: RecordingState) => void;
-  templateId: string;
-  onTemplateChange: (id: string) => void;
+  templateId?: string;
+  onTemplateChange?: (id: string) => void;
 }
 
 function formatDuration(seconds: number) {
@@ -654,14 +654,16 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     if (state === "idle") {
       return (
         <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
-          <TemplateSelector
-            value={templateId}
-            onChange={onTemplateChange}
-            disabled={!!disabled}
-            size="lg"
-            label={t("templateLabel")}
-            className="w-full desktop:w-auto desktop:max-w-[320px]"
-          />
+          {templateId !== undefined && onTemplateChange && (
+            <TemplateSelector
+              value={templateId}
+              onChange={onTemplateChange}
+              disabled={!!disabled}
+              size="lg"
+              label={t("templateLabel")}
+              className="w-full desktop:w-auto desktop:max-w-[320px]"
+            />
+          )}
           {/* Mobile: button then mic (reversed from desktop) */}
           <Button
             variant="secondary"
@@ -737,14 +739,16 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     return (
       <>
         <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
-          <TemplateSelector
-            value={templateId}
-            onChange={onTemplateChange}
-            disabled={!!disabled}
-            size="lg"
-            label={t("templateLabel")}
-            className="w-full desktop:w-auto desktop:max-w-70"
-          />
+          {templateId !== undefined && onTemplateChange && (
+            <TemplateSelector
+              value={templateId}
+              onChange={onTemplateChange}
+              disabled={!!disabled}
+              size="lg"
+              label={t("templateLabel")}
+              className="w-full desktop:w-auto desktop:max-w-70"
+            />
+          )}
           <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-5">
             <div className="hidden min-w-0 items-center gap-3 desktop:flex">
               {deviceSelector}

@@ -158,7 +158,13 @@
       "icdAllSelected": "All suggested codes selected",
       "icdSavedEmpty": "No saved codes yet",
       "transcribing": "Transcribing...",
-      "retry": "Retry"
+      "retry": "Retry",
+      "adjust": "Adjust",
+      "adjustTitle": "Adjust note",
+      "adjustTabRecord": "Record / Upload",
+      "adjustTabNotes": "Free notes",
+      "adjustRegenerate": "Regenerate",
+      "adjustNotesPlaceholder": "Add additional context..."
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",
     "generationInterrupted": "Generation was interrupted. Your recording and files are safe — tap Retry to continue.",

@@ -158,7 +158,13 @@
       "icdAllSelected": "Všechny navrhované kódy vybrány",
       "icdSavedEmpty": "Zatím žádné uložené kódy",
       "transcribing": "Přepisuje se...",
-      "retry": "Opakovat"
+      "retry": "Opakovat",
+      "adjust": "Upravit",
+      "adjustTitle": "Upravit záznam",
+      "adjustTabRecord": "Nahrát / Soubory",
+      "adjustTabNotes": "Volné poznámky",
+      "adjustRegenerate": "Přegenerovat",
+      "adjustNotesPlaceholder": "Přidejte další kontext..."
     },
     "insufficientContext": "Nedostatek klinických informací pro vygenerování záznamu. Nahrajte konzultaci, přidejte poznámky s klinickými detaily nebo nahrajte relevantní soubory.",
     "generationInterrupted": "Generování bylo přerušeno. Vaše nahrávka a soubory jsou v bezpečí — stiskněte Opakovat pro pokračování.",

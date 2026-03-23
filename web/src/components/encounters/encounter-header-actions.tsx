@@ -42,6 +42,7 @@ interface EncounterHeaderActionsProps {
   onMarkComplete: () => void;
   onDelete: () => void;
   canGenerate: boolean;
+  onAdjust?: () => void;
 }
 
 export function EncounterHeaderActions({
@@ -52,6 +53,7 @@ export function EncounterHeaderActions({
   onMarkComplete,
   onDelete,
   canGenerate,
+  onAdjust,
 }: EncounterHeaderActionsProps) {
   const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
@@ -147,6 +149,18 @@ export function EncounterHeaderActions({
             {isProcessing ? t("detail.generating") : t("detail.generate")}
           </Button>
         )}
+
+        {/* Adjust button — review mode only */}
+        {!isDraft && onAdjust && (
+          <Button size="lg" onClick={onAdjust} disabled={isProcessing}>
+            <HugeiconsIcon
+              icon={isProcessing ? Loading03Icon : SparklesIcon}
+              size={16}
+              className={isProcessing ? "animate-spin" : ""}
+            />
+            {t("detail.adjust")}
+          </Button>
+        )}
       </>,
     );
 
@@ -162,6 +176,7 @@ export function EncounterHeaderActions({
     onGenerate,
     onMarkComplete,
     onDelete,
+    onAdjust,
     setHeaderActions,
     t,
     tNav,
