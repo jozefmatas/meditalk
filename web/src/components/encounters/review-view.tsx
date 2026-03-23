@@ -126,6 +126,16 @@ export function ReviewView({
     transitioning.current = false;
   }, []);
 
+  // Auto-expand header when switching tabs — the new tab's content may be too
+  // short to scroll, so the scroll-based reveal would never fire.
+  useEffect(() => {
+    if (isHidden.current) {
+      isHidden.current = false;
+      transitioning.current = true;
+      setMobileHeaderHidden(false);
+    }
+  }, [activeTab]);
+
   useEffect(() => {
     const scrollParent = mobileCollapsibleRef.current?.closest(
       "[style*='overflow'], .overflow-y-auto, .overflow-auto",
@@ -147,8 +157,7 @@ export function ReviewView({
         // Don't collapse if the content barely overflows — collapsing the header
         // would remove the overflow entirely, leaving no way to scroll back up.
         const el = scrollParent || document.documentElement;
-        const collapsibleH =
-          mobileCollapsibleRef.current?.scrollHeight ?? 0;
+        const collapsibleH = mobileCollapsibleRef.current?.scrollHeight ?? 0;
         const scrollableOverflow = el.scrollHeight - el.clientHeight;
         if (scrollableOverflow - collapsibleH < 60) {
           anchorY.current = currentY;
