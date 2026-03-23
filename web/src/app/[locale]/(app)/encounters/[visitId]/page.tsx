@@ -211,6 +211,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   };
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [adjustDrawerOpen, setAdjustDrawerOpen] = useState(false);
 
   const handleDelete = () => setDeleteDialogOpen(true);
 
@@ -284,6 +285,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         onMarkComplete={handleMarkComplete}
         onDelete={handleDelete}
         canGenerate={canGenerate}
+        onAdjust={() => setAdjustDrawerOpen(true)}
       />
 
       {/* Streaming generation view — show sections progressively */}
@@ -315,6 +317,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
               focusSectionId={sections.focusSectionId}
               onAutoFocused={sections.handleAutoFocused}
               onRetry={handleRetry}
+              visitId={visitId}
+              files={data.files}
+              onFilesChange={data.setFiles}
+              generationLanguage={generation.generationLanguage}
+              onLanguageChange={generation.handleLanguageChange}
+              onAdjustGenerate={generation.handleAdjustGenerate}
+              adjustDrawerOpen={adjustDrawerOpen}
+              onAdjustDrawerOpenChange={setAdjustDrawerOpen}
               t={t}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
@@ -395,6 +405,14 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 focusSectionId={sections.focusSectionId}
                 onAutoFocused={sections.handleAutoFocused}
                 onRetry={handleRetry}
+                visitId={visitId}
+                files={data.files}
+                onFilesChange={data.setFiles}
+                generationLanguage={generation.generationLanguage}
+                onLanguageChange={generation.handleLanguageChange}
+                onAdjustGenerate={generation.handleAdjustGenerate}
+                adjustDrawerOpen={adjustDrawerOpen}
+                onAdjustDrawerOpenChange={setAdjustDrawerOpen}
                 t={t}
               />
               <div aria-hidden className="min-h-32 shrink-0" />

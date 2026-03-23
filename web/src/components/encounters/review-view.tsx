@@ -32,6 +32,7 @@ import {
   File01Icon,
   Image01Icon,
 } from "@hugeicons/core-free-icons";
+import { AdjustDrawer } from "@/components/encounters/adjust-drawer";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TemplateSelector } from "@/components/templates/template-selector";
@@ -78,6 +79,22 @@ interface ReviewViewProps {
   onAutoFocused: () => void;
   // Retry
   onRetry?: () => void;
+  // Adjust
+  visitId?: string;
+  files?: import("@/components/encounters/files-panel").EncounterFile[];
+  onFilesChange?: (
+    files: import("@/components/encounters/files-panel").EncounterFile[],
+  ) => void;
+  generationLanguage?: import("@/lib/types").SupportedLanguage;
+  onLanguageChange?: (lang: import("@/lib/types").SupportedLanguage) => void;
+  onAdjustGenerate?: (opts: {
+    adjustRecordingBarRef: React.RefObject<
+      import("@/components/encounters/recording-bar").RecordingBarRef | null
+    >;
+    additionalNotes?: string;
+  }) => Promise<void>;
+  adjustDrawerOpen?: boolean;
+  onAdjustDrawerOpenChange?: (open: boolean) => void;
   // i18n
   t: (key: string) => string;
 }
@@ -107,6 +124,14 @@ export function ReviewView({
   focusSectionId,
   onAutoFocused,
   onRetry,
+  visitId,
+  files,
+  onFilesChange,
+  generationLanguage,
+  onLanguageChange,
+  onAdjustGenerate,
+  adjustDrawerOpen = false,
+  onAdjustDrawerOpenChange,
   t,
 }: ReviewViewProps) {
   // Tab state — desktop uses "resources" | "note" | "add-document", mobile uses "note" | "codes"
@@ -858,6 +883,28 @@ export function ReviewView({
           <ResourcesPanel visit={visit} t={t} />
         </TabsContent>
       </Tabs>
+
+      {/* Adjust drawer */}
+      {onAdjustGenerate &&
+        visitId &&
+        files &&
+        onFilesChange &&
+        generationLanguage &&
+        onLanguageChange &&
+        onAdjustDrawerOpenChange && (
+          <AdjustDrawer
+            open={adjustDrawerOpen}
+            onOpenChange={onAdjustDrawerOpenChange}
+            visitId={visitId}
+            files={files}
+            onFilesChange={onFilesChange}
+            generationLanguage={generationLanguage}
+            onLanguageChange={onLanguageChange}
+            onAdjustGenerate={onAdjustGenerate}
+            isProcessing={isActivelyStreaming}
+            t={t}
+          />
+        )}
     </>
   );
 }
