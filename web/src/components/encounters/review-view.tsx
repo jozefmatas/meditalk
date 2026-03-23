@@ -144,6 +144,17 @@ export function ReviewView({
       const delta = currentY - anchorY.current;
 
       if (!isHidden.current && delta > 40 && currentY > 80) {
+        // Don't collapse if the content barely overflows — collapsing the header
+        // would remove the overflow entirely, leaving no way to scroll back up.
+        const el = scrollParent || document.documentElement;
+        const collapsibleH =
+          mobileCollapsibleRef.current?.scrollHeight ?? 0;
+        const scrollableOverflow = el.scrollHeight - el.clientHeight;
+        if (scrollableOverflow - collapsibleH < 60) {
+          anchorY.current = currentY;
+          return;
+        }
+
         isHidden.current = true;
         transitioning.current = true;
         setMobileHeaderHidden(true);
