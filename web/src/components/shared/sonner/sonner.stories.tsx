@@ -6,7 +6,7 @@ import { Toaster } from "./index";
 import { Button } from "@/components/shared/button";
 
 const meta: Meta<typeof Toaster> = {
-  title: "ui/Sonner",
+  title: "UI/Sonner",
   component: Toaster,
   decorators: [
     (Story) => (

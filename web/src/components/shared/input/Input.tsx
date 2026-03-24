@@ -10,7 +10,7 @@ function Input({
 }: React.ComponentProps<typeof GeneratedInput>) {
   return (
     <GeneratedInput
-      className={cn("placeholder:text-foreground/65!", className)}
+      className={cn("h-9 text-sm! placeholder:text-foreground/65!", className)}
       {...props}
     />
   );

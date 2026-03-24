@@ -1,39 +1,56 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useState, useTransition } from "react";
+import { useTranslations, useLocale } from "next-intl";
+import { useRouter, usePathname, Link } from "@/i18n/navigation";
+import { routing, type Locale } from "@/i18n/routing";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/shared/button";
+import { Input } from "@/components/shared/input";
+import { Separator } from "@/components/shared/separator";
+import { ErrorAlert } from "@/components/shared/error-alert";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/shared/card";
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from "@/components/shared/select";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/shared/input-group";
-import { Alert, AlertDescription } from "@/components/shared/alert";
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+  InputOTPSeparator,
+} from "@/components/shared/input-otp";
+import { MeditalkLogo } from "@/components/nav/meditalk-logo";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Mail01Icon,
-  Loading03Icon,
-  AlertCircleIcon,
-  ArrowLeft01Icon,
-} from "@hugeicons/core-free-icons";
+import { Loading03Icon } from "@hugeicons/core-free-icons";
+
+const localeNames: Record<Locale, string> = {
+  sk: "Slovenčina",
+  cs: "Čeština",
+  en: "English",
+};
 
 export default function LoginPage() {
   const t = useTranslations("login");
+  const locale = useLocale() as Locale;
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
+
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [otpValue, setOtpValue] = useState("");
   const [verifying, setVerifying] = useState(false);
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  const handleLocaleChange = (newLocale: string) => {
+    startTransition(() => {
+      router.replace(pathname, { locale: newLocale as Locale });
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,9 +58,7 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-    });
+    const { error } = await supabase.auth.signInWithOtp({ email });
 
     setLoading(false);
 
@@ -70,64 +85,17 @@ export default function LoginPage() {
 
     if (error) {
       setError(t("errorInvalidCode"));
-      setOtp(["", "", "", "", "", ""]);
-      inputRefs.current[0]?.focus();
+      setOtpValue("");
       return;
     }
 
-    // Full page navigation ensures auth cookies are sent on the server round-trip
-    // (router.push does a soft navigation that can fail on mobile Safari)
     window.location.assign("/");
   };
 
-  const handleOtpChange = (index: number, value: string) => {
-    // Only allow digits
-    const digit = value.replace(/\D/g, "").slice(-1);
-    const newOtp = [...otp];
-    newOtp[index] = digit;
-    setOtp(newOtp);
-
-    // Auto-advance to next input
-    if (digit && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-
-    // Auto-submit when all 6 digits are filled
-    const code = newOtp.join("");
-    if (code.length === 6 && newOtp.every((d) => d !== "")) {
-      handleVerify(code);
-    }
-  };
-
-  const handleOtpKeyDown = (
-    index: number,
-    e: React.KeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (e.key === "Backspace" && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handleOtpPaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const pasted = e.clipboardData
-      .getData("text")
-      .replace(/\D/g, "")
-      .slice(0, 6);
-    if (!pasted) return;
-
-    const newOtp = ["", "", "", "", "", ""];
-    for (let i = 0; i < pasted.length; i++) {
-      newOtp[i] = pasted[i];
-    }
-    setOtp(newOtp);
-
-    // Focus appropriate input
-    if (pasted.length >= 6) {
-      inputRefs.current[5]?.focus();
-      handleVerify(pasted.slice(0, 6));
-    } else {
-      inputRefs.current[pasted.length]?.focus();
+  const handleOtpChange = (value: string) => {
+    setOtpValue(value);
+    if (value.length === 6) {
+      handleVerify(value);
     }
   };
 
@@ -136,9 +104,7 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-    });
+    const { error } = await supabase.auth.signInWithOtp({ email });
 
     setLoading(false);
 
@@ -148,121 +114,155 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">MediTalk</CardTitle>
-          <CardDescription>
-            {sent ? t("enterCode", { email }) : t("description")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {sent ? (
-            <div className="flex flex-col items-center gap-6 py-4">
-              {error && (
-                <Alert variant="destructive">
-                  <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
+    <div className="flex min-h-screen items-center justify-center bg-accent px-4">
+      <div className="flex w-full max-w-100 flex-col items-center gap-6 rounded-2xl border border-border bg-background p-6 desktop:p-8">
+        {/* Logo */}
+        <div className="flex flex-col items-center gap-3">
+          <MeditalkLogo className="size-8 text-primary" />
+          <span className="text-lg leading-none text-foreground">MediTalk</span>
+        </div>
 
-              <div className="flex gap-2" onPaste={handleOtpPaste}>
-                {otp.map((digit, i) => (
-                  <input
-                    key={i}
-                    ref={(el) => {
-                      inputRefs.current[i] = el;
-                    }}
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={1}
-                    value={digit}
-                    onChange={(e) => handleOtpChange(i, e.target.value)}
-                    onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                    disabled={verifying}
-                    className="h-12 w-10 rounded-lg border border-input bg-background text-center text-lg font-semibold focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
-                  />
-                ))}
-              </div>
+        {sent ? (
+          /* ── Enter Code View ── */
+          <>
+            <div className="flex w-full flex-col items-center gap-2">
+              <h1 className="text-2xl leading-none text-foreground">
+                {t("enterCodeTitle")}
+              </h1>
+              <p className="text-center text-sm text-foreground/65">
+                {t("enterCodeSubtitle")}{" "}
+                <span className="font-medium text-primary">{email}</span>
+              </p>
+            </div>
+
+            {error && <ErrorAlert message={error} />}
+
+            <div className="flex w-full flex-col items-center gap-3">
+              <InputOTP
+                maxLength={6}
+                value={otpValue}
+                onChange={handleOtpChange}
+                disabled={verifying}
+                autoFocus
+              >
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                </InputOTPGroup>
+                <InputOTPSeparator />
+                <InputOTPGroup>
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
 
               {verifying && (
                 <HugeiconsIcon
                   icon={Loading03Icon}
-                  size={24}
-                  className="animate-spin text-muted-foreground"
+                  size={20}
+                  className="animate-spin text-foreground/65"
                 />
               )}
 
-              <div className="flex flex-col items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleResend}
-                  disabled={loading}
-                  className="text-sm text-muted-foreground underline hover:text-foreground disabled:opacity-50"
-                >
-                  {loading ? t("resending") : t("resendCode")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSent(false);
-                    setOtp(["", "", "", "", "", ""]);
-                    setError(null);
-                  }}
-                  className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-                >
-                  <HugeiconsIcon icon={ArrowLeft01Icon} size={14} />
-                  {t("changeEmail")}
-                </button>
-              </div>
+              <Button
+                variant="ghost"
+                size="lg"
+                onClick={handleResend}
+                disabled={loading}
+              >
+                {loading ? t("resending") : t("resendCode")}
+              </Button>
+
+              <Separator />
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              {error && (
-                <Alert variant="destructive">
-                  <HugeiconsIcon icon={AlertCircleIcon} size={16} />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              <div className="flex flex-col gap-2">
-                <label htmlFor="email" className="text-sm font-medium">
-                  {t("emailLabel")}
-                </label>
-                <InputGroup>
-                  <InputGroupAddon>
-                    <HugeiconsIcon icon={Mail01Icon} />
-                  </InputGroupAddon>
-                  <InputGroupInput
-                    id="email"
-                    type="email"
-                    placeholder={t("emailPlaceholder")}
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    disabled={loading}
-                  />
-                </InputGroup>
-              </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSent(false);
+                setOtpValue("");
+                setError(null);
+              }}
+              className="text-sm text-foreground underline hover:opacity-70"
+            >
+              {t("changeEmail")}
+            </button>
+          </>
+        ) : (
+          /* ── Email Form View ── */
+          <>
+            <h1 className="text-2xl leading-none text-foreground">
+              {t("title")}
+            </h1>
+
+            <form
+              onSubmit={handleSubmit}
+              className="flex w-full flex-col items-center gap-3"
+            >
+              {error && <ErrorAlert message={error} />}
+
+              <Input
+                type="email"
+                autoFocus
+                placeholder={t("emailPlaceholder")}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                disabled={loading}
+                className="w-full"
+              />
+
               <Button
                 type="submit"
+                size="lg"
                 disabled={loading || !email}
-                className="w-full"
+                className="w-full disabled:opacity-30"
               >
                 {loading ? (
                   <HugeiconsIcon
                     icon={Loading03Icon}
-                    size={20}
+                    size={16}
                     className="animate-spin"
                   />
                 ) : (
-                  t("sendCode")
+                  t("continue")
                 )}
               </Button>
+
+              <p className="text-center text-xs text-foreground/65">
+                {t("terms")}{" "}
+                <Link
+                  href="/terms"
+                  className="cursor-pointer text-foreground underline hover:opacity-70"
+                >
+                  {t("termsLink")}
+                </Link>
+              </p>
             </form>
-          )}
-        </CardContent>
-      </Card>
+
+            <Separator />
+
+            <Select
+              value={locale}
+              onValueChange={handleLocaleChange}
+              disabled={isPending}
+            >
+              <SelectTrigger className="w-full" label={t("language")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {routing.locales.map((loc) => (
+                  <SelectItem key={loc} value={loc}>
+                    {localeNames[loc]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
+      </div>
     </div>
   );
 }

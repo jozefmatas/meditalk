@@ -4,6 +4,11 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/shared/button";
+import { ErrorAlert } from "@/components/shared/error-alert";
+import { MeditalkLogo } from "@/components/nav/meditalk-logo";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Loading03Icon } from "@hugeicons/core-free-icons";
 
 function AuthConfirmContent() {
   const searchParams = useSearchParams();
@@ -36,12 +41,10 @@ function AuthConfirmContent() {
       return;
     }
 
-    // Redirect to app after successful verification
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
     router.push(appUrl || "/");
   }
 
-  // Auto-verify on page load (user clicked the link intentionally)
   useEffect(() => {
     if (tokenHash && type) {
       handleConfirm();
@@ -49,106 +52,51 @@ function AuthConfirmContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (status === "error") {
-    return (
-      <div
-        style={{
-          maxWidth: 480,
-          margin: "0 auto",
-          padding: "80px 24px",
-          textAlign: "center",
-          fontFamily:
-            "'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 22,
-            fontWeight: 600,
-            color: "#232334",
-            marginBottom: 8,
-          }}
-        >
-          Link expired
-        </h2>
-        <p
-          style={{
-            fontSize: 15,
-            color: "#232334",
-            opacity: 0.65,
-            marginBottom: 32,
-          }}
-        >
-          This magic link has already been used or has expired.
-        </p>
-        <Link
-          href="/login"
-          style={{
-            display: "inline-block",
-            backgroundColor: "#4444ff",
-            color: "#fff",
-            fontSize: 15,
-            textDecoration: "none",
-            padding: "12px 32px",
-            borderRadius: 10,
-          }}
-        >
-          Back to login
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div
-      style={{
-        maxWidth: 480,
-        margin: "0 auto",
-        padding: "80px 24px",
-        textAlign: "center",
-        fontFamily:
-          "'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-      }}
-    >
-      <h2
-        style={{
-          fontSize: 22,
-          fontWeight: 600,
-          color: "#232334",
-          marginBottom: 8,
-        }}
-      >
-        {status === "verifying" ? "Signing you in..." : "Confirm your login"}
-      </h2>
-      <p
-        style={{
-          fontSize: 15,
-          color: "#232334",
-          opacity: 0.65,
-          marginBottom: 32,
-        }}
-      >
-        {status === "verifying"
-          ? "Please wait a moment."
-          : "Click the button below to complete sign in."}
-      </p>
-      {status === "idle" && (
-        <button
-          onClick={handleConfirm}
-          style={{
-            display: "inline-block",
-            backgroundColor: "#4444ff",
-            color: "#fff",
-            fontSize: 15,
-            border: "none",
-            cursor: "pointer",
-            padding: "12px 32px",
-            borderRadius: 10,
-          }}
-        >
-          Log in to MediTalk
-        </button>
-      )}
+    <div className="flex min-h-screen items-center justify-center bg-accent px-4">
+      <div className="flex w-full max-w-100 flex-col items-center gap-6 rounded-2xl border border-border bg-background p-8">
+        {/* Logo */}
+        <div className="flex flex-col items-center gap-3">
+          <MeditalkLogo className="size-8 text-primary" />
+          <span className="text-lg text-foreground">MediTalk</span>
+        </div>
+
+        {status === "error" ? (
+          <>
+            <ErrorAlert message="This magic link has already been used or has expired." />
+            <Button asChild className="w-full">
+              <Link href="/login">Back to login</Link>
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col items-center gap-2">
+              <h1 className="text-2xl text-foreground">
+                {status === "verifying"
+                  ? "Signing you in..."
+                  : "Confirm your login"}
+              </h1>
+              <p className="text-center text-sm text-foreground/65">
+                {status === "verifying"
+                  ? "Please wait a moment."
+                  : "Click the button below to complete sign in."}
+              </p>
+            </div>
+
+            {status === "verifying" ? (
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                size={24}
+                className="animate-spin text-foreground/65"
+              />
+            ) : (
+              <Button onClick={handleConfirm} className="w-full">
+                Log in to MediTalk
+              </Button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -157,29 +105,19 @@ export default function AuthConfirmPage() {
   return (
     <Suspense
       fallback={
-        <div
-          style={{
-            maxWidth: 480,
-            margin: "0 auto",
-            padding: "80px 24px",
-            textAlign: "center",
-            fontFamily:
-              "'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: 22,
-              fontWeight: 600,
-              color: "#232334",
-              marginBottom: 8,
-            }}
-          >
-            Signing you in...
-          </h2>
-          <p style={{ fontSize: 15, color: "#232334", opacity: 0.65 }}>
-            Please wait a moment.
-          </p>
+        <div className="flex min-h-screen items-center justify-center bg-accent px-4">
+          <div className="flex w-full max-w-100 flex-col items-center gap-6 rounded-2xl border border-border bg-background p-8">
+            <div className="flex flex-col items-center gap-3">
+              <MeditalkLogo className="size-8 text-primary" />
+              <span className="text-lg text-foreground">MediTalk</span>
+            </div>
+            <h1 className="text-2xl text-foreground">Signing you in...</h1>
+            <HugeiconsIcon
+              icon={Loading03Icon}
+              size={24}
+              className="animate-spin text-foreground/65"
+            />
+          </div>
         </div>
       }
     >
