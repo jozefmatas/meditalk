@@ -126,7 +126,7 @@ export default function LoginPage() {
           /* ── Enter Code View ── */
           <>
             <div className="flex w-full flex-col items-center gap-2">
-              <h1 className="text-2xl leading-none text-foreground">
+              <h1 className="text-3xl leading-none text-foreground">
                 {t("enterCodeTitle")}
               </h1>
               <p className="text-center text-sm text-foreground/65">
@@ -193,7 +193,7 @@ export default function LoginPage() {
         ) : (
           /* ── Email Form View ── */
           <>
-            <h1 className="text-2xl leading-none text-foreground">
+            <h1 className="text-3xl leading-none text-foreground">
               {t("title")}
             </h1>
 

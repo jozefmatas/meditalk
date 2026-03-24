@@ -71,7 +71,7 @@ function AuthConfirmContent() {
         ) : (
           <>
             <div className="flex flex-col items-center gap-2">
-              <h1 className="text-2xl text-foreground">
+              <h1 className="text-3xl leading-none text-foreground">
                 {status === "verifying"
                   ? "Signing you in..."
                   : "Confirm your login"}
