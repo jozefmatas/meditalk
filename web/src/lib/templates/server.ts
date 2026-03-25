@@ -14,6 +14,7 @@ function dbRowToTemplate(row: Record<string, unknown>): Template {
     styleExamples:
       (row.style_examples as { name: string; text: string }[]) ?? undefined,
     specialties: (row.specialties as string[]) ?? undefined,
+    locales: (row.locales as string[]) ?? undefined,
     isSystem: row.is_system as boolean,
     sourceTemplateId: (row.source_template_id as string) ?? undefined,
   };
@@ -39,15 +40,25 @@ export async function resolveTemplate(id: string): Promise<Template> {
 
 /**
  * Fetch all visible templates from the database.
- * Used by /api/templates route (server-side only).
+ * Optionally filter by locale (only returns templates whose `locales` array
+ * contains the given locale).
+ * Used by /api/templates route and templates page (server-side only).
  */
-export async function resolveAllTemplates(): Promise<Template[]> {
+export async function resolveAllTemplates(
+  locale?: string,
+): Promise<Template[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("templates")
     .select("*")
     .eq("visible", true)
     .order("sort_order");
+
+  if (locale) {
+    query = query.contains("locales", [locale]);
+  }
+
+  const { data, error } = await query;
 
   if (error || !data?.length) {
     throw new Error("No templates found in database");

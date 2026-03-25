@@ -13,6 +13,7 @@ export interface TemplateRow {
   system_prompt: string | null;
   style_examples: { name: string; text: string }[] | null;
   specialties: string[];
+  locales: string[];
   is_system: boolean;
   visible: boolean;
   sort_order: number;

@@ -21,7 +21,7 @@ export default async function TemplatesPage({
 }) {
   const { locale } = await params;
   const t = await getTranslations("templates");
-  const templates = await resolveAllTemplates();
+  const templates = await resolveAllTemplates(locale);
 
   const prefix = locale === routing.defaultLocale ? "" : `/${locale}`;
 

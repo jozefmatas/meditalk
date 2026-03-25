@@ -13,6 +13,7 @@ export interface Template {
   systemPrompt?: string;
   styleExamples?: { name: string; text: string }[];
   specialties?: string[];
+  locales?: string[];
   isSystem?: boolean;
   sourceTemplateId?: string;
 }

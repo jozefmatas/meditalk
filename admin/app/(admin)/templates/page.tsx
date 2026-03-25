@@ -42,6 +42,9 @@ export default async function TemplatesPage() {
                 Specialties
               </th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                Locales
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                 Visible
               </th>
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">
@@ -93,6 +96,18 @@ export default async function TemplatesPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
+                  <span className="flex flex-wrap gap-1">
+                    {t.locales.map((l) => (
+                      <span
+                        key={l}
+                        className="rounded bg-muted px-2 py-0.5 text-xs font-medium uppercase"
+                      >
+                        {l}
+                      </span>
+                    ))}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
                   <VisibilityToggle
                     templateId={t.id}
                     initialVisible={t.visible}
@@ -107,7 +122,7 @@ export default async function TemplatesPage() {
             {templates.length === 0 && (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   No templates found

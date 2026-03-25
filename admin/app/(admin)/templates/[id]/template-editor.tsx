@@ -47,8 +47,9 @@ import type {
   TemplateSection,
   Locale,
 } from "@/lib/template-types";
-import { LOCALES, PRIMARY_LOCALE } from "@/lib/template-types";
+import { PRIMARY_LOCALE } from "@/lib/template-types";
 import { SpecialtyCombobox } from "@/components/specialty-combobox";
+import { LocaleCombobox } from "@/components/locale-combobox";
 
 // ── Default system prompt (with {{variables}} for interpolation) ────
 
@@ -367,6 +368,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   const [name, setName] = useState(initialData.name);
   const [description, setDescription] = useState(initialData.description);
   const [specialties, setSpecialties] = useState(initialData.specialties);
+  const [locales, setLocales] = useState(initialData.locales);
   const [sections, setSections] = useState<TemplateSection[]>(
     initialData.sections,
   );
@@ -375,6 +377,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [translating, setTranslating] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
@@ -391,6 +394,66 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     resizePrompt();
   }, [systemPrompt, resizePrompt]);
 
+  // ── Guard editLocale — reset if current locale is removed ──
+
+  useEffect(() => {
+    if (!locales.includes(editLocale)) {
+      setEditLocale((locales[0] as Locale) ?? PRIMARY_LOCALE);
+    }
+  }, [locales, editLocale]);
+
+  // ── Handle locale changes — auto-translate when a locale is added ──
+
+  const handleLocalesChange = useCallback(
+    async (newLocales: string[]) => {
+      const added = newLocales.filter((l) => !locales.includes(l));
+      setLocales(newLocales);
+
+      if (added.length === 0) return;
+
+      // Determine source locale for translation
+      const textsFromEdit = collectTexts(
+        name,
+        description,
+        sections,
+        editLocale,
+      );
+      const editHasContent = Object.values(textsFromEdit).some((v) => v.trim());
+      const sourceLocale = editHasContent ? editLocale : PRIMARY_LOCALE;
+      const texts = editHasContent
+        ? textsFromEdit
+        : collectTexts(name, description, sections, PRIMARY_LOCALE);
+      const hasTexts = Object.values(texts).some((v) => v.trim());
+
+      if (!hasTexts) return;
+
+      setTranslating(true);
+      try {
+        const translateRes = await fetch("/api/templates/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts, sourceLocale, targetLocales: added }),
+        });
+
+        if (translateRes.ok) {
+          const { translations } = await translateRes.json();
+          const merged = mergeTranslations(
+            name,
+            description,
+            sections,
+            translations,
+          );
+          setName(merged.name);
+          setDescription(merged.description);
+          setSections(merged.sections);
+        }
+      } finally {
+        setTranslating(false);
+      }
+    },
+    [locales, name, description, sections, editLocale],
+  );
+
   // ── Dirty tracking ──
 
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
@@ -398,6 +461,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       name: initialData.name,
       description: initialData.description,
       specialties: initialData.specialties,
+      locales: initialData.locales,
       sections: initialData.sections,
       system_prompt: initialData.system_prompt ?? "",
     }),
@@ -409,10 +473,19 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         name,
         description,
         specialties,
+        locales,
         sections,
         system_prompt: systemPrompt,
       }) !== savedSnapshot,
-    [name, description, specialties, sections, systemPrompt, savedSnapshot],
+    [
+      name,
+      description,
+      specialties,
+      locales,
+      sections,
+      systemPrompt,
+      savedSnapshot,
+    ],
   );
 
   // Unsaved changes dialog state
@@ -521,11 +594,17 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       let finalDesc = description;
       let finalSections = sections;
 
-      if (hasTexts) {
+      const saveTargetLocales = locales.filter((l) => l !== sourceLocale);
+
+      if (hasTexts && saveTargetLocales.length > 0) {
         const translateRes = await fetch("/api/templates/translate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ texts, sourceLocale }),
+          body: JSON.stringify({
+            texts,
+            sourceLocale,
+            targetLocales: saveTargetLocales,
+          }),
         });
 
         if (translateRes.ok) {
@@ -558,6 +637,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         name: finalName,
         description: finalDesc,
         specialties,
+        locales,
         sections: finalSections,
         system_prompt:
           !systemPrompt.trim() ||
@@ -577,6 +657,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             name: finalName,
             description: finalDesc,
             specialties,
+            locales,
             sections: finalSections,
             system_prompt: systemPrompt,
           }),
@@ -684,23 +765,28 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             </span>
           )}
 
-          {/* Locale picker */}
-          <div className="flex rounded-lg border border-border">
-            {LOCALES.map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setEditLocale(l)}
-                className={cn(
-                  "px-2.5 py-1 text-xs font-medium uppercase transition-colors first:rounded-l-lg last:rounded-r-lg",
-                  l === editLocale
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {l}
-              </button>
-            ))}
+          {/* Locale picker — only show selected locales */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex rounded-lg border border-border">
+              {locales.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => setEditLocale(l as Locale)}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium uppercase transition-colors first:rounded-l-lg last:rounded-r-lg",
+                    l === editLocale
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            {translating && (
+              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -778,6 +864,11 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
                 value={specialties}
                 onChange={setSpecialties}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Locales</Label>
+              <LocaleCombobox value={locales} onChange={handleLocalesChange} />
             </div>
           </div>
 

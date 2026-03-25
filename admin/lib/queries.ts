@@ -459,6 +459,7 @@ export interface TemplateRow {
   name: Record<string, string>;
   description: Record<string, string>;
   specialties: string[];
+  locales: string[];
   sections: unknown[];
   is_system: boolean;
   visible: boolean;
@@ -472,7 +473,7 @@ export async function getTemplates(): Promise<TemplateRow[]> {
   const { data, error } = await sb
     .from("templates")
     .select(
-      "id, name, description, specialties, sections, is_system, visible, sort_order, created_at",
+      "id, name, description, specialties, locales, sections, is_system, visible, sort_order, created_at",
     )
     .order("sort_order");
 

@@ -21,9 +21,9 @@ interface TemplateOption {
   name: Record<string, string>;
 }
 
-/** Module-level cache — shared across all TemplateSelector instances, survives unmount. */
-let cachedTemplates: TemplateOption[] | null = null;
-let inflightList: Promise<TemplateOption[] | null> | null = null;
+/** Module-level cache keyed by locale. */
+const cachedByLocale = new Map<string, TemplateOption[]>();
+const inflightByLocale = new Map<string, Promise<TemplateOption[] | null>>();
 
 export function TemplateSelector({
   value,
@@ -39,7 +39,7 @@ export function TemplateSelector({
 
   // Initialise from module-level cache (instant on subsequent renders)
   const [dbTemplates, setDbTemplates] = useState<TemplateOption[] | null>(
-    cachedTemplates,
+    cachedByLocale.get(locale) ?? null,
   );
 
   // Fallback: fetch the selected template individually so we can show its
@@ -51,25 +51,25 @@ export function TemplateSelector({
   useEffect(() => {
     let cancelled = false;
 
-    let request = inflightList;
+    let request = inflightByLocale.get(locale);
     if (!request) {
       request = fetch("/api/templates")
         .then((res) => (res.ok ? res.json() : null))
         .then((data: Template[] | null) => {
           if (data) {
-            cachedTemplates = data;
+            cachedByLocale.set(locale, data);
             // Pre-populate the individual template cache so useTemplate()
             // resolves instantly for any template in the list
             populateTemplateCache(data);
           }
-          inflightList = null;
+          inflightByLocale.delete(locale);
           return data as TemplateOption[] | null;
         })
         .catch(() => {
-          inflightList = null;
+          inflightByLocale.delete(locale);
           return null;
         });
-      inflightList = request;
+      inflightByLocale.set(locale, request);
     }
 
     request.then((data) => {
@@ -79,7 +79,7 @@ export function TemplateSelector({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   const options = useMemo(() => {
     const source = dbTemplates ?? [];
@@ -89,9 +89,13 @@ export function TemplateSelector({
     }));
 
     // While list is loading, ensure the selected value appears as an option
-    // so the Combobox shows its name instead of the placeholder
+    // so the Combobox shows its name instead of the placeholder.
+    // Only add it back if it matches the current locale (or has no locale restriction).
     if (value && !items.find((o) => o.value === value)) {
-      if (selectedTemplate) {
+      if (
+        selectedTemplate &&
+        (!selectedTemplate.locales || selectedTemplate.locales.includes(locale))
+      ) {
         items.unshift({
           value: selectedTemplate.id,
           label:

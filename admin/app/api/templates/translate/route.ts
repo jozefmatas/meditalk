@@ -16,12 +16,18 @@ function anthropic() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { texts, sourceLocale = "sk" } = (await request.json()) as {
+    const {
+      texts,
+      sourceLocale = "sk",
+      targetLocales: requestedTargets,
+    } = (await request.json()) as {
       texts: Record<string, string>;
       sourceLocale?: string;
+      targetLocales?: string[];
     };
 
-    const targetLocales = LOCALES.filter((l) => l !== sourceLocale);
+    const targetLocales =
+      requestedTargets ?? LOCALES.filter((l) => l !== sourceLocale);
 
     const entries = Object.entries(texts);
     if (entries.length === 0) {
