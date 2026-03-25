@@ -10,7 +10,7 @@ function Textarea({
 }: React.ComponentProps<typeof GeneratedTextarea>) {
   return (
     <GeneratedTextarea
-      className={cn("text-sm! placeholder:text-foreground/65!", className)}
+      className={cn("text-sm placeholder:text-foreground/65", className)}
       {...props}
     />
   );
