@@ -12,6 +12,15 @@ import {
 } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
 
+/** Map MIME type to file extension for fallback uploads. */
+function mimeToExt(mime: string): string {
+  if (mime.includes("webm")) return ".webm";
+  if (mime.includes("ogg")) return ".ogg";
+  if (mime.includes("mp4") || mime.includes("m4a")) return ".m4a";
+  if (mime.includes("mpeg")) return ".mp3";
+  return ".webm";
+}
+
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
 
@@ -149,24 +158,28 @@ export function useEncounterGeneration({
         // Convert to WAV for reliable ElevenLabs compatibility
         // (MediaRecorder m4a/webm blobs can have malformed containers)
         let uploadBlob: Blob;
+        let uploadName: string;
+        let uploadType: string;
         try {
           const { convertToWav } = await import("@/lib/audio/convert-to-wav");
           uploadBlob = await convertToWav(blob);
+          uploadName = "recording.wav";
+          uploadType = "audio/wav";
         } catch (convErr) {
-          // Raw MediaRecorder blobs (WebM/m4a) can have malformed containers
-          // that ElevenLabs will reject — skip upload and rely on streaming transcript
+          // WAV conversion failed — upload original blob so audio is never lost
           console.warn(
-            "[recording] WAV conversion failed, skipping file upload (streaming transcript will be used):",
+            "[recording] WAV conversion failed, uploading original blob:",
             convErr,
           );
-          return;
+          uploadBlob = blob;
+          const ext = mimeToExt(blob.type);
+          uploadName = `recording${ext}`;
+          uploadType = blob.type || "audio/webm";
         }
 
-        const { path, fileId } = await uploadToStorage(
-          uploadBlob,
-          "recording.wav",
-          { encounterId: visitId },
-        );
+        const { path, fileId } = await uploadToStorage(uploadBlob, uploadName, {
+          encounterId: visitId,
+        });
 
         setAudioStoragePath(path);
 
@@ -178,9 +191,9 @@ export function useEncounterGeneration({
             files: [
               {
                 id: fileId,
-                name: "recording.wav",
+                name: uploadName,
                 size: uploadBlob.size,
-                type: "audio/wav",
+                type: uploadType,
                 path,
                 source: "recording",
               },
@@ -272,38 +285,43 @@ export function useEncounterGeneration({
         ) {
           // Convert to WAV for reliable ElevenLabs compatibility
           let uploadBlob: Blob;
+          let uploadName: string;
+          let uploadType: string;
           try {
             const { convertToWav } = await import("@/lib/audio/convert-to-wav");
             uploadBlob = await convertToWav(blobToProcess);
+            uploadName = "recording.wav";
+            uploadType = "audio/wav";
           } catch {
-            // Raw blobs can have malformed containers — skip upload
+            // WAV conversion failed — upload original so audio is never lost
             console.warn(
-              "[generate] WAV conversion failed, skipping recording upload",
+              "[generate] WAV conversion failed, uploading original blob",
             );
-            uploadBlob = null!;
+            uploadBlob = blobToProcess;
+            const ext = mimeToExt(blobToProcess.type);
+            uploadName = `recording${ext}`;
+            uploadType = blobToProcess.type || "audio/webm";
           }
 
-          if (uploadBlob) {
-            const result = await uploadToStorage(uploadBlob, "recording.wav", {
-              encounterId: visitId,
-            });
-            await fetch(`/api/encounters/${visitId}/files`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                files: [
-                  {
-                    id: crypto.randomUUID(),
-                    name: "recording.wav",
-                    size: uploadBlob.size,
-                    type: "audio/wav",
-                    path: result.path,
-                    source: "recording",
-                  },
-                ],
-              }),
-            });
-          }
+          const result = await uploadToStorage(uploadBlob, uploadName, {
+            encounterId: visitId,
+          });
+          await fetch(`/api/encounters/${visitId}/files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: [
+                {
+                  id: crypto.randomUUID(),
+                  name: uploadName,
+                  size: uploadBlob.size,
+                  type: uploadType,
+                  path: result.path,
+                  source: "recording",
+                },
+              ],
+            }),
+          });
         }
 
         setAudioBlob(null);
@@ -562,37 +580,44 @@ export function useEncounterGeneration({
       try {
         // Upload adjust recording if exists
         if (blobToProcess && !streamingTranscript) {
-          let uploadBlob: Blob | null = null;
+          let uploadBlob: Blob;
+          let uploadName: string;
+          let uploadType: string;
           try {
             const { convertToWav } = await import("@/lib/audio/convert-to-wav");
             uploadBlob = await convertToWav(blobToProcess);
+            uploadName = "recording.wav";
+            uploadType = "audio/wav";
           } catch {
+            // WAV conversion failed — upload original so audio is never lost
             console.warn(
-              "[adjust] WAV conversion failed, skipping recording upload",
+              "[adjust] WAV conversion failed, uploading original blob",
             );
+            uploadBlob = blobToProcess;
+            const ext = mimeToExt(blobToProcess.type);
+            uploadName = `recording${ext}`;
+            uploadType = blobToProcess.type || "audio/webm";
           }
 
-          if (uploadBlob) {
-            const result = await uploadToStorage(uploadBlob, "recording.wav", {
-              encounterId: visitId,
-            });
-            await fetch(`/api/encounters/${visitId}/files`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                files: [
-                  {
-                    id: crypto.randomUUID(),
-                    name: "recording.wav",
-                    size: uploadBlob.size,
-                    type: "audio/wav",
-                    path: result.path,
-                    source: "recording",
-                  },
-                ],
-              }),
-            });
-          }
+          const result = await uploadToStorage(uploadBlob, uploadName, {
+            encounterId: visitId,
+          });
+          await fetch(`/api/encounters/${visitId}/files`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              files: [
+                {
+                  id: crypto.randomUUID(),
+                  name: uploadName,
+                  size: uploadBlob.size,
+                  type: uploadType,
+                  path: result.path,
+                  source: "recording",
+                },
+              ],
+            }),
+          });
         }
 
         // Clear template cache — new context invalidates previous outputs

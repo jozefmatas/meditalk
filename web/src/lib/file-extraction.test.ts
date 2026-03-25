@@ -22,8 +22,8 @@ async function createLargeImage(targetBytes: number): Promise<Buffer> {
     raw[i] = Math.floor(Math.random() * 256);
   }
 
-  let quality = 100;
-  let buf = await sharp(raw, { raw: { width, height, channels } })
+  const quality = 100;
+  const buf = await sharp(raw, { raw: { width, height, channels } })
     .jpeg({ quality })
     .toBuffer();
 
