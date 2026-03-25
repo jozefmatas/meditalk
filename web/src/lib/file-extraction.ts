@@ -125,11 +125,19 @@ async function extractFromImage(
     | "image/gif"
     | "image/webp";
 
-  // Compress if over Anthropic's 5 MB limit
+  // Compress if over Anthropic's 5 MB limit for inline base64 images
   if (buffer.byteLength > MAX_IMAGE_BYTES) {
-    const compressed = await compressImage(buffer);
-    imageBuffer = compressed.data;
-    mediaType = compressed.mediaType;
+    console.log(
+      `[image-extract] image ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB exceeds 5MB limit, compressing...`,
+    );
+    try {
+      const compressed = await compressImage(buffer);
+      imageBuffer = compressed.data;
+      mediaType = compressed.mediaType;
+    } catch (compressErr) {
+      console.error("[image-extract] compression failed:", compressErr);
+      // Still attempt to send — Claude may accept it or give a clear error
+    }
   }
 
   const base64 = imageBuffer.toString("base64");
