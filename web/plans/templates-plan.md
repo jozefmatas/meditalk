@@ -247,7 +247,7 @@ Table: Name (sk) | Sections count | Visible (toggle) | Edit link
 
 _Single source of truth: DB → API → client. No more dual-path static/DB logic._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 5.5A. Create `/api/templates/[id]` route
 
@@ -305,7 +305,7 @@ Remove tests for deleted functions; add test for `DEFAULT_TEMPLATE_ID`.
 
 _Build/edit template sections from admin._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 6A. Template editor page
 
@@ -360,7 +360,7 @@ POST to `admin/app/api/templates/route.ts` with `sourceTemplateId`:
 
 _Edit the system prompt per template from admin._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 7A. Prompt editor panel
 
@@ -383,7 +383,7 @@ PATCH updates `system_prompt` column.
 
 _Restrict which locales a template is available for. Admins pick locales via combobox; doctors see only templates matching their current locale._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
 ### 8A. Database migration
 
@@ -428,15 +428,21 @@ In `admin/app/(admin)/templates/page.tsx`:
 
 ### 8F. Filter templates by locale on doctor-facing side
 
-**`web/src/lib/templates/server.ts`** — `resolveAllTemplates()`: `locales` is already returned via `select("*")` + `dbRowToTemplate`
+**`web/src/lib/templates/server.ts`** — `resolveAllTemplates(locale?)` accepts optional locale and uses Supabase `contains("locales", [locale])` for DB-level filtering.
 
-**`web/src/app/[locale]/(app)/templates/page.tsx`** — filter: `templates.filter(t => !t.locales || t.locales.includes(locale))`
+**`web/src/app/[locale]/(app)/templates/page.tsx`** — calls `resolveAllTemplates(locale)` (server component, direct DB query).
 
-**`web/src/components/templates/template-selector.tsx`** — filter options by current locale: `source.filter(t => !t.locales || t.locales.includes(locale))`
+**`web/src/app/api/templates/route.ts`** — reads locale from `NEXT_LOCALE` cookie (query params trigger next-intl 307 redirect), passes to `resolveAllTemplates()`.
 
-**`web/src/app/api/templates/route.ts`** — optionally filter server-side with `@>` array contains operator, or keep client-side filtering
+**`web/src/components/templates/template-selector.tsx`** — per-locale module-level cache (`Map<string, TemplateOption[]>`), fetches `/api/templates` (cookie provides locale), locale-aware selected template fallback.
 
-**Result:** Templates can be restricted to specific locales. Default: all 3. Doctors only see templates matching their current locale.
+### 8G. Auto-translate on locale add + locale-aware tabs
+
+**`admin/app/(admin)/templates/[id]/template-editor.tsx`** — locale tabs use `locales` state (not `LOCALES` constant), `useEffect` guard resets `editLocale` when locale removed, `handleLocalesChange` auto-translates content for newly added locales, save only translates to selected locales via `targetLocales` param.
+
+**`admin/app/api/templates/translate/route.ts`** — accepts optional `targetLocales` parameter; falls back to all locales minus source.
+
+**Result:** Templates can be restricted to specific locales. Default: all 3. Doctors only see templates matching their current locale. Admin locale tabs reflect selection, and adding a locale auto-translates content immediately.
 
 ---
 
