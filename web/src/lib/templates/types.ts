@@ -12,6 +12,7 @@ export interface Template {
   sections: TemplateSection[];
   systemPrompt?: string;
   styleExamples?: { name: string; text: string }[];
+  styleGuide?: string;
   specialties?: string[];
   locales?: string[];
   isSystem?: boolean;

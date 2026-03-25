@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
       sections: newSections,
       system_prompt: original.system_prompt,
       style_examples: original.style_examples,
+      style_guide: original.style_guide,
       specialties: original.specialties,
       is_system: true,
       visible: false,

@@ -10,6 +10,7 @@ import {
   Plus,
   Save,
   Trash2,
+  Upload,
 } from "lucide-react";
 import {
   DndContext,
@@ -48,8 +49,30 @@ import type {
   Locale,
 } from "@/lib/template-types";
 import { PRIMARY_LOCALE } from "@/lib/template-types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SpecialtyCombobox } from "@/components/specialty-combobox";
 import { LocaleCombobox } from "@/components/locale-combobox";
+
+// ── Analysis types ──────────────────────────────────────────────────
+
+interface AnalyzedSection {
+  label: string;
+  context: string;
+  subsections?: { label: string; context: string }[];
+}
+
+interface AnalysisResult {
+  extractedText: string;
+  sections: AnalyzedSection[];
+  styleGuide: string;
+}
 
 // ── Default system prompt (with {{variables}} for interpolation) ────
 
@@ -72,8 +95,7 @@ const DEFAULT_SYSTEM_PROMPT = `You are a medical documentation assistant. You MU
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
-
-`;
+{{styleGuide}}`;
 
 // ── ID generators ───────────────────────────────────────────────────
 
@@ -375,24 +397,35 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   const [systemPrompt, setSystemPrompt] = useState(
     initialData.system_prompt ?? "",
   );
+  const [styleGuide, setStyleGuide] = useState(initialData.style_guide ?? "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
+    null,
+  );
   const [duplicating, setDuplicating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const styleGuideRef = useRef<HTMLTextAreaElement>(null);
+  const refNoteInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-resize prompt textarea to hug content
-  const resizePrompt = useCallback(() => {
-    const el = promptRef.current;
+  // Auto-resize textareas to hug content
+  const resizeTextarea = useCallback((el: HTMLTextAreaElement | null) => {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, []);
 
   useEffect(() => {
-    resizePrompt();
-  }, [systemPrompt, resizePrompt]);
+    resizeTextarea(promptRef.current);
+  }, [systemPrompt, resizeTextarea]);
+
+  useEffect(() => {
+    resizeTextarea(styleGuideRef.current);
+  }, [styleGuide, resizeTextarea]);
 
   // ── Guard editLocale — reset if current locale is removed ──
 
@@ -454,6 +487,61 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     [locales, name, description, sections, editLocale],
   );
 
+  // ── Reference note upload + analysis ──
+
+  function applyAnalysis(result: AnalysisResult, mode: "both" | "style_only") {
+    // Add blank lines between bullets for readability
+    const formatted = result.styleGuide.replace(/\n- /g, "\n\n- ");
+    setStyleGuide(formatted);
+
+    if (mode === "both") {
+      const newSections: TemplateSection[] = result.sections.map((s) => ({
+        id: generateSectionId(),
+        labels: { [editLocale]: s.label },
+        context: s.context,
+        subsections: s.subsections?.map((sub) => ({
+          id: generateSectionId(),
+          labels: { [editLocale]: sub.label },
+          context: sub.context,
+        })),
+      }));
+      setSections(newSections);
+    }
+
+    setShowAnalysisDialog(false);
+    setAnalysisResult(null);
+  }
+
+  async function handleReferenceUpload(file: File) {
+    setAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/templates/analyze-note", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Analysis failed");
+        return;
+      }
+
+      const result: AnalysisResult = await res.json();
+      setAnalysisResult(result);
+
+      if (sections.length > 0) {
+        setShowAnalysisDialog(true);
+      } else {
+        applyAnalysis(result, "both");
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
   // ── Dirty tracking ──
 
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
@@ -464,6 +552,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       locales: initialData.locales,
       sections: initialData.sections,
       system_prompt: initialData.system_prompt ?? "",
+      style_guide: initialData.style_guide ?? "",
     }),
   );
 
@@ -476,6 +565,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         locales,
         sections,
         system_prompt: systemPrompt,
+        style_guide: styleGuide,
       }) !== savedSnapshot,
     [
       name,
@@ -484,6 +574,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       locales,
       sections,
       systemPrompt,
+      styleGuide,
       savedSnapshot,
     ],
   );
@@ -644,6 +735,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
           systemPrompt.trim() === DEFAULT_SYSTEM_PROMPT.trim()
             ? null
             : systemPrompt.trim(),
+        style_guide: styleGuide.trim() || null,
       };
       const res = await fetch(`/api/templates/${initialData.id}`, {
         method: "PATCH",
@@ -660,6 +752,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             locales,
             sections: finalSections,
             system_prompt: systemPrompt,
+            style_guide: styleGuide,
           }),
         );
         setSaved(true);
@@ -883,15 +976,41 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
                 )}{" "}
                 subheaders)
               </h2>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setSections((prev) => addHeader(prev, editLocale))
-                }
-              >
-                <Plus /> Add header
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing}
+                  onClick={() => refNoteInputRef.current?.click()}
+                >
+                  {analyzing ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Upload />
+                  )}
+                  {analyzing ? "Analyzing..." : "Upload reference note"}
+                </Button>
+                <input
+                  ref={refNoteInputRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.txt,.md"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0])
+                      handleReferenceUpload(e.target.files[0]);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setSections((prev) => addHeader(prev, editLocale))
+                  }
+                >
+                  <Plus /> Add header
+                </Button>
+              </div>
             </div>
 
             <DndContext
@@ -962,43 +1081,117 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
           </div>
         </div>
 
-        {/* Right: System prompt */}
-        <div className="rounded-lg border border-border p-4 space-y-3 self-start">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              System Prompt
-            </h2>
-            {systemPrompt !== DEFAULT_SYSTEM_PROMPT && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
-                className="h-6 text-xs text-muted-foreground"
-              >
-                Reset to default
-              </Button>
+        {/* Right: System prompt + Style guide */}
+        <div className="space-y-6">
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                System Prompt
+              </h2>
+              {systemPrompt !== DEFAULT_SYSTEM_PROMPT && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
+                  className="h-6 text-xs text-muted-foreground"
+                >
+                  Reset to default
+                </Button>
+              )}
+            </div>
+            <textarea
+              ref={promptRef}
+              value={systemPrompt || DEFAULT_SYSTEM_PROMPT}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              className="w-full resize-none overflow-hidden rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-xs leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            />
+            <p className="text-xs text-muted-foreground">
+              Variables interpolated at generation time:{" "}
+              <code className="rounded bg-muted px-1 py-0.5">
+                {"{{sections}}"}
+              </code>{" "}
+              <code className="rounded bg-muted px-1 py-0.5">
+                {"{{language}}"}
+              </code>{" "}
+              <code className="rounded bg-muted px-1 py-0.5">
+                {"{{languageCode}}"}
+              </code>{" "}
+              <code className="rounded bg-muted px-1 py-0.5">
+                {"{{styleGuide}}"}
+              </code>
+            </p>
+          </div>
+
+          {/* Writing Style Guide */}
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Writing Style Guide
+              </h2>
+              {styleGuide && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setStyleGuide("")}
+                  className="h-6 text-xs text-muted-foreground"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            {styleGuide ? (
+              <textarea
+                ref={styleGuideRef}
+                value={styleGuide}
+                onChange={(e) => setStyleGuide(e.target.value)}
+                className="w-full resize-none overflow-hidden rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No style guide yet. Upload a reference note to auto-generate
+                one, or write your own.
+              </p>
             )}
           </div>
-          <textarea
-            ref={promptRef}
-            value={systemPrompt || DEFAULT_SYSTEM_PROMPT}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            className="w-full resize-none overflow-hidden rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-xs leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-          <p className="text-xs text-muted-foreground">
-            Variables interpolated at generation time:{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              {"{{sections}}"}
-            </code>{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              {"{{language}}"}
-            </code>{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              {"{{languageCode}}"}
-            </code>
-          </p>
         </div>
       </div>
+
+      {/* Analysis result dialog */}
+      <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reference Note Analyzed</DialogTitle>
+            <DialogDescription>
+              This template already has {sections.length} section
+              {sections.length !== 1 && "s"}. How would you like to apply the
+              analysis?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm">
+            <p>
+              <strong>Detected:</strong> {analysisResult?.sections.length}{" "}
+              sections, writing style analyzed.
+            </p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() =>
+                analysisResult && applyAnalysis(analysisResult, "style_only")
+              }
+            >
+              Keep structure, apply style only
+            </Button>
+            <Button
+              onClick={() =>
+                analysisResult && applyAnalysis(analysisResult, "both")
+              }
+            >
+              Override structure + apply style
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Unsaved changes dialog */}
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>

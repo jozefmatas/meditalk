@@ -12,6 +12,7 @@ export interface TemplateRow {
   sections: TemplateSection[];
   system_prompt: string | null;
   style_examples: { name: string; text: string }[] | null;
+  style_guide: string | null;
   specialties: string[];
   locales: string[];
   is_system: boolean;

@@ -122,21 +122,31 @@ export function buildTemplateSystemPrompt(
     .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
     .join("\n");
 
-  // Use custom system prompt if set, with variable interpolation
-  if (template.systemPrompt) {
-    return template.systemPrompt
+  // Build style guide block (empty string if no style guide)
+  const styleGuideBlock = template.styleGuide
+    ? `\n\nWRITING STYLE GUIDE:\nMimic the following writing style in your output. Match the tone, sentence structure, formatting preferences, abbreviation usage, and level of detail described below:\n${template.styleGuide}\n`
+    : "";
+
+  // Variable interpolation (works for both custom and default prompts)
+  const interpolate = (prompt: string) =>
+    prompt
       .replace(/\{\{sections\}\}/g, sectionList)
       .replace(/\{\{language\}\}/g, langLabel)
-      .replace(/\{\{languageCode\}\}/g, language);
+      .replace(/\{\{languageCode\}\}/g, language)
+      .replace(/\{\{styleGuide\}\}/g, styleGuideBlock);
+
+  // Use custom system prompt if set
+  if (template.systemPrompt) {
+    return interpolate(template.systemPrompt);
   }
 
-  return `You are a medical documentation assistant. You MUST follow these rules strictly:
+  return interpolate(`You are a medical documentation assistant. You MUST follow these rules strictly:
 
 1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
 
 2. STRICT GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, estimate, or hallucinate any medical facts. If a value (age, duration, measurement, dosage, etc.) is not explicitly stated, do NOT guess — omit it entirely.
 
-3. OUTPUT LANGUAGE: Write ALL content exclusively in ${langLabel}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+3. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
 
 4. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
 
@@ -145,10 +155,11 @@ export function buildTemplateSystemPrompt(
 6. FORMAT: Return valid JSON with the following keys:
    - One key for each section ID listed below, with the section content as a string value (or "" if no information).
    - A "letter" key with a patient-friendly summary letter.
-   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in ${langLabel}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
+   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in {{language}}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
-${sectionList}`;
+{{sections}}
+{{styleGuide}}`);
 }
 
 /**

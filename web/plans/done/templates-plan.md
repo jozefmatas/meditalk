@@ -446,53 +446,111 @@ In `admin/app/(admin)/templates/page.tsx`:
 
 ---
 
-## Step 9: Admin template builder — Style examples
+## Step 9: Reference note upload — Structure extraction + Writing style guide
 
-_Upload reference documents, AI extracts text, injected into prompt._
+_Upload previous medical notes to auto-detect template structure and extract writing style. Style guide is injected into the generation prompt so output matches the doctor's voice._
 
-**Status:** [ ] Not started
+**Status:** [x] Done (on main)
 
-### 9A. File extraction endpoint
+### 9A. Database + types — add `style_guide` column
 
-**File:** `web/src/app/api/admin/extract/route.ts`
+**File:** `web/supabase/migrations/011_template_style_guide.sql`
 
-POST: accepts file upload, extracts text using existing `file-extraction.ts` logic.
+```sql
+ALTER TABLE templates ADD COLUMN style_guide text;
+```
 
-### 9B. Style examples panel
+**`admin/lib/template-types.ts`** — add `style_guide: string | null` to `TemplateRow`
 
-- Upload button (PDF, images, text files)
-- Calls extraction endpoint → gets `{name, text}`
-- List of extracted examples with editable textarea
-- Add/Remove
+**`web/src/lib/templates/types.ts`** — add `styleGuide?: string` to `Template`
 
-### 9C. Save to DB
+**`web/src/lib/templates/server.ts`** — map `style_guide` in `dbRowToTemplate()`
 
-PATCH updates `style_examples` JSONB column.
+**`admin/app/api/templates/duplicate/route.ts`** — copy `style_guide` in duplicate insert
 
-**Result:** Admin can upload example notes → extracted text becomes part of the generation prompt.
+### 9B. Admin file extraction + analysis API
+
+**File:** `admin/lib/file-extraction.ts` (new)
+
+Simplified OCR for PDFs/images/text using base64 + Sonnet. No audio support, no signed URLs, no usage logging — admin-only.
+
+**File:** `admin/app/api/templates/analyze-note/route.ts` (new)
+
+POST (FormData upload) → extracts text → calls Claude Sonnet to return:
+
+- `sections[]` — detected headers/subheaders with labels + context descriptions
+- `styleGuide` — bullet-point style analysis (tone, structure, abbreviations, person/voice, formality, detail level, distinctive patterns)
+- `extractedText` — raw text for storage in `style_examples`
+
+### 9C. Upload UI + analysis dialog in template editor
+
+**File:** `admin/app/(admin)/templates/[id]/template-editor.tsx`
+
+**Upload button** in sections panel header ("Upload reference note" — PDF, images, text). Analyzing spinner while API processes.
+
+**New template** (no sections): auto-apply both structure + style.
+
+**Existing template**: dialog with two choices:
+- "Override structure + apply style" — replaces sections with detected structure
+- "Keep structure, apply style only" — only updates the style guide
+
+**Style Guide panel** (right column, below System Prompt):
+- Standalone editable textarea — admin can manually write, edit, or refine
+- AI generates as a **bullet-point list** (one bullet per characteristic):
+  ```
+  - Tone: formal, clinical
+  - Structure: bullet points for findings, prose for assessment
+  - Abbreviations: uses freely (TK, BMI, RA, EKG)
+  - Person: third person ("Patient presents...")
+  - Detail level: thorough, includes specific values
+  - Distinctive: always starts assessment with differential diagnosis
+  ```
+- "Clear" button to reset
+- Empty state: "No style guide yet. Upload a reference note to auto-generate one, or write your own."
+- Included in save body and dirty tracking
+
+### 9D. Style guide injection into generation prompt (doctor-facing)
+
+**File:** `web/src/lib/anthropic.ts` — modify `buildTemplateSystemPrompt()`
+
+- For custom prompts: `{{styleGuide}}` interpolation variable
+- For default prompt: append after section list as "WRITING STYLE GUIDE:" block
+- Bullet format translates naturally into clear prompt instructions
+- When `styleGuide` is empty/null: no injection, no behavior change
+
+### 9E. Reference text storage (multiple uploads)
+
+- Each upload appends `{ name: filename, text: extractedText }` to `style_examples` array
+- Latest analysis overwrites `styleGuide` (re-analyzed from combined references)
+- Save persists both `style_examples` and `style_guide` to DB
+
+**Result:** Admin uploads reference notes → AI detects section structure (headers, subheaders, context) and extracts writing style as an editable bullet-point guide. New templates get auto-populated structure. Style guide is injected into generation prompt so output matches the doctor's writing voice.
 
 ---
 
 ## Key Files Summary
 
-| File                                        | Step  | Change                                                |
-| ------------------------------------------- | ----- | ----------------------------------------------------- |
-| `web/src/lib/templates/types.ts`            | 3     | Hash IDs, `labels`, `context`, updated Template shape |
-| `web/src/lib/templates/*.ts` (4 files)      | 3     | Migrate to hash IDs + embedded labels                 |
-| `web/src/lib/templates/index.ts`            | 3     | Helpers: resolveSectionLabel, generateSectionId, etc. |
-| `web/src/lib/anthropic.ts`                  | 1,2,3 | systemPrompt, styleExamples, context injection        |
-| `web/src/app/api/generate/route.ts`         | 3,4   | Use template labels/context, DB fetch                 |
-| `web/src/app/api/regenerate/route.ts`       | 3,4   | Same as generate                                      |
-| `web/src/components/encounters/*.tsx`       | 3     | section.labels[locale] resolution                     |
-| `web/messages/{sk,en,cs}.json`              | 3     | Remove dead templates.sections.\* keys                |
-| `web/supabase/migrations/006_templates.sql` | 4     | DB table + seed                                       |
-| `web/src/app/api/templates/route.ts`        | 4     | GET with DB + static fallback                         |
-| `admin/components/app-sidebar.tsx`          | 5     | Add Templates nav                                     |
-| `admin/app/(admin)/templates/page.tsx`      | 5     | Template list                                         |
-| `admin/app/(admin)/templates/[id]/page.tsx` | 6,7,9 | Template builder (sections, prompt, style)            |
-| `admin/components/locale-combobox.tsx`       | 8     | Multi-select locale picker                            |
-| `web/supabase/migrations/010_template_locales.sql` | 8 | Add `locales` column to templates                   |
-| `admin/app/api/templates/*.ts`              | 5,6   | CRUD + translate routes                               |
+| File                                              | Step    | Change                                                |
+| ------------------------------------------------- | ------- | ----------------------------------------------------- |
+| `web/src/lib/templates/types.ts`                  | 3, 9    | Hash IDs, `labels`, `context`, `styleGuide`           |
+| `web/src/lib/templates/*.ts` (4 files)            | 3       | Migrate to hash IDs + embedded labels                 |
+| `web/src/lib/templates/index.ts`                  | 3       | Helpers: resolveSectionLabel, generateSectionId, etc. |
+| `web/src/lib/anthropic.ts`                        | 1,2,3,9 | systemPrompt, styleGuide, context injection           |
+| `web/src/app/api/generate/route.ts`               | 3, 4    | Use template labels/context, DB fetch                 |
+| `web/src/app/api/regenerate/route.ts`             | 3, 4    | Same as generate                                      |
+| `web/src/components/encounters/*.tsx`              | 3       | section.labels[locale] resolution                     |
+| `web/messages/{sk,en,cs}.json`                    | 3       | Remove dead templates.sections.\* keys                |
+| `web/supabase/migrations/006_templates.sql`       | 4       | DB table + seed                                       |
+| `web/supabase/migrations/010_template_locales.sql` | 8      | Add `locales` column to templates                     |
+| `web/supabase/migrations/011_template_style_guide.sql` | 9  | Add `style_guide` column                              |
+| `web/src/app/api/templates/route.ts`              | 4       | GET with DB + static fallback                         |
+| `admin/components/app-sidebar.tsx`                | 5       | Add Templates nav                                     |
+| `admin/app/(admin)/templates/page.tsx`            | 5       | Template list                                         |
+| `admin/app/(admin)/templates/[id]/page.tsx`       | 6,7,9   | Template builder (sections, prompt, style)            |
+| `admin/components/locale-combobox.tsx`            | 8       | Multi-select locale picker                            |
+| `admin/lib/file-extraction.ts`                    | 9       | Simplified OCR for admin                              |
+| `admin/app/api/templates/analyze-note/route.ts`   | 9       | Upload + analysis API (structure + style)             |
+| `admin/app/api/templates/*.ts`                    | 5, 6    | CRUD + translate routes                               |
 
 ## Verification per step
 
