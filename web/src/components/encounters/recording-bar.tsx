@@ -210,15 +210,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // Without this, the old MediaStream holds the mic and blocks getUserMedia on the next page
     useEffect(() => {
       return () => {
-        // Save accumulated recording before tearing down (max ~1s loss from last timeslice)
-        if (chunksRef.current.length > 0) {
-          const blob = new Blob(chunksRef.current, {
-            type: mimeTypeRef.current,
-          });
-          onRecordingCompleteRef.current(blob);
-          chunksRef.current = [];
-        }
-        // Stop MediaRecorder
+        // Stop MediaRecorder — onstop handler will build the blob and call
+        // onRecordingComplete automatically (no timeslice, so data is flushed at stop)
         if (mediaRecorderRef.current?.state !== "inactive") {
           try {
             mediaRecorderRef.current?.stop();
@@ -530,14 +523,11 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           if (blob) onRecordingComplete(blob);
         };
 
-        // MP4 (Safari) produces invalid files when using timeslice — fragmented
-        // MP4 chunks don't concatenate properly. Use no timeslice so stop()
-        // delivers a single valid file. WebM/OGG handle timeslice correctly.
-        if (mimeType.includes("mp4")) {
-          recorder.start();
-        } else {
-          recorder.start(1000);
-        }
+        // No timeslice — stop() delivers a single valid file.
+        // Timeslice fragments can produce malformed containers on some Android
+        // devices, causing WAV conversion and ElevenLabs batch transcription
+        // to fail. Scribe streaming handles real-time transcript independently.
+        recorder.start();
 
         // Start Scribe streaming from the same mic stream (non-blocking)
         startScribe(stream);

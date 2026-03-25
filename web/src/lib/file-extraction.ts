@@ -1,8 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
+import sharp from "sharp";
 import { transcribeAudio } from "./elevenlabs";
 import type { SupportedLanguage } from "./types";
 import { logUsage, type UsageContext } from "./usage";
+
+/** Anthropic's max image size is 5 MB (5,242,880 bytes). */
+const MAX_IMAGE_BYTES = 5_242_880;
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -66,6 +70,46 @@ async function extractFromPdf(
 }
 
 /**
+ * Compress an image buffer to fit within Anthropic's 5 MB limit.
+ * Converts to JPEG and progressively reduces quality/dimensions until under limit.
+ */
+export async function compressImage(
+  buffer: Buffer,
+): Promise<{ data: Buffer; mediaType: "image/jpeg" }> {
+  let quality = 85;
+  let resizeWidth: number | undefined;
+
+  // Get original dimensions
+  const metadata = await sharp(buffer).metadata();
+  const originalWidth = metadata.width ?? 4096;
+
+  // Start with original dimensions, reduce if needed
+  let result = await sharp(buffer).jpeg({ quality }).toBuffer();
+
+  while (result.byteLength > MAX_IMAGE_BYTES && quality > 20) {
+    quality -= 15;
+    if (quality <= 50 && !resizeWidth) {
+      // Also reduce dimensions if quality alone isn't enough
+      resizeWidth = Math.min(originalWidth, 2048);
+    } else if (resizeWidth) {
+      resizeWidth = Math.floor(resizeWidth * 0.75);
+    }
+
+    let pipeline = sharp(buffer);
+    if (resizeWidth) {
+      pipeline = pipeline.resize(resizeWidth, undefined, { fit: "inside" });
+    }
+    result = await pipeline.jpeg({ quality }).toBuffer();
+  }
+
+  console.log(
+    `[image-compress] ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB → ${(result.byteLength / 1024 / 1024).toFixed(1)}MB (quality=${quality}${resizeWidth ? `, width=${resizeWidth}` : ""})`,
+  );
+
+  return { data: result, mediaType: "image/jpeg" };
+}
+
+/**
  * Extract text from an image using Claude Vision API.
  */
 async function extractFromImage(
@@ -74,13 +118,22 @@ async function extractFromImage(
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  const base64 = buffer.toString("base64");
-  return await ocrImageWithClaude(
-    base64,
-    mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
-    language,
-    ctx,
-  );
+  let imageBuffer = buffer;
+  let mediaType = mimeType as
+    | "image/jpeg"
+    | "image/png"
+    | "image/gif"
+    | "image/webp";
+
+  // Compress if over Anthropic's 5 MB limit
+  if (buffer.byteLength > MAX_IMAGE_BYTES) {
+    const compressed = await compressImage(buffer);
+    imageBuffer = compressed.data;
+    mediaType = compressed.mediaType;
+  }
+
+  const base64 = imageBuffer.toString("base64");
+  return await ocrImageWithClaude(base64, mediaType, language, ctx);
 }
 
 /**

@@ -1,21 +1,23 @@
 /**
- * Convert an audio Blob (WebM/Opus, OGG, or any browser-decodable format)
+ * Convert an audio Blob (WebM/Opus, OGG, MP4/AAC, or any browser-decodable format)
  * to a mono 16 kHz WAV Blob using the Web Audio API.
  *
- * This ensures ElevenLabs Scribe always receives a valid file —
- * WebM from Android Chrome's MediaRecorder can be malformed.
+ * Uses OfflineAudioContext for decoding — unlike AudioContext it doesn't require
+ * a user gesture, so it works reliably on iOS even in async callbacks.
  */
 export async function convertToWav(audioBlob: Blob): Promise<Blob> {
   const arrayBuffer = await audioBlob.arrayBuffer();
 
-  const audioContext = new AudioContext();
-  await audioContext.resume(); // mobile browsers may start suspended
-  let audioBuffer: AudioBuffer;
-  try {
-    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-  } finally {
-    await audioContext.close();
+  if (arrayBuffer.byteLength < 100) {
+    throw new Error("Audio blob too small to be valid");
   }
+
+  // OfflineAudioContext.decodeAudioData works without a user gesture (critical
+  // for iOS Safari where AudioContext creation outside a tap handler fails).
+  // Params (channels, length, sampleRate) are only used for rendering — decoding
+  // ignores them and returns the file's actual format.
+  const offlineCtx = new OfflineAudioContext(1, 1, 44100);
+  const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
 
   // Take first channel (mono)
   const inputData = audioBuffer.getChannelData(0);
