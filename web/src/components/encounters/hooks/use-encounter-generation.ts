@@ -79,8 +79,10 @@ export function useEncounterGeneration({
 
   // Audio recording — blob kept in memory for canGenerate check
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  // Storage path of the uploaded audio (set by handleRecordingComplete or FilesPanel)
-  const [audioStoragePath, setAudioStoragePath] = useState<string | null>(null);
+  // Storage path of the uploaded audio (set by handleRecordingComplete or FilesPanel).
+  // Ref instead of state so handleGenerate can read the latest value immediately
+  // after finalize() triggers handleRecordingComplete (avoids React state batching delay).
+  const audioStoragePathRef = useRef<string | null>(null);
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
@@ -181,7 +183,7 @@ export function useEncounterGeneration({
           encounterId: visitId,
         });
 
-        setAudioStoragePath(path);
+        audioStoragePathRef.current = path;
 
         // Register file metadata with the API (small JSON, no file bytes)
         const res = await fetch(`/api/encounters/${visitId}/files`, {
@@ -255,7 +257,6 @@ export function useEncounterGeneration({
       const capturedTemplateId = selectedTemplateId;
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
-      const capturedAudioStoragePath = audioStoragePath;
 
       // Set processing state immediately — the activeGenerations guard in
       // handleRecordingStateChange prevents finalize()'s "idle" from overriding this.
@@ -278,9 +279,11 @@ export function useEncounterGeneration({
       try {
         // If there's a recorded audio that hasn't been uploaded yet AND we don't
         // have a streaming transcript, upload now as fallback.
+        // Read from ref (not stale state) — handleRecordingComplete may have
+        // uploaded the file between our capture and finalize().
         if (
           blobToProcess &&
-          !capturedAudioStoragePath &&
+          !audioStoragePathRef.current &&
           !streamingTranscript
         ) {
           // Convert to WAV for reliable ElevenLabs compatibility
@@ -325,7 +328,7 @@ export function useEncounterGeneration({
         }
 
         setAudioBlob(null);
-        setAudioStoragePath(null);
+        audioStoragePathRef.current = null;
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
         let completedEvent: Record<string, unknown> | null = null;
@@ -524,15 +527,7 @@ export function useEncounterGeneration({
         );
       }
     },
-    [
-      visitId,
-      selectedTemplateId,
-      doctorNotes,
-      audioBlob,
-      audioStoragePath,
-      setVisit,
-      setError,
-    ],
+    [visitId, selectedTemplateId, doctorNotes, audioBlob, setVisit, setError],
   );
 
   /* ------------------------------------------------------------------ */

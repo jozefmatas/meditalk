@@ -520,6 +520,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
         recorder.onstop = () => {
           const blob = buildBlob();
+          chunksRef.current = [];
           if (blob) onRecordingComplete(blob);
         };
 
