@@ -151,7 +151,14 @@
       "Bash(vercel project ls:*)",
       "Bash(vercel env ls:*)",
       "Bash(vercel:*)",
-      "Bash(PGHOST=\"db.glrmfkdlkrdpwmcwrzbv.supabase.co\" PGPORT=\"5432\" PGUSER=\"cli_login_postgres\" PGPASSWORD=\"TyMsvLLsmkrModGUJJikNgRarQjvYDSL\" psql:*)"
+      "Bash(PGHOST=\"db.glrmfkdlkrdpwmcwrzbv.supabase.co\" PGPORT=\"5432\" PGUSER=\"cli_login_postgres\" PGPASSWORD=\"TyMsvLLsmkrModGUJJikNgRarQjvYDSL\" psql:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk add:*)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk commit -m \"$\\(cat <<''EOF''\nFix audio recording corruption on iOS and add image compression for oversized uploads\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk push)",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk commit -m \"$\\(cat <<''EOF''\nAlways upload audio even if WAV conversion fails — never lose recordings\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk commit -m \"$\\(cat <<''EOF''\nFix race condition causing duplicate corrupt audio uploads\n\nClear chunksRef after original onstop to prevent finalize\\(\\) from\nbuilding a duplicate blob. Use ref instead of state for audio storage\npath so handleGenerate reads the latest value immediately after finalize.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk commit -m \"$\\(cat <<''EOF''\nAllow file uploads during admin impersonation\n\nAccept admin''s real userId as valid storage path prefix when\nimpersonating, since client-side auth token stays unchanged.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git -C /Users/jozefmatas/Documents/meditalk/meditalk commit -m \"$\\(cat <<''EOF''\nFix sharp in Vercel runtime and restore title font size\n\n- Add sharp to serverExternalPackages so image compression works\n  in Vercel serverless functions\n- Add error logging around image compression path\n- Remove !important from Textarea text-sm so title text-2xl wins\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
     ],
     "deny": [],
     "ask": []

@@ -379,26 +379,87 @@ PATCH updates `system_prompt` column.
 
 ---
 
-## Step 8: Admin template builder — Style examples
+## Step 8: Locale filtering for templates
+
+_Restrict which locales a template is available for. Admins pick locales via combobox; doctors see only templates matching their current locale._
+
+**Status:** [ ] Not started
+
+### 8A. Database migration
+
+**File:** `web/supabase/migrations/010_template_locales.sql`
+
+```sql
+ALTER TABLE templates ADD COLUMN locales text[] NOT NULL DEFAULT '{sk,en,cs}';
+```
+
+Default = all locales, so existing templates keep working unchanged.
+
+### 8B. Update types
+
+**`admin/lib/template-types.ts`** — add `locales: string[]` to `TemplateRow`
+
+**`web/src/lib/templates/types.ts`** — add `locales?: string[]` to `Template`
+
+**`web/src/lib/templates/server.ts`** — map `row.locales` in `dbRowToTemplate()`
+
+### 8C. Create LocaleCombobox in admin
+
+**File:** `admin/components/locale-combobox.tsx`
+
+Multi-select combobox modeled on `admin/components/specialty-combobox.tsx`:
+- Options derived dynamically from `LOCALES` constant in `admin/lib/template-types.ts` with a label map (`{sk: "Slovenčina", cs: "Čeština", en: "English"}`) — adding a new locale to `LOCALES` automatically makes it available in the combobox
+- Same toggle/remove pattern with Badge display
+- Minimum 1 locale selected (prevent empty array — disable remove when only 1 left)
+
+### 8D. Add LocaleCombobox to template editor
+
+In `admin/app/(admin)/templates/[id]/template-editor.tsx`:
+- Add `locales` state (from `initialData.locales`)
+- Add `LocaleCombobox` to Metadata section (after Specialties)
+- Include `locales` in save body, dirty tracking snapshot
+
+### 8E. Add Locales column to admin templates table
+
+In `admin/app/(admin)/templates/page.tsx`:
+- Add "Locales" column header after "Specialties"
+- Display locale badges (uppercase, e.g. SK, CS, EN)
+- Update `colSpan` on empty state row
+
+### 8F. Filter templates by locale on doctor-facing side
+
+**`web/src/lib/templates/server.ts`** — `resolveAllTemplates()`: `locales` is already returned via `select("*")` + `dbRowToTemplate`
+
+**`web/src/app/[locale]/(app)/templates/page.tsx`** — filter: `templates.filter(t => !t.locales || t.locales.includes(locale))`
+
+**`web/src/components/templates/template-selector.tsx`** — filter options by current locale: `source.filter(t => !t.locales || t.locales.includes(locale))`
+
+**`web/src/app/api/templates/route.ts`** — optionally filter server-side with `@>` array contains operator, or keep client-side filtering
+
+**Result:** Templates can be restricted to specific locales. Default: all 3. Doctors only see templates matching their current locale.
+
+---
+
+## Step 9: Admin template builder — Style examples
 
 _Upload reference documents, AI extracts text, injected into prompt._
 
 **Status:** [ ] Not started
 
-### 8A. File extraction endpoint
+### 9A. File extraction endpoint
 
 **File:** `web/src/app/api/admin/extract/route.ts`
 
 POST: accepts file upload, extracts text using existing `file-extraction.ts` logic.
 
-### 8B. Style examples panel
+### 9B. Style examples panel
 
 - Upload button (PDF, images, text files)
 - Calls extraction endpoint → gets `{name, text}`
 - List of extracted examples with editable textarea
 - Add/Remove
 
-### 8C. Save to DB
+### 9C. Save to DB
 
 PATCH updates `style_examples` JSONB column.
 
@@ -422,7 +483,9 @@ PATCH updates `style_examples` JSONB column.
 | `web/src/app/api/templates/route.ts`        | 4     | GET with DB + static fallback                         |
 | `admin/components/app-sidebar.tsx`          | 5     | Add Templates nav                                     |
 | `admin/app/(admin)/templates/page.tsx`      | 5     | Template list                                         |
-| `admin/app/(admin)/templates/[id]/page.tsx` | 6,7,8 | Template builder (sections, prompt, style)            |
+| `admin/app/(admin)/templates/[id]/page.tsx` | 6,7,9 | Template builder (sections, prompt, style)            |
+| `admin/components/locale-combobox.tsx`       | 8     | Multi-select locale picker                            |
+| `web/supabase/migrations/010_template_locales.sql` | 8 | Add `locales` column to templates                   |
 | `admin/app/api/templates/*.ts`              | 5,6   | CRUD + translate routes                               |
 
 ## Verification per step
