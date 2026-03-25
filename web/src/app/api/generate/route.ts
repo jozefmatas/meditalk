@@ -659,18 +659,20 @@ export async function POST(request: NextRequest) {
           // stays alive until the email is sent (even if client disconnected)
           if (sendAsEmail) {
             try {
-              const {
-                data: { user },
-              } = await supabase.auth.getUser();
-              if (user?.email) {
+              const admin = createAdminClient();
+              // Use admin.getUserById instead of supabase.auth.getUser() —
+              // during impersonation, supabase is a service-role client with no session.
+              const { data: userData } =
+                await admin.auth.admin.getUserById(userId);
+              const userEmail = userData?.user?.email;
+              if (userEmail) {
                 const encounterPath = `/${language}/encounters/${visitId}`;
                 const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
                 const redirectTo = `${appUrl}${encounterPath}`;
 
-                const admin = createAdminClient();
                 const { data: linkData } = await admin.auth.admin.generateLink({
                   type: "magiclink",
-                  email: user.email,
+                  email: userEmail,
                   options: { redirectTo },
                 });
                 const viewUrl =
@@ -678,7 +680,7 @@ export async function POST(request: NextRequest) {
                   `${appUrl}${encounterPath}`;
 
                 await sendNoteEmail({
-                  to: user.email,
+                  to: userEmail,
                   title: autoTitle || visit.title || "Untitled",
                   noteHtml: filterEmptySectionsHtml(generatedNote),
                   viewUrl,

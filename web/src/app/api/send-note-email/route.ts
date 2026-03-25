@@ -38,12 +38,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get user email
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // Get user email — use admin.getUserById instead of supabase.auth.getUser()
+    // because during impersonation supabase is a service-role client with no session.
+    const admin = createAdminClient();
+    const { data: userData } = await admin.auth.admin.getUserById(userId);
+    const userEmail = userData?.user?.email;
 
-    if (!user?.email) {
+    if (!userEmail) {
       return NextResponse.json(
         { error: "User email not found" },
         { status: 400 },
@@ -56,10 +57,9 @@ export async function POST(request: Request) {
     const encounterPath = `/${language}/encounters/${visitId}`;
     const redirectTo = `${appUrl}${encounterPath}`;
 
-    const admin = createAdminClient();
     const { data: linkData } = await admin.auth.admin.generateLink({
       type: "magiclink",
-      email: user.email,
+      email: userEmail,
       options: { redirectTo },
     });
 
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       linkData?.properties?.action_link || `${appUrl}${encounterPath}`;
 
     await sendNoteEmail({
-      to: user.email,
+      to: userEmail,
       title: encounter.title || "Untitled",
       noteHtml: filterEmptySectionsHtml(encounter.encounter_note),
       viewUrl,
