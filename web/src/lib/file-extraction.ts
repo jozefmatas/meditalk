@@ -1,12 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
-import sharp from "sharp";
 import { transcribeAudio } from "./elevenlabs";
 import type { SupportedLanguage } from "./types";
 import { logUsage, type UsageContext } from "./usage";
-
-/** Anthropic's max image size is 5 MB (5,242,880 bytes). */
-const MAX_IMAGE_BYTES = 5_242_880;
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -21,16 +17,22 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 };
 
 /**
- * Extract text content from a file buffer based on its MIME type.
+ * Extract text content from a file based on its MIME type.
  *
- * - PDF: text extraction via Claude document API
- * - Image (PNG/JPEG): OCR via Claude Vision
- * - Audio: transcription via ElevenLabs Scribe v2
+ * - Image (PNG/JPEG): OCR via Claude Vision using a signed URL (no size limit)
+ * - PDF: text extraction via Claude document API using a signed URL (no download needed)
+ * - Audio: transcription via ElevenLabs Scribe v2 (requires buffer)
  *
- * Returns extracted text or null on failure.
+ * For images and PDFs, pass a signed URL so Claude fetches the file
+ * directly — this avoids inline base64 size limits entirely.
+ * For audio, pass `buffer` (ElevenLabs requires a File object).
  */
 export async function extractTextFromFile(
-  buffer: Buffer,
+  opts: {
+    buffer?: Buffer;
+    imageUrl?: string;
+    pdfUrl?: string;
+  },
   filename: string,
   mimeType: string,
   language: SupportedLanguage,
@@ -38,15 +40,35 @@ export async function extractTextFromFile(
 ): Promise<string | null> {
   try {
     if (mimeType === "application/pdf") {
-      return await extractFromPdf(buffer, language, ctx);
+      if (opts.pdfUrl) {
+        return await ocrPdfWithUrl(opts.pdfUrl, language, ctx);
+      }
+      if (opts.buffer) {
+        return await extractFromPdf(opts.buffer, language, ctx);
+      }
+      return null;
     }
 
     if (mimeType.startsWith("image/")) {
-      return await extractFromImage(buffer, mimeType, language, ctx);
+      if (opts.imageUrl) {
+        return await ocrImageWithUrl(opts.imageUrl, language, ctx);
+      }
+      // Fallback to base64 if no URL provided (shouldn't happen in normal flow)
+      if (opts.buffer) {
+        const base64 = opts.buffer.toString("base64");
+        const mediaType = mimeType as
+          | "image/jpeg"
+          | "image/png"
+          | "image/gif"
+          | "image/webp";
+        return await ocrImageWithBase64(base64, mediaType, language, ctx);
+      }
+      return null;
     }
 
     if (mimeType.startsWith("audio/")) {
-      return await extractFromAudio(buffer, filename, ctx);
+      if (!opts.buffer) return null;
+      return await extractFromAudio(opts.buffer, filename, ctx);
     }
 
     return null;
@@ -70,81 +92,6 @@ async function extractFromPdf(
 }
 
 /**
- * Compress an image buffer to fit within Anthropic's 5 MB limit.
- * Converts to JPEG and progressively reduces quality/dimensions until under limit.
- */
-export async function compressImage(
-  buffer: Buffer,
-): Promise<{ data: Buffer; mediaType: "image/jpeg" }> {
-  let quality = 85;
-  let resizeWidth: number | undefined;
-
-  // Get original dimensions
-  const metadata = await sharp(buffer).metadata();
-  const originalWidth = metadata.width ?? 4096;
-
-  // Start with original dimensions, reduce if needed
-  let result = await sharp(buffer).jpeg({ quality }).toBuffer();
-
-  while (result.byteLength > MAX_IMAGE_BYTES && quality > 20) {
-    quality -= 15;
-    if (quality <= 50 && !resizeWidth) {
-      // Also reduce dimensions if quality alone isn't enough
-      resizeWidth = Math.min(originalWidth, 2048);
-    } else if (resizeWidth) {
-      resizeWidth = Math.floor(resizeWidth * 0.75);
-    }
-
-    let pipeline = sharp(buffer);
-    if (resizeWidth) {
-      pipeline = pipeline.resize(resizeWidth, undefined, { fit: "inside" });
-    }
-    result = await pipeline.jpeg({ quality }).toBuffer();
-  }
-
-  console.log(
-    `[image-compress] ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB → ${(result.byteLength / 1024 / 1024).toFixed(1)}MB (quality=${quality}${resizeWidth ? `, width=${resizeWidth}` : ""})`,
-  );
-
-  return { data: result, mediaType: "image/jpeg" };
-}
-
-/**
- * Extract text from an image using Claude Vision API.
- */
-async function extractFromImage(
-  buffer: Buffer,
-  mimeType: string,
-  language: SupportedLanguage,
-  ctx?: UsageContext,
-): Promise<string | null> {
-  let imageBuffer = buffer;
-  let mediaType = mimeType as
-    | "image/jpeg"
-    | "image/png"
-    | "image/gif"
-    | "image/webp";
-
-  // Compress if over Anthropic's 5 MB limit for inline base64 images
-  if (buffer.byteLength > MAX_IMAGE_BYTES) {
-    console.log(
-      `[image-extract] image ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB exceeds 5MB limit, compressing...`,
-    );
-    try {
-      const compressed = await compressImage(buffer);
-      imageBuffer = compressed.data;
-      mediaType = compressed.mediaType;
-    } catch (compressErr) {
-      console.error("[image-extract] compression failed:", compressErr);
-      // Still attempt to send — Claude may accept it or give a clear error
-    }
-  }
-
-  const base64 = imageBuffer.toString("base64");
-  return await ocrImageWithClaude(base64, mediaType, language, ctx);
-}
-
-/**
  * Transcribe audio using ElevenLabs Scribe v2 (batch).
  */
 async function extractFromAudio(
@@ -162,9 +109,58 @@ function ocrPrompt(language: SupportedLanguage): string {
 }
 
 /**
- * OCR for images using Claude Vision API (type: 'image').
+ * OCR for images using Claude Vision API with a URL source.
+ * No inline size limit — Claude fetches the image directly.
  */
-async function ocrImageWithClaude(
+async function ocrImageWithUrl(
+  url: string,
+  language: SupportedLanguage,
+  ctx?: UsageContext,
+): Promise<string | null> {
+  console.log(`[image-extract] using URL source (no size limit)`);
+
+  const content: ContentBlockParam[] = [
+    {
+      type: "image",
+      source: {
+        type: "url",
+        url,
+      },
+    },
+    {
+      type: "text",
+      text: ocrPrompt(language),
+    },
+  ];
+
+  const response = await anthropic().messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 4096,
+    messages: [{ role: "user", content }],
+  });
+
+  if (ctx) {
+    logUsage({
+      userId: ctx.userId,
+      visitId: ctx.visitId,
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      operation: "ocr_image",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return text?.trim() || null;
+}
+
+/**
+ * OCR for images using Claude Vision API with base64 (fallback).
+ * Subject to Anthropic's 5 MB inline limit for base64 images.
+ */
+async function ocrImageWithBase64(
   base64Data: string,
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
   language: SupportedLanguage,
@@ -209,7 +205,55 @@ async function ocrImageWithClaude(
 }
 
 /**
- * OCR for scanned PDFs using Claude document API (type: 'document').
+ * Extract text from PDF using Claude document API with a URL source.
+ * No download needed — Claude fetches the PDF directly.
+ */
+async function ocrPdfWithUrl(
+  url: string,
+  language: SupportedLanguage,
+  ctx?: UsageContext,
+): Promise<string | null> {
+  console.log(`[pdf-extract] using URL source (no download needed)`);
+
+  const content: ContentBlockParam[] = [
+    {
+      type: "document",
+      source: {
+        type: "url",
+        url,
+      },
+    },
+    {
+      type: "text",
+      text: ocrPrompt(language),
+    },
+  ];
+
+  const response = await anthropic().messages.create({
+    model: "claude-sonnet-4-5-20250929",
+    max_tokens: 4096,
+    messages: [{ role: "user", content }],
+  });
+
+  if (ctx) {
+    logUsage({
+      userId: ctx.userId,
+      visitId: ctx.visitId,
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      operation: "ocr_pdf",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
+
+  const text =
+    response.content[0].type === "text" ? response.content[0].text : "";
+  return text?.trim() || null;
+}
+
+/**
+ * OCR for scanned PDFs using Claude document API with base64 (fallback).
  */
 async function ocrPdfWithClaude(
   base64Data: string,

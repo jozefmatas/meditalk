@@ -120,25 +120,58 @@ export async function POST(request: NextRequest) {
           }
 
           try {
-            const { data: fileData, error: dlError } = await supabase.storage
-              .from("encounter-files")
-              .download(file.path);
+            const isImage = file.type.startsWith("image/");
+            const isPdf = file.type === "application/pdf";
+            const isAudio = file.type.startsWith("audio/");
 
-            if (dlError || !fileData) {
-              console.error(`Failed to download ${file.name}:`, dlError);
-              extractionErrors.push(`${file.name}: download failed`);
-              return;
+            if (isImage || isPdf) {
+              // Use a signed URL so Claude fetches the file directly —
+              // avoids inline base64 size limits entirely.
+              const { data: urlData, error: urlError } = await supabase.storage
+                .from("encounter-files")
+                .createSignedUrl(file.path, 300); // 5 min expiry
+
+              if (urlError || !urlData?.signedUrl) {
+                console.error(
+                  `Failed to create signed URL for ${file.name}:`,
+                  urlError,
+                );
+                extractionErrors.push(`${file.name}: signed URL failed`);
+                return;
+              }
+
+              const text = await extractTextFromFile(
+                isImage
+                  ? { imageUrl: urlData.signedUrl }
+                  : { pdfUrl: urlData.signedUrl },
+                file.name,
+                file.type,
+                language,
+                { userId, visitId },
+              );
+              file.extracted_text = text;
+            } else if (isAudio) {
+              // Audio: download buffer (ElevenLabs requires File object)
+              const { data: fileData, error: dlError } = await supabase.storage
+                .from("encounter-files")
+                .download(file.path);
+
+              if (dlError || !fileData) {
+                console.error(`Failed to download ${file.name}:`, dlError);
+                extractionErrors.push(`${file.name}: download failed`);
+                return;
+              }
+
+              const buffer = Buffer.from(await fileData.arrayBuffer());
+              const text = await extractTextFromFile(
+                { buffer },
+                file.name,
+                file.type,
+                language,
+                { userId, visitId },
+              );
+              file.extracted_text = text;
             }
-
-            const buffer = Buffer.from(await fileData.arrayBuffer());
-            const text = await extractTextFromFile(
-              buffer,
-              file.name,
-              file.type,
-              language,
-              { userId, visitId },
-            );
-            file.extracted_text = text;
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : "Unknown extraction error";
