@@ -45,7 +45,8 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { encounterId } = await params;
 
     // Verify ownership
@@ -82,9 +83,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         );
       }
 
-      // Validate each path belongs to the authenticated user
+      // Validate each path belongs to the authenticated user.
+      // When an admin is impersonating, the client-side upload uses the
+      // admin's real userId (because client auth token is unchanged) so we
+      // accept paths starting with either the impersonated or real userId.
+      const { isImpersonating, realUserId } = auth;
       for (const f of preUploaded) {
-        if (!f.path.startsWith(`${userId}/`)) {
+        const ownsPath =
+          f.path.startsWith(`${userId}/`) ||
+          (isImpersonating && f.path.startsWith(`${realUserId}/`));
+        if (!ownsPath) {
           return NextResponse.json(
             { error: "Invalid file path" },
             { status: 403 },
