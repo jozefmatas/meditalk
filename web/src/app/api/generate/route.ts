@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
     // Scribe real-time transcript (used for recording files instead of Whisper)
     const transcriptText: string | undefined = body.transcriptText;
     const sendAsEmail: boolean = body.sendAsEmail === true;
+    console.log("[generate] sendAsEmail:", sendAsEmail);
 
     console.log(
       `[generate] transcriptText: ${transcriptText ? `${transcriptText.length} chars` : "NONE"}`,
@@ -652,11 +653,10 @@ export async function POST(request: NextRequest) {
               : {}),
           });
 
-          lap("total");
-          safeClose();
-
-          // Send email AFTER closing the stream — awaited so the serverless function
-          // stays alive until the email is sent (even if client disconnected)
+          // Send email BEFORE closing stream — client already has the
+          // "complete" event so there's no perceived delay. Sending after
+          // safeClose() risks the runtime killing the function before the
+          // email is dispatched.
           if (sendAsEmail) {
             try {
               const admin = createAdminClient();
@@ -692,6 +692,9 @@ export async function POST(request: NextRequest) {
               console.error("[email] Failed to send note email:", err);
             }
           }
+
+          lap("total");
+          safeClose();
         } catch (err) {
           console.error("Generate stream error:", err);
           sendEvent({
