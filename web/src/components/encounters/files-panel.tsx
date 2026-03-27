@@ -18,7 +18,6 @@ import {
   TableCell,
 } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
-import { uploadToStorage } from "@/lib/supabase/upload";
 
 export interface EncounterFile {
   id: string;
@@ -27,6 +26,8 @@ export interface EncounterFile {
   type: string;
   extracted_text?: string | null;
   source?: string;
+  /** True if file is saved to IndexedDB but upload pending */
+  pending?: boolean;
 }
 
 interface FilesContentProps {
@@ -57,43 +58,69 @@ export function FilesContent({
       if (allFiles.length === 0) return;
 
       setIsUploading(true);
+      const { uploadWithPersistence } =
+        await import("@/lib/upload/upload-with-persistence");
+      const { savePendingUpload } =
+        await import("@/lib/indexeddb/pending-uploads");
+      const { toast } = await import("sonner");
+
+      // Add pending files to list immediately (before upload)
+      const pendingFiles: EncounterFile[] = allFiles.map((file) => ({
+        id: crypto.randomUUID(), // temporary ID
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        pending: true,
+      }));
+      onFilesChange([...files, ...pendingFiles]);
+
       try {
-        // Upload all files directly to Supabase Storage (bypasses Vercel limit)
+        // Upload all files with IndexedDB persistence and retry
         const results = await Promise.allSettled(
-          allFiles.map(async (file) => {
-            const { path, fileId } = await uploadToStorage(file, file.name, {
-              encounterId: visitId,
-            });
-            return {
-              id: fileId,
+          allFiles.map(async (file, idx) => {
+            const pendingId = pendingFiles[idx].id;
+
+            // Save to IndexedDB first
+            await savePendingUpload({
+              id: pendingId,
+              visitId,
+              blob: file,
               name: file.name,
-              size: file.size,
               type: file.type,
-              path,
-            };
+              size: file.size,
+              timestamp: Date.now(),
+            });
+
+            return uploadWithPersistence(file, file.name, visitId, {
+              onRetry: (attempt, max) => {
+                toast.error(
+                  `${file.name} upload failed, retrying (${attempt}/${max})...`,
+                  { duration: 2000 },
+                );
+              },
+            });
           }),
         );
 
         const uploadResults = results
-          .filter(
-            (
-              r,
-            ): r is PromiseFulfilledResult<{
-              id: string;
-              name: string;
-              size: number;
-              type: string;
-              path: string;
-            }> => r.status === "fulfilled",
-          )
-          .map((r) => r.value);
+          .filter((r) => r.status === "fulfilled")
+          .map(
+            (r) =>
+              (
+                r as PromiseFulfilledResult<
+                  Awaited<ReturnType<typeof uploadWithPersistence>>
+                >
+              ).value,
+          );
 
         if (uploadResults.length === 0) {
-          console.error("All file uploads failed");
+          toast.error(
+            "All file uploads failed. Files are saved and will retry automatically.",
+          );
           return;
         }
 
-        // Register file metadata with the API (small JSON, no file bytes)
+        // Register file metadata with the API
         const res = await fetch(`/api/encounters/${visitId}/files`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -101,19 +128,26 @@ export function FilesContent({
         });
 
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          console.error(
-            "File metadata registration failed:",
-            res.status,
-            errData,
-          );
-          return;
+          throw new Error(`Metadata registration failed: ${res.status}`);
         }
 
         const data = await res.json();
-        onFilesChange([...files, ...data.files]);
+
+        // Replace pending files with uploaded files
+        const withoutPending = files.filter((f) => !f.pending);
+        onFilesChange([...withoutPending, ...(data.files as EncounterFile[])]);
+
+        if (uploadResults.length < allFiles.length) {
+          const failedCount = allFiles.length - uploadResults.length;
+          toast.warning(
+            `${failedCount} file(s) failed to upload but are saved for retry.`,
+          );
+        }
       } catch (err) {
         console.error("File upload error:", err);
+        toast.error(
+          "File upload failed. Files are saved and will retry automatically.",
+        );
       } finally {
         setIsUploading(false);
       }
@@ -213,21 +247,28 @@ export function FilesContent({
                   <TableCell>
                     <div className="flex min-w-0 items-center gap-1">
                       <HugeiconsIcon
-                        icon={iconForType(file.type)}
+                        icon={
+                          file.pending ? Loading03Icon : iconForType(file.type)
+                        }
                         size={14}
-                        className="shrink-0 text-muted-foreground"
+                        className={cn(
+                          "shrink-0 text-muted-foreground",
+                          file.pending && "animate-spin",
+                        )}
                       />
                       <span className="min-w-0 flex-1 truncate">
                         {file.name}
                       </span>
-                      <Button
-                        variant="outline"
-                        size="icon-sm"
-                        className="shrink-0 desktop:opacity-0 desktop:transition-opacity desktop:group-hover:opacity-100"
-                        onClick={() => handleDelete(file.id)}
-                      >
-                        <HugeiconsIcon icon={Delete01Icon} size={12} />
-                      </Button>
+                      {!file.pending && (
+                        <Button
+                          variant="outline"
+                          size="icon-sm"
+                          className="shrink-0 desktop:opacity-0 desktop:transition-opacity desktop:group-hover:opacity-100"
+                          onClick={() => handleDelete(file.id)}
+                        >
+                          <HugeiconsIcon icon={Delete01Icon} size={12} />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

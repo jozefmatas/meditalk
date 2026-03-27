@@ -151,70 +151,238 @@ export function useEncounterGeneration({
     return () => clearTimeout(timeout);
   }, [doctorNotes, visit, visitId]);
 
+  // Resume pending uploads from IndexedDB on mount
+  useEffect(() => {
+    (async () => {
+      const { getPendingUploadsForVisit } =
+        await import("@/lib/indexeddb/pending-uploads");
+      const { resumePendingUpload } =
+        await import("@/lib/upload/upload-with-persistence");
+      const { toast } = await import("sonner");
+
+      const pending = await getPendingUploadsForVisit(visitId);
+      if (pending.length === 0) return;
+
+      console.log(
+        `[upload] Found ${pending.length} pending upload(s) in IndexedDB`,
+      );
+
+      // Filter out files that are already uploaded (deduplication)
+      // This prevents duplicates when page is refreshed after upload succeeded
+      // but before IndexedDB cleanup completed
+      setFiles((prev: EncounterFile[]) => {
+        const existingIds = new Set(prev.map((f) => f.id));
+        const newPending = pending
+          .filter((p) => !existingIds.has(p.id))
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            size: p.size,
+            type: p.type,
+            source: p.source,
+            pending: true,
+          }));
+
+        if (newPending.length > 0) {
+          toast.info(`Resuming ${newPending.length} pending upload(s)...`, {
+            duration: 3000,
+          });
+        }
+
+        return newPending.length > 0 ? [...prev, ...newPending] : prev;
+      });
+
+      // Clean up IndexedDB for files that are already uploaded
+      const { deletePendingUpload } =
+        await import("@/lib/indexeddb/pending-uploads");
+
+      // Get current files to check for duplicates
+      let currentFileIds: Set<string> = new Set();
+      setFiles((prev: EncounterFile[]) => {
+        currentFileIds = new Set(prev.map((f) => f.id));
+        return prev;
+      });
+
+      // Delete from IndexedDB if already uploaded
+      pending.forEach((p) => {
+        if (currentFileIds.has(p.id)) {
+          console.log(
+            `[upload] Cleaning up ${p.name} from IndexedDB (already uploaded)`,
+          );
+          deletePendingUpload(p.id).catch(() => {});
+        }
+      });
+
+      // Only resume uploads for files that aren't already uploaded
+      const toResume = pending.filter((p) => !currentFileIds.has(p.id));
+
+      if (toResume.length === 0) {
+        console.log(
+          "[upload] All pending files already uploaded, nothing to resume",
+        );
+        return;
+      }
+
+      // Resume uploads in parallel
+      const results = await Promise.allSettled(
+        toResume.map(async (p) => {
+          try {
+            const result = await resumePendingUpload(p, {
+              onRetry: (attempt, max) => {
+                toast.error(
+                  `${p.name} upload failed, retrying (${attempt}/${max})...`,
+                  { duration: 2000 },
+                );
+              },
+            });
+
+            // Register with API
+            const res = await fetch(`/api/encounters/${visitId}/files`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ files: [result] }),
+            });
+
+            if (!res.ok) {
+              throw new Error(`Metadata registration failed: ${res.status}`);
+            }
+
+            const data = await res.json();
+
+            // Replace pending file with uploaded file
+            setFiles((prev: EncounterFile[]) => {
+              const withoutPending = prev.filter((f) => f.id !== p.id);
+              return [...withoutPending, ...(data.files as EncounterFile[])];
+            });
+
+            return result;
+          } catch (err) {
+            console.error(`[upload] Failed to resume ${p.name}:`, err);
+            throw err;
+          }
+        }),
+      );
+
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      const failed = results.length - succeeded;
+
+      if (succeeded > 0) {
+        toast.success(`${succeeded} file(s) uploaded successfully.`);
+      }
+      if (failed > 0) {
+        toast.warning(
+          `${failed} file(s) failed. They will retry automatically.`,
+        );
+      }
+    })();
+  }, [visitId, setFiles]);
+
   const handleRecordingComplete = useCallback(
     async (blob: Blob) => {
       setAudioBlob(blob);
 
-      // Upload directly to Supabase Storage (bypasses Vercel 4.5 MB limit)
+      // Convert to WAV for reliable ElevenLabs compatibility
+      let uploadBlob: Blob;
+      let uploadName: string;
       try {
-        // Convert to WAV for reliable ElevenLabs compatibility
-        // (MediaRecorder m4a/webm blobs can have malformed containers)
-        let uploadBlob: Blob;
-        let uploadName: string;
-        let uploadType: string;
-        try {
-          const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-          uploadBlob = await convertToWav(blob);
-          uploadName = "recording.wav";
-          uploadType = "audio/wav";
-        } catch (convErr) {
-          // WAV conversion failed — upload original blob so audio is never lost
-          console.warn(
-            "[recording] WAV conversion failed, uploading original blob:",
-            convErr,
-          );
-          uploadBlob = blob;
-          const ext = mimeToExt(blob.type);
-          uploadName = `recording${ext}`;
-          uploadType = blob.type || "audio/webm";
-        }
+        const { convertToWav } = await import("@/lib/audio/convert-to-wav");
+        uploadBlob = await convertToWav(blob);
+        uploadName = "recording.wav";
+      } catch (convErr) {
+        // WAV conversion failed — upload original blob so audio is never lost
+        console.warn(
+          "[recording] WAV conversion failed, uploading original blob:",
+          convErr,
+        );
+        uploadBlob = blob;
+        const ext = mimeToExt(blob.type);
+        uploadName = `recording${ext}`;
+      }
 
-        const { path, fileId } = await uploadToStorage(uploadBlob, uploadName, {
-          encounterId: visitId,
+      // Show recording in files list immediately (before upload)
+      const pendingId = crypto.randomUUID();
+      setFiles((prev: EncounterFile[]) => [
+        ...prev,
+        {
+          id: pendingId,
+          name: uploadName,
+          size: uploadBlob.size,
+          type: uploadBlob.type,
+          source: "recording",
+          pending: true,
+        },
+      ]);
+
+      // Upload with IndexedDB persistence and retry
+      const { uploadWithPersistence } =
+        await import("@/lib/upload/upload-with-persistence");
+      const { savePendingUpload } =
+        await import("@/lib/indexeddb/pending-uploads");
+      const { toast } = await import("sonner");
+
+      // Save to IndexedDB first
+      try {
+        await savePendingUpload({
+          id: pendingId,
+          visitId,
+          blob: uploadBlob,
+          name: uploadName,
+          type: uploadBlob.type,
+          size: uploadBlob.size,
+          source: "recording",
+          timestamp: Date.now(),
         });
+      } catch (idbErr) {
+        console.error("[recording] Failed to save to IndexedDB:", idbErr);
+      }
 
-        audioStoragePathRef.current = path;
+      try {
+        const result = await uploadWithPersistence(
+          uploadBlob,
+          uploadName,
+          visitId,
+          {
+            source: "recording",
+            onRetry: (attempt, max) => {
+              toast.error(
+                `Audio upload failed, retrying (${attempt}/${max})...`,
+                {
+                  id: "audio-upload-retry",
+                  duration: 3000,
+                },
+              );
+            },
+          },
+        );
 
-        // Register file metadata with the API (small JSON, no file bytes)
+        audioStoragePathRef.current = result.path;
+
+        // Register file metadata with the API
         const res = await fetch(`/api/encounters/${visitId}/files`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            files: [
-              {
-                id: fileId,
-                name: uploadName,
-                size: uploadBlob.size,
-                type: uploadType,
-                path,
-                source: "recording",
-              },
-            ],
-          }),
+          body: JSON.stringify({ files: [result] }),
         });
 
         if (!res.ok) {
-          console.error("Audio metadata registration failed:", res.status);
-          return;
+          throw new Error(`Metadata registration failed: ${res.status}`);
         }
 
         const data = await res.json();
-        setFiles((prev: EncounterFile[]) => [
-          ...prev,
-          ...(data.files as EncounterFile[]),
-        ]);
+
+        // Replace pending file with uploaded file
+        setFiles((prev: EncounterFile[]) => {
+          const withoutPending = prev.filter((f) => f.id !== pendingId);
+          return [...withoutPending, ...(data.files as EncounterFile[])];
+        });
+
+        toast.dismiss("audio-upload-retry");
       } catch (err) {
-        console.error("Audio upload error:", err);
+        console.error("[recording] Upload failed after all retries:", err);
+        toast.error(
+          "Audio upload failed. The recording is safely stored and will retry when you return.",
+          { id: "audio-upload-retry", duration: Infinity },
+        );
       }
     },
     [visitId, setFiles],

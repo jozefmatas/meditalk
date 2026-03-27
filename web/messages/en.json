@@ -132,7 +132,7 @@
       "leaveWhileRecordingStay": "Stay on page",
       "leaveWhileRecordingLeave": "Leave page",
       "micError": "Could not access microphone. Check permissions and try again.",
-      "generatingEncounter": "Generating your encounter",
+      "generatingEncounter": "Generating",
       "regenerating": "Regenerating note...",
       "note": "Note",
       "addDocument": "Add document",

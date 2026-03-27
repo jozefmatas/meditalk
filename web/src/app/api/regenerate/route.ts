@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import {
   anthropic,
-  GENERATION_MODEL,
+  GENERATION_MODELS,
+  MODEL_FALLBACK_DELAY,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
       | Record<string, unknown>
       | undefined;
 
-    let streamModel: string;
+    let streamModels: readonly string[];
     let systemPrompt: string;
     let userMessage: string;
     let reuseLetterFromVisit = false;
@@ -158,7 +159,7 @@ export async function POST(request: NextRequest) {
         .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
         .join("\n");
 
-      streamModel = HAIKU_MODEL;
+      streamModels = [HAIKU_MODEL];
 
       systemPrompt = `You reorganize medical documentation between template formats.
 Rules:
@@ -179,7 +180,7 @@ Rules:
       }
     } else {
       // ─── FULL PATH: Generate from transcript with Opus ───
-      streamModel = GENERATION_MODEL;
+      streamModels = GENERATION_MODELS;
 
       if (cachedAnalysis?.inferredSpecialty) {
         clinicalAnalysis = {
@@ -217,9 +218,7 @@ Rules:
       );
     }
 
-    // Stream Anthropic response as SSE (with retry on overloaded errors)
-    const STREAM_MAX_RETRIES = 3;
-    const STREAM_RETRY_DELAYS = [2000, 5000, 10000];
+    // Stream Anthropic response as SSE (with model fallback on overloaded errors)
 
     const encoder = new TextEncoder();
     const sectionIdSet = new Set(allIds);
@@ -300,8 +299,12 @@ Rules:
             ReturnType<typeof anthropic>["messages"]["stream"]
           >["finalMessage"]
         >;
+        let usedModel = streamModels[0];
 
-        for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
+        // Try each model in the fallback chain; on overload, move to the next model
+        for (let mi = 0; mi < streamModels.length; mi++) {
+          const model = streamModels[mi];
+
           sendEvent({
             type: "streaming_start",
             sectionIds: allIds,
@@ -313,7 +316,7 @@ Rules:
 
           try {
             const stream = anthropic().messages.stream({
-              model: streamModel,
+              model,
               max_tokens: 8192,
               system: systemPrompt,
               messages: [{ role: "user", content: userMessage }],
@@ -325,17 +328,17 @@ Rules:
             });
 
             finalMessage = await stream.finalMessage();
+            usedModel = model;
             break; // Success
           } catch (err) {
             const isOverloaded =
               err instanceof Error &&
               err.message.toLowerCase().includes("overloaded");
-            if (isOverloaded && attempt < STREAM_MAX_RETRIES) {
-              const delay = STREAM_RETRY_DELAYS[attempt];
+            if (isOverloaded && mi < streamModels.length - 1) {
               console.warn(
-                `[regenerate] Overloaded, retrying in ${delay}ms (attempt ${attempt + 1}/${STREAM_MAX_RETRIES})`,
+                `[regenerate] ${model} overloaded, falling back to ${streamModels[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
               );
-              await new Promise((r) => setTimeout(r, delay));
+              await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
               continue;
             }
             throw err;
@@ -432,7 +435,7 @@ Rules:
             userId,
             visitId,
             provider: "anthropic",
-            model: streamModel,
+            model: usedModel,
             operation: reuseLetterFromVisit
               ? "reformat_template"
               : "generate_template",

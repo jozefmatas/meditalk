@@ -3,7 +3,8 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
 import {
   anthropic,
-  GENERATION_MODEL,
+  GENERATION_MODELS,
+  MODEL_FALLBACK_DELAY,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
 } from "@/lib/anthropic";
@@ -378,10 +379,8 @@ export async function POST(request: NextRequest) {
       `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
     );
 
-    // Stream Anthropic response as SSE (with retry on overloaded errors)
+    // Stream Anthropic response as SSE (with model fallback on overloaded errors)
     lap("generation-start");
-    const STREAM_MAX_RETRIES = 3;
-    const STREAM_RETRY_DELAYS = [2000, 5000, 10000];
 
     const encoder = new TextEncoder();
     const sectionIdSet = new Set(allIds);
@@ -476,8 +475,12 @@ export async function POST(request: NextRequest) {
             ReturnType<typeof anthropic>["messages"]["stream"]
           >["finalMessage"]
         >;
+        let usedModel: string = GENERATION_MODELS[0];
 
-        for (let attempt = 0; attempt <= STREAM_MAX_RETRIES; attempt++) {
+        // Try each model in the fallback chain; on overload, move to the next model
+        for (let mi = 0; mi < GENERATION_MODELS.length; mi++) {
+          const model = GENERATION_MODELS[mi];
+
           // Send streaming_start on each attempt so client resets streamed sections
           sendEvent({
             type: "streaming_start",
@@ -490,7 +493,7 @@ export async function POST(request: NextRequest) {
 
           try {
             const stream = anthropic().messages.stream({
-              model: GENERATION_MODEL,
+              model,
               max_tokens: 8192,
               system: systemPrompt,
               messages: [{ role: "user", content: userMessage }],
@@ -502,17 +505,17 @@ export async function POST(request: NextRequest) {
             });
 
             finalMessage = await stream.finalMessage();
+            usedModel = model;
             break; // Success
           } catch (err) {
             const isOverloaded =
               err instanceof Error &&
               err.message.toLowerCase().includes("overloaded");
-            if (isOverloaded && attempt < STREAM_MAX_RETRIES) {
-              const delay = STREAM_RETRY_DELAYS[attempt];
+            if (isOverloaded && mi < GENERATION_MODELS.length - 1) {
               console.warn(
-                `[generate] Overloaded, retrying in ${delay}ms (attempt ${attempt + 1}/${STREAM_MAX_RETRIES})`,
+                `[generate] ${model} overloaded, falling back to ${GENERATION_MODELS[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
               );
-              await new Promise((r) => setTimeout(r, delay));
+              await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
               continue;
             }
             throw err;
@@ -626,7 +629,7 @@ export async function POST(request: NextRequest) {
             userId,
             visitId,
             provider: "anthropic",
-            model: GENERATION_MODEL,
+            model: usedModel,
             operation: "generate_template",
             inputTokens,
             outputTokens,

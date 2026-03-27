@@ -556,7 +556,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const handlePause = useCallback(() => {
       const recorder = mediaRecorderRef.current;
       if (recorder?.state === "recording") {
-        recorder.pause();
+        // STOP (not pause) to finalize the current recording segment
+        recorder.stop(); // This triggers onstop → blob created → onRecordingComplete
       }
       // Close Scribe on pause to avoid transcribing silence
       stopScribe();
@@ -566,18 +567,35 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     }, [pauseTimer, onRecordingStateChange, stopScribe]);
 
     const handleResume = useCallback(() => {
-      const recorder = mediaRecorderRef.current;
-      if (recorder?.state === "paused") {
-        recorder.resume();
-      }
+      // Start a NEW recorder for the next segment (previous one was stopped on pause)
+      const stream = recordingStreamRef.current;
+      if (!stream) return;
+
+      const mimeType = mimeTypeRef.current;
+      const recorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = recorder;
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const blob = buildBlob();
+        chunksRef.current = [];
+        if (blob) onRecordingCompleteRef.current(blob);
+      };
+
+      recorder.start();
+
       // Reconnect Scribe using the existing recording stream
-      if (recordingStreamRef.current) {
-        startScribe(recordingStreamRef.current);
-      }
+      startScribe(stream);
       startTimer();
       setState("recording");
       onRecordingStateChange?.("recording");
-    }, [startTimer, onRecordingStateChange, startScribe]);
+    }, [startTimer, onRecordingStateChange, startScribe, buildBlob]);
 
     // Navigation guard dialog — shared between recording & paused states
     const navGuardDialog = (

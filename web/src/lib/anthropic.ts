@@ -202,9 +202,23 @@ export function buildTemplateUserMessage(
 }
 
 /**
+ * Model fallback chain for generation — if the primary model is overloaded,
+ * try the next one in the list before giving up.
+ */
+export const GENERATION_MODELS = [
+  "claude-opus-4-6",
+  "claude-sonnet-4-5-20250929",
+  "claude-sonnet-4-20250514",
+] as const;
+
+export const GENERATION_MODEL = GENERATION_MODELS[0];
+
+/** Delay (ms) before retrying with the next fallback model. */
+export const MODEL_FALLBACK_DELAY = 2000;
+
+/**
  * Generate a medical document from a template, transcript chunks, and optional doctor notes.
  */
-export const GENERATION_MODEL = "claude-opus-4-6";
 
 export async function generateFromTemplate(
   chunks: string[],
