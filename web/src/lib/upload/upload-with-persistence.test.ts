@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { uploadWithPersistence, resumePendingUpload } from "./upload-with-persistence";
+import {
+  uploadWithPersistence,
+  resumePendingUpload,
+} from "./upload-with-persistence";
 import type { PendingUpload } from "@/lib/indexeddb/pending-uploads";
 
 // Mock the dependencies
@@ -44,11 +47,7 @@ describe("uploadWithPersistence", () => {
       fileId: "file-123",
     });
 
-    const promise = uploadWithPersistence(
-      mockBlob,
-      mockFileName,
-      mockVisitId,
-    );
+    const promise = uploadWithPersistence(mockBlob, mockFileName, mockVisitId);
 
     // Let savePendingUpload be called
     await vi.runOnlyPendingTimersAsync();
@@ -102,12 +101,9 @@ describe("uploadWithPersistence", () => {
 
     const onRetry = vi.fn();
 
-    const promise = uploadWithPersistence(
-      mockBlob,
-      mockFileName,
-      mockVisitId,
-      { onRetry },
-    );
+    const promise = uploadWithPersistence(mockBlob, mockFileName, mockVisitId, {
+      onRetry,
+    });
 
     // Fast-forward through retry delays
     await vi.runAllTimersAsync();
@@ -126,11 +122,9 @@ describe("uploadWithPersistence", () => {
       new Error("Persistent failure"),
     );
 
-    const promise = uploadWithPersistence(
-      mockBlob,
-      mockFileName,
-      mockVisitId,
-    );
+    const promise = uploadWithPersistence(mockBlob, mockFileName, mockVisitId);
+    // Prevent unhandled rejection during timer advancement
+    promise.catch(() => {});
 
     // Fast-forward through all retry delays
     await vi.runAllTimersAsync();
@@ -211,11 +205,7 @@ describe("uploadWithPersistence", () => {
       return originalSetTimeout(fn, 0);
     }) as typeof setTimeout);
 
-    const promise = uploadWithPersistence(
-      mockBlob,
-      mockFileName,
-      mockVisitId,
-    );
+    const promise = uploadWithPersistence(mockBlob, mockFileName, mockVisitId);
 
     await vi.runAllTimersAsync();
     await promise;

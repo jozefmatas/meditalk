@@ -1,166 +1,231 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useTranslations } from "next-intl";
+import Link from "next/link";
+import { useTranslations, useLocale } from "next-intl";
 import { AppShell } from "@/components/nav/app-shell";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/shared/card";
 import { Button } from "@/components/shared/button";
+import { Badge } from "@/components/shared/badge";
 import { Skeleton } from "@/components/shared/skeleton";
-import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Add01Icon,
-  Folder01Icon,
-  Tick02Icon,
-  FileEditIcon,
-  Loading03Icon,
-} from "@hugeicons/core-free-icons";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/shared/select";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Loading03Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { useHeaderActions } from "@/components/nav/header-actions-context";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
-import type { EncounterListResponse } from "@/lib/types";
+import {
+  useEncounterStats,
+  type TimePeriod,
+} from "@/hooks/use-encounter-stats";
+import { TemplateIcon } from "@/components/templates/template-icon";
+import {
+  sortTemplatesByUsage,
+  incrementTemplateUsage,
+  fetchTemplateUsage,
+} from "@/lib/templates/usage";
+import { useLocalizedHref } from "@/hooks/use-localized-href";
+import type { Template } from "@/lib/templates/types";
 
-interface Stats {
-  total: number;
-  started: number;
-  completed: number;
-}
-
-export default function DashboardPage() {
-  const t = useTranslations("dashboard");
-  const tEncounters = useTranslations("encounters");
+export default function HomePage() {
+  const t = useTranslations("home");
   const tNav = useTranslations("nav");
+  const locale = useLocale();
+  const getHref = useLocalizedHref();
+  const { setHeaderActions } = useHeaderActions();
   const { createEncounter, isCreating } = useCreateEncounter();
 
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>("week");
+  const { stats, isLoading: isStatsLoading } = useEncounterStats(timePeriod);
 
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [isTemplatesLoading, setIsTemplatesLoading] = useState(true);
+  const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(
+    null,
+  );
+
+  // Fetch templates + usage counts in parallel
   useEffect(() => {
-    async function fetchStats() {
+    async function loadTemplates() {
       try {
-        const [allRes, startedRes, completedRes] = await Promise.all([
-          fetch("/api/encounters?limit=1"),
-          fetch("/api/encounters?limit=1&status=started"),
-          fetch("/api/encounters?limit=1&status=completed"),
+        const [templatesRes, usage] = await Promise.all([
+          fetch("/api/templates"),
+          fetchTemplateUsage(),
         ]);
+        if (!templatesRes.ok) throw new Error("Failed to fetch templates");
+        const data: Template[] = await templatesRes.json();
 
-        const all: EncounterListResponse = await allRes.json();
-        const startedData: EncounterListResponse = await startedRes.json();
-        const completedData: EncounterListResponse = await completedRes.json();
-
-        setStats({
-          total: all.total,
-          started: startedData.total,
-          completed: completedData.total,
-        });
+        // Sort by server-side usage and take top 4
+        const sorted = sortTemplatesByUsage(data, usage);
+        setTemplates(sorted.slice(0, 4));
       } catch {
-        // Silently fail — stats are non-critical
+        // Silently fail — templates are non-critical
       } finally {
-        setIsLoading(false);
+        setIsTemplatesLoading(false);
       }
     }
-    fetchStats();
+    loadTemplates();
   }, []);
 
+  // Set header actions (New encounter button)
+  useEffect(() => {
+    setHeaderActions(
+      <Button size="lg" onClick={() => createEncounter()} disabled={isCreating}>
+        {isCreating ? (
+          <HugeiconsIcon
+            icon={Loading03Icon}
+            size={16}
+            className="animate-spin"
+          />
+        ) : null}
+        {tNav("newEncounter")}
+      </Button>,
+    );
+
+    return () => setHeaderActions(null);
+  }, [createEncounter, isCreating, setHeaderActions, tNav]);
+
+  const handleUseTemplate = (templateId: string) => {
+    setCreatingTemplateId(templateId);
+    incrementTemplateUsage(templateId);
+    createEncounter(templateId);
+  };
+
   return (
-    <AppShell>
-      <div className="max-w-4xl space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {t("welcome")}
-          </h1>
-        </div>
+    <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0">
+      <div className="flex flex-1 items-start justify-center">
+        <div className="flex w-full max-w-3xl flex-col gap-6">
+          {/* Stats section */}
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background px-5 py-6 md:static md:bg-transparent">
+            <div className="flex flex-1 gap-[15%]">
+              <div className="flex items-end gap-1">
+                {isStatsLoading ? (
+                  <Skeleton className="h-6 w-12" />
+                ) : (
+                  <span className="text-2xl md:text-3xl leading-none">
+                    {stats?.count ?? 0}
+                  </span>
+                )}
+                <span className="text-xs leading-none opacity-65">
+                  {t("encounters")}
+                </span>
+              </div>
+              <div className="flex items-end gap-1">
+                {isStatsLoading ? (
+                  <Skeleton className="h-6 w-12" />
+                ) : (
+                  <span className="text-2xl md:text-3xl leading-none">
+                    {stats?.minsSaved ?? 0}
+                  </span>
+                )}
+                <span className="text-xs leading-none opacity-65">
+                  {t("minsSaved")}
+                </span>
+              </div>
+            </div>
 
-        {/* Stats cards */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tEncounters("title")}
-              </CardTitle>
-              <HugeiconsIcon
-                icon={Folder01Icon}
-                size={16}
-                className="text-muted-foreground"
-              />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-16" />
-              ) : (
-                <div className="text-2xl font-bold">{stats?.total ?? 0}</div>
-              )}
-            </CardContent>
-          </Card>
+            {/* Time period selector */}
+            <Select
+              value={timePeriod}
+              onValueChange={(v) => setTimePeriod(v as TimePeriod)}
+            >
+              <SelectTrigger className="w-auto">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="week">{t("period.week")}</SelectItem>
+                <SelectItem value="month">{t("period.month")}</SelectItem>
+                <SelectItem value="year">{t("period.year")}</SelectItem>
+                <SelectItem value="all">{t("period.all")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tEncounters("status.started")}
-              </CardTitle>
-              <HugeiconsIcon
-                icon={FileEditIcon}
-                size={16}
-                className="text-muted-foreground"
-              />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-16" />
-              ) : (
-                <div className="text-2xl font-bold">{stats?.started ?? 0}</div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Templates section */}
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between px-5">
+              <h2 className="text-2xl leading-none">{t("templates.title")}</h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                asChild
+                className="px-0 hover:bg-transparent hover:opacity-75"
+              >
+                <Link href={getHref("/templates")}>
+                  {t("templates.seeAll")}
+                  <HugeiconsIcon icon={ArrowRight01Icon} size={16} />
+                </Link>
+              </Button>
+            </div>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {tEncounters("status.completed")}
-              </CardTitle>
-              <HugeiconsIcon
-                icon={Tick02Icon}
-                size={16}
-                className="text-muted-foreground"
-              />
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <Skeleton className="h-8 w-16" />
+            {/* Templates grid */}
+            <div className="flex flex-col gap-4">
+              {isTemplatesLoading ? (
+                // Loading skeletons
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {[...Array(4)].map((_, i) => (
+                    <Skeleton key={i} className="h-44 rounded-2xl" />
+                  ))}
+                </div>
+              ) : templates.length === 0 ? (
+                <p className="px-5 text-sm text-muted-foreground">
+                  No templates found
+                </p>
               ) : (
-                <div className="text-2xl font-bold">
-                  {stats?.completed ?? 0}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {templates.map((template) => {
+                    const specialty = template.specialties?.[0];
+                    const specialtyLabel = specialty
+                      ? t(`specialties.${specialty}`)
+                      : "General";
+
+                    return (
+                      <div
+                        key={template.id}
+                        className="flex flex-col gap-4 rounded-2xl border bg-accent/50 p-5"
+                      >
+                        <div className="flex items-center gap-4">
+                          <TemplateIcon specialty={specialty} size={56} />
+                          <div className="flex min-w-0 flex-1 flex-col gap-2">
+                            <p className="text-sm font-medium leading-tight">
+                              {template.name[locale] ??
+                                template.name.sk ??
+                                template.id}
+                            </p>
+                            <Badge
+                              variant="status-started"
+                              className="w-fit text-xs"
+                            >
+                              {specialtyLabel}
+                            </Badge>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          onClick={() => handleUseTemplate(template.id)}
+                          disabled={isCreating}
+                        >
+                          {creatingTemplateId === template.id ? (
+                            <HugeiconsIcon
+                              icon={Loading03Icon}
+                              size={16}
+                              className="animate-spin"
+                            />
+                          ) : null}
+                          {t("templates.use")}
+                        </Button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* New Encounter CTA */}
-        <Card>
-          <CardContent className="flex items-center justify-between py-6">
-            <div>
-              <h3 className="font-medium">{tNav("newEncounter")}</h3>
-              <p className="text-sm text-muted-foreground">
-                {tEncounters("empty.description")}
-              </p>
             </div>
-            <Button onClick={() => createEncounter()} disabled={isCreating}>
-              {isCreating ? (
-                <HugeiconsIcon
-                  icon={Loading03Icon}
-                  size={16}
-                  className="animate-spin"
-                />
-              ) : (
-                <HugeiconsIcon icon={Add01Icon} size={16} />
-              )}
-              {tNav("newEncounter")}
-            </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </AppShell>
   );

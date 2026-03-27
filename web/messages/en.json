@@ -217,7 +217,25 @@
   },
   "home": {
     "deployNow": "Deploy Now",
-    "documentation": "Documentation"
+    "documentation": "Documentation",
+    "encounters": "Encounters",
+    "minsSaved": "Mins saved",
+    "period": {
+      "week": "This week",
+      "month": "This month",
+      "year": "This year",
+      "all": "All time"
+    },
+    "templates": {
+      "title": "Templates",
+      "seeAll": "See all",
+      "use": "Use"
+    },
+    "specialties": {
+      "cardiology": "Cardiology",
+      "neurology": "Neurology",
+      "general": "General"
+    }
   },
   "login": {
     "title": "Login or signup",

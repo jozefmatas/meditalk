@@ -217,7 +217,25 @@
   },
   "home": {
     "deployNow": "Nasadiť teraz",
-    "documentation": "Dokumentácia"
+    "documentation": "Dokumentácia",
+    "encounters": "Návštevy",
+    "minsSaved": "Ušetrených minút",
+    "period": {
+      "week": "Tento týždeň",
+      "month": "Tento mesiac",
+      "year": "Tento rok",
+      "all": "Všetko"
+    },
+    "templates": {
+      "title": "Šablóny",
+      "seeAll": "Zobraziť všetky",
+      "use": "Použiť"
+    },
+    "specialties": {
+      "cardiology": "Kardiológia",
+      "neurology": "Neurológia",
+      "general": "Všeobecné"
+    }
   },
   "login": {
     "title": "Prihlásenie",
