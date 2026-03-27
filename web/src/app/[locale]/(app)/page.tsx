@@ -100,7 +100,7 @@ export default function HomePage() {
       <div className="flex flex-1 items-start justify-center">
         <div className="flex w-full max-w-3xl flex-col gap-6">
           {/* Stats section */}
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background px-5 py-6 md:static md:bg-transparent">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background py-6 md:static md:bg-transparent md:px-5">
             <div className="flex flex-1 gap-[15%]">
               <div className="flex items-end gap-1">
                 {isStatsLoading ? (
@@ -133,7 +133,7 @@ export default function HomePage() {
               value={timePeriod}
               onValueChange={(v) => setTimePeriod(v as TimePeriod)}
             >
-              <SelectTrigger className="w-auto">
+              <SelectTrigger className="hidden w-auto md:flex">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -147,7 +147,7 @@ export default function HomePage() {
 
           {/* Templates section */}
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between px-5">
+            <div className="flex items-center justify-between md:px-5">
               <h2 className="text-2xl leading-none">{t("templates.title")}</h2>
               <Button
                 variant="ghost"
