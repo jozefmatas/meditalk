@@ -106,7 +106,7 @@ export function TemplatesList({ templates }: TemplatesListProps) {
     <div className="flex flex-1 items-start justify-center">
       <div className="flex w-full max-w-3xl flex-col gap-6">
         {/* Filter bar */}
-        <div className="sticky top-0 z-10 flex gap-4 border-b border-border bg-background py-6 md:px-4">
+        <div className="sticky top-0 z-10 flex gap-4 border-b border-border bg-background py-4 md:py-6 md:px-4">
           <Select value={specialty} onValueChange={setSpecialty}>
             <SelectTrigger label={t("specialty")} className="hidden md:flex">
               <SelectValue />
