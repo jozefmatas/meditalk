@@ -100,9 +100,9 @@ export default function HomePage() {
       <div className="flex flex-1 items-start justify-center">
         <div className="flex w-full max-w-3xl flex-col gap-6">
           {/* Stats section */}
-          <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background py-6 md:static md:bg-transparent md:px-5">
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background py-6 md:pl-4 pr-0 md:static md:bg-transparent">
             <div className="flex flex-1 gap-[15%]">
-              <div className="flex items-end gap-1">
+              <div className="flex items-baseline gap-1">
                 {isStatsLoading ? (
                   <Skeleton className="h-6 w-12" />
                 ) : (
@@ -114,7 +114,7 @@ export default function HomePage() {
                   {t("encounters")}
                 </span>
               </div>
-              <div className="flex items-end gap-1">
+              <div className="flex items-baseline gap-1">
                 {isStatsLoading ? (
                   <Skeleton className="h-6 w-12" />
                 ) : (
@@ -147,7 +147,7 @@ export default function HomePage() {
 
           {/* Templates section */}
           <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between md:px-5">
+            <div className="flex items-center justify-between md:pl-4 pr-0">
               <h2 className="text-2xl leading-none">{t("templates.title")}</h2>
               <Button
                 variant="ghost"
@@ -186,7 +186,7 @@ export default function HomePage() {
                     return (
                       <div
                         key={template.id}
-                        className="flex flex-col gap-4 rounded-2xl border bg-accent/50 p-5"
+                        className="flex flex-col gap-4 rounded-2xl border bg-accent/50 p-4"
                       >
                         <div className="flex items-center gap-4">
                           <TemplateIcon specialty={specialty} size={56} />
