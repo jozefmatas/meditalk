@@ -23,7 +23,7 @@ import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+const SONNET_MODEL = "claude-sonnet-4-5-20250929";
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: "English",
   sk: "Slovak",
@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
         .join("\n");
 
-      streamModels = [HAIKU_MODEL];
+      streamModels = [SONNET_MODEL];
 
       systemPrompt = `You reorganize medical documentation between template formats.
 Rules:
