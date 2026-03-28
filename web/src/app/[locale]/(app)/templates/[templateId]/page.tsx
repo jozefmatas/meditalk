@@ -45,7 +45,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
         <div className="flex flex-1 items-start justify-center">
           <div className="flex w-full max-w-3xl flex-col gap-6 pt-6">
             <Skeleton className="h-10 w-64" />
-            <Skeleton className="h-4 w-96" />
+            <Skeleton className="h-4 w-full max-w-96" />
             <Skeleton className="h-64 w-full rounded-xl" />
           </div>
         </div>
@@ -96,7 +96,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
 
             {/* Description */}
             {(template.description[locale] ?? template.description.sk) && (
-              <p className="text-base leading-none text-foreground/65">
+              <p className="text-base text-foreground/65">
                 {template.description[locale] ?? template.description.sk}
               </p>
             )}
