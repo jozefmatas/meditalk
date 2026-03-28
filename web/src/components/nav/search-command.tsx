@@ -1,17 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
-import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Home01Icon,
-  Add01Icon,
-  Settings01Icon,
-} from "@hugeicons/core-free-icons";
+import { useTranslations, useLocale } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
-import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import type { Encounter, EncounterListResponse } from "@/lib/types";
+import type { Template } from "@/lib/templates/types";
 import {
   CommandDialog,
   Command,
@@ -20,7 +14,6 @@ import {
   CommandEmpty,
   CommandGroup,
   CommandItem,
-  CommandSeparator,
 } from "@/components/shared/command";
 
 interface SearchCommandProps {
@@ -30,14 +23,16 @@ interface SearchCommandProps {
 
 export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
   const t = useTranslations("encounters");
-  const tNav = useTranslations("nav");
+  const tTemplates = useTranslations("templates");
   const tCommon = useTranslations("common");
+  const locale = useLocale();
   const router = useRouter();
   const getHref = useLocalizedHref();
 
-  const { createEncounter } = useCreateEncounter();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Encounter[]>([]);
+  const [encounterResults, setEncounterResults] = useState<Encounter[]>([]);
+  const [recentEncounters, setRecentEncounters] = useState<Encounter[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
@@ -52,10 +47,29 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onOpenChange]);
 
-  // Debounced search
+  // Fetch templates and recent encounters once when dialog opens
+  useEffect(() => {
+    if (!open) return;
+
+    if (templates.length === 0) {
+      fetch("/api/templates")
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data: Template[]) => setTemplates(data))
+        .catch(() => {});
+    }
+
+    fetch("/api/encounters?limit=5&sortBy=visit_date&sortOrder=desc")
+      .then((res) => (res.ok ? res.json() : { encounters: [] }))
+      .then((data: EncounterListResponse) =>
+        setRecentEncounters(data.encounters),
+      )
+      .catch(() => {});
+  }, [open, templates.length]);
+
+  // Debounced encounter search
   useEffect(() => {
     if (!query.trim()) {
-      setResults([]);
+      setEncounterResults([]);
       return;
     }
 
@@ -69,7 +83,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
         const res = await fetch(`/api/encounters?${params}`);
         if (res.ok) {
           const data: EncounterListResponse = await res.json();
-          setResults(data.encounters);
+          setEncounterResults(data.encounters);
         }
       } catch {
         // Silently fail
@@ -80,6 +94,21 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
 
     return () => clearTimeout(timeout);
   }, [query]);
+
+  // Filter templates client-side
+  const filteredTemplates = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return templates.filter((tmpl) => {
+      const name = (tmpl.name[locale] ?? tmpl.name.sk ?? "").toLowerCase();
+      const desc = (
+        tmpl.description[locale] ??
+        tmpl.description.sk ??
+        ""
+      ).toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    });
+  }, [query, templates, locale]);
 
   const navigate = useCallback(
     (href: string) => {
@@ -97,8 +126,12 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
     });
   };
 
+  const hasQuery = query.trim().length > 0;
+  const hasResults =
+    encounterResults.length > 0 || filteredTemplates.length > 0;
+
   return (
-    <CommandDialog open={open} onOpenChange={onOpenChange}>
+    <CommandDialog open={open} onOpenChange={onOpenChange} className="top-16">
       <Command shouldFilter={false}>
         <CommandInput
           placeholder={t("searchPlaceholder")}
@@ -106,15 +139,18 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
           onValueChange={setQuery}
         />
         <CommandList>
-          <CommandEmpty>
-            {isSearching ? tCommon("loading") : t("empty.title")}
-          </CommandEmpty>
+          {hasQuery && !hasResults && (
+            <CommandEmpty>
+              {isSearching ? tCommon("loading") : t("empty.title")}
+            </CommandEmpty>
+          )}
 
-          {results.length > 0 && (
+          {encounterResults.length > 0 && (
             <CommandGroup heading={t("title")}>
-              {results.map((visit) => (
+              {encounterResults.map((visit) => (
                 <CommandItem
                   key={visit.id}
+                  value={visit.id}
                   onSelect={() => navigate(getHref(`/encounters/${visit.id}`))}
                 >
                   <span className="flex-1 truncate">
@@ -129,27 +165,41 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
             </CommandGroup>
           )}
 
-          <CommandSeparator />
+          {filteredTemplates.length > 0 && (
+            <CommandGroup heading={tTemplates("title")}>
+              {filteredTemplates.map((tmpl) => (
+                <CommandItem
+                  key={tmpl.id}
+                  value={tmpl.id}
+                  onSelect={() => navigate(getHref(`/templates/${tmpl.id}`))}
+                >
+                  <span className="flex-1 truncate">
+                    {tmpl.name[locale] ?? tmpl.name.sk ?? tmpl.id}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
 
-          <CommandGroup heading={tNav("dashboard")}>
-            <CommandItem onSelect={() => navigate(getHref(""))}>
-              <HugeiconsIcon icon={Home01Icon} size={16} />
-              <span>{tNav("dashboard")}</span>
-            </CommandItem>
-            <CommandItem
-              onSelect={() => {
-                onOpenChange(false);
-                createEncounter();
-              }}
-            >
-              <HugeiconsIcon icon={Add01Icon} size={16} />
-              <span>{tNav("newEncounter")}</span>
-            </CommandItem>
-            <CommandItem onSelect={() => navigate(getHref("/settings"))}>
-              <HugeiconsIcon icon={Settings01Icon} size={16} />
-              <span>{tNav("settings")}</span>
-            </CommandItem>
-          </CommandGroup>
+          {!hasQuery && recentEncounters.length > 0 && (
+            <CommandGroup heading={t("title")}>
+              {recentEncounters.map((visit) => (
+                <CommandItem
+                  key={visit.id}
+                  value={visit.id}
+                  onSelect={() => navigate(getHref(`/encounters/${visit.id}`))}
+                >
+                  <span className="flex-1 truncate">
+                    {visit.title || t("untitled")}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {visit.patient_name && `${visit.patient_name} · `}
+                    {formatDate(visit.visit_date)}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
         </CommandList>
       </Command>
     </CommandDialog>
