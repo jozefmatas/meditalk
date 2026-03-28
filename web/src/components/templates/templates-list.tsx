@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Fragment, useState, useMemo } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -148,49 +148,55 @@ export function TemplatesList({ templates }: TemplatesListProps) {
               );
 
               return (
-                <div key={group.specialty} className="flex flex-col gap-4">
+                <Fragment key={group.specialty}>
                   {/* Divider between groups (not before first) */}
                   {groupIndex > 0 && <div className="border-t border-border" />}
 
-                  {/* Specialty header */}
-                  <div className="flex items-center gap-3 md:px-4">
-                    <TemplateIcon specialty={group.specialty} size={56} />
-                    <div className="flex flex-col gap-1">
-                      <h2 className="text-2xl leading-none">
-                        {tHome(`specialties.${group.specialty}`)}
-                      </h2>
-                      <p className="text-xs leading-none text-foreground/65">
-                        {t("templatesCount", {
-                          count: group.templates.length,
-                        })}
-                      </p>
+                  {/* Specialty group */}
+                  <div className="flex flex-col gap-4">
+                    {/* Specialty header */}
+                    <div className="flex items-center gap-3 md:px-4">
+                      <TemplateIcon specialty={group.specialty} size={56} />
+                      <div className="flex flex-col gap-1">
+                        <h2 className="text-2xl leading-none">
+                          {tHome(`specialties.${group.specialty}`)}
+                        </h2>
+                        <p className="text-xs leading-none text-foreground/65">
+                          {t("templatesCount", {
+                            count: group.templates.length,
+                          })}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Template rows */}
+                    <div className="flex flex-col gap-2">
+                      {group.templates.map((tmpl, i) => (
+                        <div
+                          key={tmpl.id}
+                          className="flex items-center gap-4 rounded-xl border bg-accent/50 px-4 py-3"
+                        >
+                          <div className="flex flex-1 flex-wrap items-start gap-1 md:gap-2">
+                            <span className="text-sm font-medium leading-tight">
+                              {tmpl.name[locale] ?? tmpl.name.sk ?? tmpl.id}
+                            </span>
+                            <Badge
+                              variant="status-started"
+                              className="shrink-0"
+                            >
+                              {t("sectionCount", { count: sectionCounts[i] })}
+                            </Badge>
+                          </div>
+                          <Button variant="outline" size="lg" asChild>
+                            <Link href={getHref(`/templates/${tmpl.id}`)}>
+                              {t("open")}
+                            </Link>
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </div>
-
-                  {/* Template rows */}
-                  <div className="flex flex-col gap-2">
-                    {group.templates.map((tmpl, i) => (
-                      <div
-                        key={tmpl.id}
-                        className="flex items-center gap-4 rounded-xl border bg-accent/50 px-4 py-3"
-                      >
-                        <div className="flex flex-1 flex-wrap items-start gap-1 md:gap-2">
-                          <span className="text-sm font-medium leading-tight">
-                            {tmpl.name[locale] ?? tmpl.name.sk ?? tmpl.id}
-                          </span>
-                          <Badge variant="status-started" className="shrink-0">
-                            {t("sectionCount", { count: sectionCounts[i] })}
-                          </Badge>
-                        </div>
-                        <Button variant="outline" size="lg" asChild>
-                          <Link href={getHref(`/templates/${tmpl.id}`)}>
-                            {t("open")}
-                          </Link>
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                </Fragment>
               );
             })}
           </div>

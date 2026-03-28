@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getUsers } from "@/lib/queries";
 import { formatCost } from "@/lib/pricing";
+import { InviteUserDialog } from "@/components/invite-user-dialog";
+import { DeleteUserDialog } from "@/components/delete-user-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +11,10 @@ export default async function UsersPage() {
 
   return (
     <div className="max-w-6xl space-y-6">
-      <h1 className="text-2xl font-bold">Users</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Users</h1>
+        <InviteUserDialog />
+      </div>
 
       <div className="overflow-hidden rounded-lg border border-border">
         <table className="w-full text-sm">
@@ -30,6 +35,7 @@ export default async function UsersPage() {
               <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                 Total Cost
               </th>
+              <th className="w-10" />
             </tr>
           </thead>
           <tbody>
@@ -60,12 +66,15 @@ export default async function UsersPage() {
                 <td className="px-4 py-3 text-right font-medium">
                   {formatCost(u.total_cost)}
                 </td>
+                <td className="px-2 py-3 text-center">
+                  <DeleteUserDialog userId={u.id} email={u.email} />
+                </td>
               </tr>
             ))}
             {users.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   No users found

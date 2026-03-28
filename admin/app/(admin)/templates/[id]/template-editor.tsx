@@ -542,6 +542,19 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     }
   }
 
+  // ── New template detection ──
+  // A template is "new" if all name values in the initial data are empty
+  const isNewTemplate = useMemo(
+    () => Object.values(initialData.name).every((v) => !v.trim()),
+    [initialData.name],
+  );
+
+  // Name is required for saving — at least one locale must have a name
+  const hasName = useMemo(
+    () => Object.values(name).some((v) => v.trim()),
+    [name],
+  );
+
   // ── Dirty tracking ──
 
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
@@ -583,20 +596,23 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const pendingNavUrl = useRef<string | null>(null);
 
+  // Should we guard navigation? Yes if dirty, or if it's a new unsaved template
+  const shouldGuardNav = isDirty || isNewTemplate;
+
   // Browser tab close / refresh — native dialog (can't be customized)
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (isDirty) {
+      if (shouldGuardNav) {
         e.preventDefault();
       }
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
+  }, [shouldGuardNav]);
 
   // Client-side navigation — intercept link clicks
   useEffect(() => {
-    if (!isDirty) return;
+    if (!shouldGuardNav) return;
 
     function handleClick(e: MouseEvent) {
       const anchor = (e.target as HTMLElement).closest("a[href]");
@@ -611,9 +627,16 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
 
     document.addEventListener("click", handleClick, true);
     return () => document.removeEventListener("click", handleClick, true);
-  }, [isDirty]);
+  }, [shouldGuardNav]);
 
-  function handleConfirmLeave() {
+  async function handleConfirmLeave() {
+    // If this is a new template that was never saved, delete the empty DB row
+    if (isNewTemplate) {
+      await fetch(`/api/templates/${initialData.id}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+
     setShowLeaveDialog(false);
     const url = pendingNavUrl.current;
     pendingNavUrl.current = null;
@@ -901,7 +924,12 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
             Delete
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={saving || !hasName}
+            title={!hasName ? "Enter a template name to save" : undefined}
+          >
             {saving ? <Loader2 className="animate-spin" /> : <Save />}
             {saving ? "Saving..." : saved ? "Saved!" : "Save"}
           </Button>
@@ -1197,10 +1225,13 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Unsaved changes</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isNewTemplate ? "Discard new template?" : "Unsaved changes"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Your changes have not been saved. Are you sure you want to leave
-              this page?
+              {isNewTemplate
+                ? "This template has not been saved yet. Leaving will discard it."
+                : "Your changes have not been saved. Are you sure you want to leave this page?"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1208,7 +1239,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
               variant="destructive"
               onClick={handleConfirmLeave}
             >
-              Yes, leave without saving
+              {isNewTemplate ? "Yes, discard" : "Yes, leave without saving"}
             </AlertDialogAction>
             <AlertDialogCancel>No, keep editing</AlertDialogCancel>
           </AlertDialogFooter>

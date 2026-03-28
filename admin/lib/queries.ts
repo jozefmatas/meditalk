@@ -482,7 +482,10 @@ export async function getTemplates(): Promise<TemplateRow[]> {
     return [];
   }
 
-  return data as TemplateRow[];
+  // Filter out templates with no name (unsaved new templates)
+  return (data as TemplateRow[]).filter((t) =>
+    Object.values(t.name).some((v) => v.trim()),
+  );
 }
 
 export async function getTemplateById(
