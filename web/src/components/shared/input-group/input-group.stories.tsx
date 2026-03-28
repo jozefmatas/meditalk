@@ -169,6 +169,19 @@ export const Disabled: Story = {
   ),
 };
 
+export const Ghost: Story = {
+  render: () => (
+    <InputGroup variant="ghost">
+      <InputGroupAddon align="inline-start">
+        <InputGroupText>
+          <HugeiconsIcon icon={Search01Icon} />
+        </InputGroupText>
+      </InputGroupAddon>
+      <InputGroupInput placeholder="Search templates..." />
+    </InputGroup>
+  ),
+};
+
 export const ButtonSizes: Story = {
   render: () => (
     <div className="flex w-full flex-col gap-4">

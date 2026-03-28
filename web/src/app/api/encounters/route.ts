@@ -35,6 +35,8 @@ export async function GET(request: NextRequest) {
       sortOrder: (searchParams.get("sortOrder") as "asc" | "desc") || "desc",
     };
 
+    const after = searchParams.get("after") || undefined;
+
     const offset = (params.page! - 1) * params.limit!;
 
     // Build query
@@ -43,11 +45,21 @@ export async function GET(request: NextRequest) {
       .select("*", { count: "exact" })
       .eq("user_id", userId);
 
-    // Filter by status (exclude archived by default)
+    // Filter by status — supports comma-separated values (e.g. "to_review,completed")
     if (params.status) {
-      query = query.eq("status", params.status);
+      const statuses = (params.status as string).split(",");
+      if (statuses.length > 1) {
+        query = query.in("status", statuses);
+      } else {
+        query = query.eq("status", params.status);
+      }
     } else {
       query = query.neq("status", "archived");
+    }
+
+    // Filter by date
+    if (after) {
+      query = query.gte("created_at", after);
     }
 
     // Search by title or patient name

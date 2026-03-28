@@ -57,7 +57,10 @@ function AccordionTrigger({
 }: AccordionTriggerProps) {
   return (
     <GeneratedAccordionTrigger
-      className={cn("items-center hover:no-underline", className)}
+      className={cn(
+        "items-center hover:no-underline **:data-[slot=accordion-trigger-icon]:text-foreground/65",
+        className,
+      )}
       {...props}
     >
       {icon && <HugeiconsIcon icon={icon} className="mr-2 size-5 shrink-0" />}

@@ -284,7 +284,15 @@
     "slashNoResults": "Žiadne sekcie nenájdené.",
     "slashSections": "Sekcie",
     "slashSubsections": "Podsekcie",
-    "noResults": "Žiadne šablóny"
+    "noResults": "Žiadne šablóny",
+    "searchPlaceholder": "Hľadať šablóny...",
+    "specialty": "Špecializácia",
+    "specialtyAll": "Všetky",
+    "open": "Otvoriť",
+    "templatesCount": "{count} šablón",
+    "useTemplate": "Použiť šablónu",
+    "system": "Systémová",
+    "noContext": "Žiadny ďalší kontext"
   },
   "poc": {
     "description": "Medicínsky prepis & generátor SOAP poznámok",

@@ -284,7 +284,15 @@
     "slashNoResults": "No sections found.",
     "slashSections": "Sections",
     "slashSubsections": "Subsections",
-    "noResults": "No templates found"
+    "noResults": "No templates found",
+    "searchPlaceholder": "Search templates...",
+    "specialty": "Specialty",
+    "specialtyAll": "All",
+    "open": "Open",
+    "templatesCount": "{count} templates",
+    "useTemplate": "Use template",
+    "system": "System",
+    "noContext": "No additional context"
   },
   "poc": {
     "description": "Medical transcription & SOAP note generator",

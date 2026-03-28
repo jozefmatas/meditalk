@@ -44,7 +44,7 @@ export function useEncounterStats(period: TimePeriod = "week") {
 
       try {
         const cutoff = getDateCutoff(period);
-        let url = "/api/encounters?limit=1";
+        let url = "/api/encounters?limit=1&status=to_review,completed";
 
         if (cutoff) {
           url += `&after=${cutoff.toISOString()}`;
