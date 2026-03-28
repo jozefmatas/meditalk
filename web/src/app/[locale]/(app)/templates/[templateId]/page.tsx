@@ -65,7 +65,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
           <div className="sticky top-0 z-10 flex flex-col gap-6 border-b border-border bg-background py-6 md:px-4">
             <div className="flex items-center justify-between gap-4">
               <div className="flex flex-col gap-2">
-                <h1 className="text-2xl leading-none">
+                <h1 className="text-2xl">
                   {template.name[locale] ?? template.name.sk ?? template.id}
                 </h1>
                 <div className="flex gap-2">
