@@ -78,11 +78,12 @@
 
 ### 1.6 IndexedDB Encryption
 
-- [ ] Encrypt blobs before storing in IndexedDB (WebCrypto API)
-- [ ] Delete from IndexedDB immediately after confirmed upload (not 7-day retention)
-- [ ] Alternative: eliminate IndexedDB persistence, upload directly with retry
+- [x] Encrypt blobs before storing in IndexedDB (AES-GCM 256-bit, key in separate IndexedDB store)
+- [x] Delete from IndexedDB immediately after confirmed upload (already implemented)
+- [x] Reduce retention from 7 days to 24 hours
+- ~~Alternative: eliminate IndexedDB persistence~~ — keeping IndexedDB for crash safety
 
-**Files:** `web/src/lib/indexeddb/pending-uploads.ts`, `web/src/lib/upload/upload-with-persistence.ts`
+**Files:** `web/src/lib/indexeddb/crypto.ts`, `web/src/lib/indexeddb/pending-uploads.ts`
 
 ### 1.7 Remove Unvetted Analytics
 
