@@ -157,17 +157,38 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const hardDelete = searchParams.get("hard") === "true";
 
     if (hardDelete) {
-      // Get audio path first to clean up storage
+      // Get audio path + file metadata to clean up storage
       const { data: visit } = await supabase
         .from("visits")
-        .select("audio_path")
+        .select("audio_path, metadata")
         .eq("id", visitId)
         .eq("user_id", userId)
         .single();
 
-      // Delete from storage if audio exists
+      const storageErrors: string[] = [];
+
+      // Delete audio recording from storage
       if (visit?.audio_path) {
-        await supabase.storage.from("audio").remove([visit.audio_path]);
+        const { error: audioErr } = await supabase.storage
+          .from("audio")
+          .remove([visit.audio_path]);
+        if (audioErr) {
+          console.warn("[delete] audio cleanup failed:", audioErr.message);
+          storageErrors.push(`audio: ${audioErr.message}`);
+        }
+      }
+
+      // Delete encounter files from storage
+      const files: { path?: string }[] = visit?.metadata?.files ?? [];
+      const filePaths = files.map((f) => f.path).filter(Boolean) as string[];
+      if (filePaths.length > 0) {
+        const { error: filesErr } = await supabase.storage
+          .from("encounter-files")
+          .remove(filePaths);
+        if (filesErr) {
+          console.warn("[delete] files cleanup failed:", filesErr.message);
+          storageErrors.push(`files: ${filesErr.message}`);
+        }
       }
 
       // Hard delete (will cascade to chunks)
@@ -184,6 +205,18 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
           { status: 500 },
         );
       }
+
+      logAudit({
+        ...createAuditContext(auth, request),
+        action: "encounter.delete",
+        resourceType: "encounter",
+        resourceId: visitId,
+        metadata: {
+          filesRemoved: filePaths.length,
+          audioRemoved: !!visit?.audio_path,
+          ...(storageErrors.length > 0 && { storageErrors }),
+        },
+      });
     } else {
       // Soft delete (archive)
       const { error } = await supabase
@@ -201,12 +234,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    logAudit({
-      ...createAuditContext(auth, request),
-      action: hardDelete ? "encounter.delete" : "encounter.archive",
-      resourceType: "encounter",
-      resourceId: visitId,
-    });
+    if (!hardDelete) {
+      logAudit({
+        ...createAuditContext(auth, request),
+        action: "encounter.archive",
+        resourceType: "encounter",
+        resourceId: visitId,
+      });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

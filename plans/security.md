@@ -57,11 +57,11 @@
 
 ### 1.4 Fix Data Deletion
 
-- [ ] User deletion: list and remove all files from `encounter-files` bucket
-- [ ] User deletion: remove all files from `audio` bucket
-- [ ] Encounter hard-delete: remove files from `encounter-files` referenced in `metadata.files[]`
-- [ ] Add deletion verification (check storage delete succeeded)
-- [ ] Log all deletions to audit table
+- [x] User deletion: list and remove all files from `encounter-files` bucket
+- [x] User deletion: remove all files from `audio` bucket
+- [x] Encounter hard-delete: remove files from `encounter-files` referenced in `metadata.files[]`
+- [x] Add deletion verification (check storage delete succeeded)
+- [x] Log all deletions to audit table
 
 **Files:** `admin/app/api/users/[userId]/route.ts`, `web/src/app/api/encounters/[encounterId]/route.ts`
 
