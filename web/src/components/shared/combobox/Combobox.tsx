@@ -215,7 +215,7 @@ function Combobox(props: ComboboxProps) {
           aria-expanded={open}
           disabled={disabled}
           className={cn(
-            "justify-between font-normal",
+            "justify-between font-normal pl-2.5 pr-2",
             triggerVariants[variant],
             isMultiple && "h-auto min-h-9 py-1.5",
             !isMultiple && !props.value && "text-foreground/65",
