@@ -8,6 +8,13 @@ export {
   searchIcd,
   resolveIcdCodes,
 } from "./icd-index";
+export {
+  buildMedicationReferenceForConcepts,
+  getMedicationActiveIngredient,
+  isValidMedication,
+  searchMedications,
+  resolveMedications,
+} from "./medication-index";
 export type {
   ClinicalAnalysis,
   SpecialtyId,
@@ -15,6 +22,7 @@ export type {
   ClinicalConcept,
   RegionalTerm,
   IcdEntry,
+  MedicationEntry,
   MatchedConcept,
   ProblemCluster,
   CandidateIcdCode,

@@ -10,6 +10,7 @@ import {
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
+  buildSectionContextsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
@@ -134,8 +135,9 @@ export async function POST(request: NextRequest) {
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
     const allIds = flattenSectionIds(template);
 
-    // Build section labels directly from the template
+    // Build section labels and contexts directly from the template
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
+    const sectionContexts = buildSectionContextsFromTemplate(template);
 
     // Determine generation path: fast reformat vs full generation
     const existingNote = visit.encounter_note as string | null;
@@ -216,9 +218,14 @@ Rules:
         template,
         language,
         sectionLabels,
+        sectionContexts,
       );
       systemPrompt = clinicalAnalysis
-        ? buildEnrichedSystemPrompt(baseSystemPrompt, clinicalAnalysis)
+        ? buildEnrichedSystemPrompt(
+            baseSystemPrompt,
+            clinicalAnalysis,
+            language,
+          )
         : baseSystemPrompt;
       userMessage = buildTemplateUserMessage(
         chunkContents,

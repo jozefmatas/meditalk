@@ -114,12 +114,21 @@ export function buildTemplateSystemPrompt(
   template: Template,
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
+  sectionContexts?: Record<string, string>,
 ): string {
   const langLabel = LANGUAGE_LABELS[language];
   const allIds = flattenSectionIds(template);
 
   const sectionList = allIds
-    .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
+    .map((id) => {
+      const label = sectionLabels[id] || id;
+      const context = sectionContexts?.[id];
+      // If section has specific guidance, include it prominently
+      if (context) {
+        return `- "${id}": ${label}\n  SECTION-SPECIFIC GUIDANCE (ALWAYS FOLLOW THIS): ${context}`;
+      }
+      return `- "${id}": ${label}`;
+    })
     .join("\n");
 
   // Build style guide block (empty string if no style guide)
@@ -141,6 +150,9 @@ export function buildTemplateSystemPrompt(
   }
 
   return interpolate(`You are a medical documentation assistant. You MUST follow these rules strictly:
+
+CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL:
+If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes absolute precedence over any general rule or instruction. Follow section-specific guidance exactly as written, even if it contradicts other rules.
 
 1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
 
@@ -229,6 +241,7 @@ export async function generateFromTemplate(
   fileTexts?: { name: string; type: string; text: string }[],
   ctx?: UsageContext,
   clinicalAnalysis?: ClinicalAnalysis,
+  sectionContexts?: Record<string, string>,
 ): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
   const userMessage = buildTemplateUserMessage(
@@ -243,9 +256,14 @@ export async function generateFromTemplate(
     template,
     language,
     sectionLabels,
+    sectionContexts,
   );
   if (clinicalAnalysis) {
-    systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
+    systemPrompt = buildEnrichedSystemPrompt(
+      systemPrompt,
+      clinicalAnalysis,
+      language,
+    );
   }
 
   console.log(

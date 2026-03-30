@@ -108,11 +108,12 @@ export async function runClinicalAnalysis(
 
 /**
  * Augment a base system prompt with specialty context, ICD codes,
- * and matched concepts from clinical analysis.
+ * matched concepts, and medication validation from clinical analysis.
  */
 export function buildEnrichedSystemPrompt(
   baseSystemPrompt: string,
   analysis: ClinicalAnalysis,
+  locale: SupportedLanguage,
 ): string {
   const parts: string[] = [baseSystemPrompt];
 
@@ -128,6 +129,17 @@ export function buildEnrichedSystemPrompt(
       );
     }
   }
+
+  // Add medication validation instructions
+  parts.push(`\nMEDICATION VALIDATION (locale: ${locale}):
+CRITICAL: When documenting any medication in the clinical note, you MUST use ONLY exact medication names from the official approved medication list for this locale.
+- NEVER invent, approximate, or hallucinate medication names
+- NEVER use generic descriptions like "analgesic" or "antihypertensive" without specifying the exact approved medication name
+- If you identify a medication mentioned in the transcript, verify it matches an entry from the approved list
+- Use the exact spelling and capitalization from the approved list (case-insensitive matching is acceptable)
+- If a medication cannot be matched to the approved list, note it as "medication name to be verified" in square brackets [...]
+- Include both the brand name and active ingredient when documenting medications
+The medication database is available and should be consulted for any medication documentation.`);
 
   // Add ICD code candidates
   if (analysis.candidateIcdCodes.length > 0) {

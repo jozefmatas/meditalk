@@ -97,3 +97,9 @@ export interface IcdEntry {
   description: string;
   code: string;
 }
+
+/** Medication entry from the CSV index */
+export interface MedicationEntry {
+  name: string;
+  activeIngredient: string;
+}

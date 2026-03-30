@@ -12,6 +12,7 @@ import { extractTextFromFile } from "@/lib/file-extraction";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
+  buildSectionContextsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
@@ -272,9 +273,10 @@ export async function POST(request: NextRequest) {
     // Look up the template (DB with static fallback)
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
 
-    // Build section labels directly from the template
+    // Build section labels and contexts directly from the template
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
+    const sectionContexts = buildSectionContextsFromTemplate(template);
 
     // Semantic search on legacy transcript chunks + clinical analysis — run in parallel
     let chunkContents: string[] = [];
@@ -392,9 +394,14 @@ export async function POST(request: NextRequest) {
       template,
       language,
       sectionLabels,
+      sectionContexts,
     );
     if (clinicalAnalysis) {
-      systemPrompt = buildEnrichedSystemPrompt(systemPrompt, clinicalAnalysis);
+      systemPrompt = buildEnrichedSystemPrompt(
+        systemPrompt,
+        clinicalAnalysis,
+        language,
+      );
     }
 
     const userMessage = buildTemplateUserMessage(
