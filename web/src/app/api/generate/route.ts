@@ -136,9 +136,30 @@ export async function POST(request: NextRequest) {
             const isPdf = file.type === "application/pdf";
             const isAudio = file.type.startsWith("audio/");
 
-            if (isImage || isPdf) {
-              // Use a signed URL so Claude fetches the file directly —
-              // avoids inline base64 size limits entirely.
+            if (isImage) {
+              // Download image so we can auto-rotate EXIF orientation with sharp
+              // before sending to Claude Vision (phone photos are often rotated)
+              const { data: fileData, error: dlError } = await supabase.storage
+                .from("encounter-files")
+                .download(file.path);
+
+              if (dlError || !fileData) {
+                console.error(`Failed to download ${file.name}:`, dlError);
+                extractionErrors.push(`${file.name}: download failed`);
+                return;
+              }
+
+              const buffer = Buffer.from(await fileData.arrayBuffer());
+              const text = await extractTextFromFile(
+                { imageBuffer: buffer },
+                file.name,
+                file.type,
+                language,
+                { userId, visitId },
+              );
+              file.extracted_text = text;
+            } else if (isPdf) {
+              // PDFs: use signed URL so Claude fetches directly (no rotation issue)
               const { data: urlData, error: urlError } = await supabase.storage
                 .from("encounter-files")
                 .createSignedUrl(file.path, 300); // 5 min expiry
@@ -153,9 +174,7 @@ export async function POST(request: NextRequest) {
               }
 
               const text = await extractTextFromFile(
-                isImage
-                  ? { imageUrl: urlData.signedUrl }
-                  : { pdfUrl: urlData.signedUrl },
+                { pdfUrl: urlData.signedUrl },
                 file.name,
                 file.type,
                 language,

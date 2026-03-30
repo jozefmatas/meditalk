@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages/messages";
+import sharp from "sharp";
 import { transcribeAudio } from "./elevenlabs";
 import type { SupportedLanguage } from "./types";
 import { logUsage, type UsageContext } from "./usage";
@@ -17,19 +18,31 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 };
 
 /**
+ * Auto-rotate an image based on EXIF orientation metadata using sharp.
+ * Phone cameras typically store raw pixels in landscape + EXIF rotation tag.
+ * sharp().rotate() without arguments reads the EXIF orientation and applies
+ * the correct rotation (0°, 90°, 180°, 270°), then strips the tag.
+ * No-op if the image is already correctly oriented.
+ */
+export async function normalizeImage(buffer: Buffer): Promise<Buffer> {
+  return sharp(buffer).rotate().toBuffer();
+}
+
+/**
  * Extract text content from a file based on its MIME type.
  *
- * - Image (PNG/JPEG): OCR via Claude Vision using a signed URL (no size limit)
+ * - Image (PNG/JPEG): OCR via Claude Vision — downloaded, EXIF-rotated, sent as base64
  * - PDF: text extraction via Claude document API using a signed URL (no download needed)
  * - Audio: transcription via ElevenLabs Scribe v2 (requires buffer)
  *
- * For images and PDFs, pass a signed URL so Claude fetches the file
- * directly — this avoids inline base64 size limits entirely.
+ * For images, pass `imageBuffer` so we can normalize EXIF rotation before OCR.
+ * For PDFs, pass a signed URL so Claude fetches the file directly.
  * For audio, pass `buffer` (ElevenLabs requires a File object).
  */
 export async function extractTextFromFile(
   opts: {
     buffer?: Buffer;
+    imageBuffer?: Buffer;
     imageUrl?: string;
     pdfUrl?: string;
   },
@@ -50,12 +63,24 @@ export async function extractTextFromFile(
     }
 
     if (mimeType.startsWith("image/")) {
+      // Preferred: download buffer → EXIF auto-rotate → base64
+      if (opts.imageBuffer) {
+        const normalized = await normalizeImage(opts.imageBuffer);
+        const base64 = normalized.toString("base64");
+        const mediaType = mimeType as
+          | "image/jpeg"
+          | "image/png"
+          | "image/gif"
+          | "image/webp";
+        return await ocrImageWithBase64(base64, mediaType, language, ctx);
+      }
+      // Fallback: signed URL (no EXIF rotation — may fail for rotated photos)
       if (opts.imageUrl) {
         return await ocrImageWithUrl(opts.imageUrl, language, ctx);
       }
-      // Fallback to base64 if no URL provided (shouldn't happen in normal flow)
       if (opts.buffer) {
-        const base64 = opts.buffer.toString("base64");
+        const normalized = await normalizeImage(opts.buffer);
+        const base64 = normalized.toString("base64");
         const mediaType = mimeType as
           | "image/jpeg"
           | "image/png"
