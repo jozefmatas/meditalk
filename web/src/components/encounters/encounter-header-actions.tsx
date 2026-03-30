@@ -163,7 +163,9 @@ export function EncounterHeaderActions({
               size={16}
               className={isProcessing ? "animate-spin" : ""}
             />
-            {t("detail.adjust")}
+            {isProcessing
+              ? t("detail.generatingEncounter")
+              : t("detail.adjust")}
           </Button>
         )}
       </>,
