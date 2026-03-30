@@ -58,6 +58,12 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  createAuditContext: vi.fn().mockReturnValue({}),
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+}));
+
 vi.mock("@/lib/parse-note-sections", () => ({
   filterEmptySectionsHtml: vi.fn((html) => html),
 }));

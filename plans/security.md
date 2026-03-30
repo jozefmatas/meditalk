@@ -43,16 +43,17 @@
 
 ### 1.3 Audit Logging
 
-- [ ] Create `audit_log` table: `(id, actor_id, actor_email, action, resource_type, resource_id, metadata, ip_address, created_at)`
-- [ ] Create audit logging helper function
-- [ ] Log data access events (view encounter)
-- [ ] Log data modification events (edit/delete encounter)
-- [ ] Log admin impersonation start/stop
-- [ ] Log file uploads/downloads
-- [ ] Log email sends
-- [ ] Log authentication events (login/logout)
+- [x] Create `audit_logs` table: `(id, actor_id, actor_email, action, resource_type, resource_id, metadata, ip_address, is_impersonation, target_user_id, created_at)`
+- [x] Create audit logging helper function (`logAudit`, `createAuditContext`, `getClientIp`)
+- [x] Log data access events (view encounter)
+- [x] Log data modification events (create/edit/delete/archive encounter)
+- [x] Log admin impersonation start/stop
+- [x] Log file uploads/deletes
+- [x] Log email sends
+- [x] Log generation/regeneration events
+- [x] Log authentication events (login/logout) — via DB trigger on `auth.audit_log_entries`
 
-**Files:** Create `web/supabase/migrations/XXX_audit_log.sql`, create `web/src/lib/audit.ts`, modify all API routes
+**Files:** `web/supabase/migrations/013_audit_logs.sql`, `014_auth_audit_trigger.sql`, `web/src/lib/audit.ts`, all API routes
 
 ### 1.4 Fix Data Deletion
 

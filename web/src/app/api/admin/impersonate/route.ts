@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, getClientIp } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail, IMPERSONATE_COOKIE } from "@/lib/admin";
 
 async function requireAdmin() {
-  const { realUserEmail } = await requireAuth();
+  const auth = await requireAuth();
 
-  if (!isAdminEmail(realUserEmail)) {
+  if (!isAdminEmail(auth.realUserEmail)) {
     throw new Response(JSON.stringify({ error: "Forbidden" }), {
       status: 403,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  return { email: realUserEmail };
+  return auth;
 }
 
 /**
@@ -63,7 +64,7 @@ export async function GET() {
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin();
+    const auth = await requireAdmin();
 
     const { userId } = await request.json();
     if (!userId || typeof userId !== "string") {
@@ -84,6 +85,16 @@ export async function POST(request: NextRequest) {
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 4, // 4 hours
+    });
+
+    logAudit({
+      actorId: auth.realUserId,
+      actorEmail: auth.realUserEmail,
+      action: "admin.impersonate_start",
+      resourceType: "user",
+      resourceId: userId,
+      metadata: { targetEmail: data.user.email },
+      ipAddress: getClientIp(request),
     });
 
     return NextResponse.json({
@@ -108,8 +119,10 @@ export async function POST(request: NextRequest) {
  * DELETE /api/admin/impersonate
  * Clears the impersonation cookie.
  */
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
   try {
+    const auth = await requireAuth();
+
     const cookieStore = await cookies();
     cookieStore.set(IMPERSONATE_COOKIE, "", {
       httpOnly: true,
@@ -117,6 +130,13 @@ export async function DELETE() {
       sameSite: "lax",
       path: "/",
       maxAge: 0,
+    });
+
+    logAudit({
+      actorId: auth.realUserId,
+      actorEmail: auth.realUserEmail,
+      action: "admin.impersonate_stop",
+      ipAddress: getClientIp(request),
     });
 
     return NextResponse.json({ success: true });

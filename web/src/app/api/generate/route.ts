@@ -18,6 +18,7 @@ import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
 import { logUsage } from "@/lib/usage";
+import { logAudit, createAuditContext } from "@/lib/audit";
 import { sendNoteEmail } from "@/lib/email/send-note-email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
@@ -40,11 +41,12 @@ export async function POST(request: NextRequest) {
   // Auth — return JSON errors for auth failures
   let userId: string;
   let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  let authResult: Awaited<ReturnType<typeof requireAuth>>;
 
   try {
-    const auth = await requireAuth();
-    userId = auth.userId;
-    supabase = auth.supabase;
+    authResult = await requireAuth();
+    userId = authResult.userId;
+    supabase = authResult.supabase;
     lap("auth");
   } catch (err) {
     if (err instanceof Response) return err;
@@ -72,6 +74,14 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+
+    logAudit({
+      ...createAuditContext(authResult, request),
+      action: "encounter.generate",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { templateId },
+    });
 
     // Fetch the visit to get its language and existing metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase

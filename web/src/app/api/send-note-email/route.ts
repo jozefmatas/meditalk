@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, createAuditContext } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNoteEmail } from "@/lib/email/send-note-email";
 import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
 
 export async function POST(request: Request) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { visitId } = await request.json();
 
     if (!visitId) {
@@ -73,6 +75,14 @@ export async function POST(request: Request) {
       noteHtml: filterEmptySectionsHtml(encounter.encounter_note),
       viewUrl,
       language,
+    });
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "email.send",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { recipient: userEmail },
     });
 
     return NextResponse.json({ success: true });

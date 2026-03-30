@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, createAuditContext } from "@/lib/audit";
 import type {
   Encounter,
   EncounterListParams,
@@ -114,7 +115,8 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
 
     const body: CreateEncounterRequest = await request.json();
 
@@ -141,6 +143,13 @@ export async function POST(request: NextRequest) {
         { status: 500 },
       );
     }
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "encounter.create",
+      resourceType: "encounter",
+      resourceId: visit.id,
+    });
 
     return NextResponse.json(visit, { status: 201 });
   } catch (err) {

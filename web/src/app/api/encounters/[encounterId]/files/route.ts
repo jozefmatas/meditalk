@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, createAuditContext } from "@/lib/audit";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -166,6 +167,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "file.upload",
+      resourceType: "encounter",
+      resourceId: encounterId,
+      metadata: {
+        count: newFiles.length,
+        names: newFiles.map((f) => f.name),
+      },
+    });
+
     return NextResponse.json({ files: newFiles });
   } catch (err) {
     if (err instanceof Response) return err;
@@ -183,7 +195,8 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { encounterId } = await params;
     const fileId = request.nextUrl.searchParams.get("fileId");
 
@@ -224,6 +237,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       .update({ metadata: { ...meta, files: updatedFiles } })
       .eq("id", encounterId)
       .eq("user_id", userId);
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "file.delete",
+      resourceType: "encounter",
+      resourceId: encounterId,
+      metadata: { fileId },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

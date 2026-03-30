@@ -14,6 +14,7 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
+import { logAudit, createAuditContext } from "@/lib/audit";
 import {
   runClinicalAnalysis,
   buildEnrichedSystemPrompt,
@@ -39,11 +40,12 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 export async function POST(request: NextRequest) {
   let userId: string;
   let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  let authResult: Awaited<ReturnType<typeof requireAuth>>;
 
   try {
-    const auth = await requireAuth();
-    userId = auth.userId;
-    supabase = auth.supabase;
+    authResult = await requireAuth();
+    userId = authResult.userId;
+    supabase = authResult.supabase;
   } catch (err) {
     if (err instanceof Response) return err;
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -64,6 +66,14 @@ export async function POST(request: NextRequest) {
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    logAudit({
+      ...createAuditContext(authResult, request),
+      action: "encounter.regenerate",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { templateId },
+    });
 
     // Fetch visit metadata (RLS enforces ownership)
     const { data: visit, error: visitError } = await supabase

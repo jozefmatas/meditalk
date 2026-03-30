@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, createAuditContext } from "@/lib/audit";
 import type {
   Encounter,
   EncounterStatus,
@@ -24,7 +25,8 @@ interface RouteParams {
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { encounterId: visitId } = await params;
 
     // Get visit
@@ -44,6 +46,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       .from("transcript_chunks")
       .select("*", { count: "exact", head: true })
       .eq("visit_id", visitId);
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "encounter.view",
+      resourceType: "encounter",
+      resourceId: visitId,
+    });
 
     return NextResponse.json({
       ...visit,
@@ -66,7 +75,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { encounterId: visitId } = await params;
 
     const body: UpdateEncounterRequest = await request.json();
@@ -114,6 +124,14 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "encounter.update",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { fields: Object.keys(updateData) },
+    });
+
     return NextResponse.json(visit as Encounter);
   } catch (err) {
     if (err instanceof Response) return err;
@@ -131,7 +149,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const { userId, supabase } = await requireAuth();
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
     const { encounterId: visitId } = await params;
 
     const searchParams = request.nextUrl.searchParams;
@@ -181,6 +200,13 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         );
       }
     }
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: hardDelete ? "encounter.delete" : "encounter.archive",
+      resourceType: "encounter",
+      resourceId: visitId,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
