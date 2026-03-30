@@ -154,11 +154,10 @@ export function useEncounterGeneration({
   // Resume pending uploads from IndexedDB on mount
   useEffect(() => {
     (async () => {
-      const { getPendingUploadsForVisit } =
+      const { getPendingUploadsForVisit, deletePendingUpload } =
         await import("@/lib/indexeddb/pending-uploads");
       const { resumePendingUpload } =
         await import("@/lib/upload/upload-with-persistence");
-      const { toast } = await import("sonner");
 
       const pending = await getPendingUploadsForVisit(visitId);
       if (pending.length === 0) return;
@@ -183,18 +182,8 @@ export function useEncounterGeneration({
             pending: true,
           }));
 
-        if (newPending.length > 0) {
-          toast.info(`Resuming ${newPending.length} pending upload(s)...`, {
-            duration: 3000,
-          });
-        }
-
         return newPending.length > 0 ? [...prev, ...newPending] : prev;
       });
-
-      // Clean up IndexedDB for files that are already uploaded
-      const { deletePendingUpload } =
-        await import("@/lib/indexeddb/pending-uploads");
 
       // Get current files to check for duplicates
       let currentFileIds: Set<string> = new Set();
@@ -206,9 +195,6 @@ export function useEncounterGeneration({
       // Delete from IndexedDB if already uploaded
       pending.forEach((p) => {
         if (currentFileIds.has(p.id)) {
-          console.log(
-            `[upload] Cleaning up ${p.name} from IndexedDB (already uploaded)`,
-          );
           deletePendingUpload(p.id).catch(() => {});
         }
       });
@@ -216,25 +202,13 @@ export function useEncounterGeneration({
       // Only resume uploads for files that aren't already uploaded
       const toResume = pending.filter((p) => !currentFileIds.has(p.id));
 
-      if (toResume.length === 0) {
-        console.log(
-          "[upload] All pending files already uploaded, nothing to resume",
-        );
-        return;
-      }
+      if (toResume.length === 0) return;
 
-      // Resume uploads in parallel
-      const results = await Promise.allSettled(
+      // Resume uploads silently in parallel
+      await Promise.allSettled(
         toResume.map(async (p) => {
           try {
-            const result = await resumePendingUpload(p, {
-              onRetry: (attempt, max) => {
-                toast.error(
-                  `${p.name} upload failed, retrying (${attempt}/${max})...`,
-                  { duration: 2000 },
-                );
-              },
-            });
+            const result = await resumePendingUpload(p);
 
             // Register with API
             const res = await fetch(`/api/encounters/${visitId}/files`, {
@@ -254,26 +228,11 @@ export function useEncounterGeneration({
               const withoutPending = prev.filter((f) => f.id !== p.id);
               return [...withoutPending, ...(data.files as EncounterFile[])];
             });
-
-            return result;
           } catch (err) {
             console.error(`[upload] Failed to resume ${p.name}:`, err);
-            throw err;
           }
         }),
       );
-
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results.length - succeeded;
-
-      if (succeeded > 0) {
-        toast.success(`${succeeded} file(s) uploaded successfully.`);
-      }
-      if (failed > 0) {
-        toast.warning(
-          `${failed} file(s) failed. They will retry automatically.`,
-        );
-      }
     })();
   }, [visitId, setFiles]);
 
@@ -314,27 +273,11 @@ export function useEncounterGeneration({
       ]);
 
       // Upload with IndexedDB persistence and retry
+      // Note: uploadWithPersistence handles IndexedDB save/delete internally.
+      // Do NOT manually call savePendingUpload here — it creates a second entry
+      // that never gets cleaned up, causing duplicates on page refresh.
       const { uploadWithPersistence } =
         await import("@/lib/upload/upload-with-persistence");
-      const { savePendingUpload } =
-        await import("@/lib/indexeddb/pending-uploads");
-      const { toast } = await import("sonner");
-
-      // Save to IndexedDB first
-      try {
-        await savePendingUpload({
-          id: pendingId,
-          visitId,
-          blob: uploadBlob,
-          name: uploadName,
-          type: uploadBlob.type,
-          size: uploadBlob.size,
-          source: "recording",
-          timestamp: Date.now(),
-        });
-      } catch (idbErr) {
-        console.error("[recording] Failed to save to IndexedDB:", idbErr);
-      }
 
       try {
         const result = await uploadWithPersistence(
@@ -343,15 +286,6 @@ export function useEncounterGeneration({
           visitId,
           {
             source: "recording",
-            onRetry: (attempt, max) => {
-              toast.error(
-                `Audio upload failed, retrying (${attempt}/${max})...`,
-                {
-                  id: "audio-upload-retry",
-                  duration: 3000,
-                },
-              );
-            },
           },
         );
 
@@ -375,14 +309,8 @@ export function useEncounterGeneration({
           const withoutPending = prev.filter((f) => f.id !== pendingId);
           return [...withoutPending, ...(data.files as EncounterFile[])];
         });
-
-        toast.dismiss("audio-upload-retry");
       } catch (err) {
         console.error("[recording] Upload failed after all retries:", err);
-        toast.error(
-          "Audio upload failed. The recording is safely stored and will retry when you return.",
-          { id: "audio-upload-retry", duration: Infinity },
-        );
       }
     },
     [visitId, setFiles],

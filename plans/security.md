@@ -23,12 +23,12 @@
 
 ### 1.1 Security Headers
 
-- [ ] Add `Content-Security-Policy` to `web/next.config.ts`
-- [ ] Add `Strict-Transport-Security` (HSTS)
-- [ ] Add `X-Frame-Options: DENY`
-- [ ] Add `X-Content-Type-Options: nosniff`
-- [ ] Add `Referrer-Policy: strict-origin-when-cross-origin`
-- [ ] Add `Permissions-Policy` (restrict camera, microphone, geolocation)
+- [x] Add `Content-Security-Policy` to `web/next.config.ts`
+- [x] Add `Strict-Transport-Security` (HSTS)
+- [x] Add `X-Frame-Options: DENY`
+- [x] Add `X-Content-Type-Options: nosniff`
+- [x] Add `Referrer-Policy: strict-origin-when-cross-origin`
+- [x] Add `Permissions-Policy` (restrict camera, microphone, geolocation)
 
 **Files:** `web/next.config.ts`
 

@@ -60,9 +60,6 @@ export function FilesContent({
       setIsUploading(true);
       const { uploadWithPersistence } =
         await import("@/lib/upload/upload-with-persistence");
-      const { savePendingUpload } =
-        await import("@/lib/indexeddb/pending-uploads");
-      const { toast } = await import("sonner");
 
       // Add pending files to list immediately (before upload)
       const pendingFiles: EncounterFile[] = allFiles.map((file) => ({
@@ -76,29 +73,12 @@ export function FilesContent({
 
       try {
         // Upload all files with IndexedDB persistence and retry
+        // Note: uploadWithPersistence handles IndexedDB save/delete internally.
+        // Do NOT manually call savePendingUpload here — it creates a second entry
+        // that never gets cleaned up, causing duplicates on page refresh.
         const results = await Promise.allSettled(
-          allFiles.map(async (file, idx) => {
-            const pendingId = pendingFiles[idx].id;
-
-            // Save to IndexedDB first
-            await savePendingUpload({
-              id: pendingId,
-              visitId,
-              blob: file,
-              name: file.name,
-              type: file.type,
-              size: file.size,
-              timestamp: Date.now(),
-            });
-
-            return uploadWithPersistence(file, file.name, visitId, {
-              onRetry: (attempt, max) => {
-                toast.error(
-                  `${file.name} upload failed, retrying (${attempt}/${max})...`,
-                  { duration: 2000 },
-                );
-              },
-            });
+          allFiles.map(async (file) => {
+            return uploadWithPersistence(file, file.name, visitId);
           }),
         );
 
@@ -114,9 +94,6 @@ export function FilesContent({
           );
 
         if (uploadResults.length === 0) {
-          toast.error(
-            "All file uploads failed. Files are saved and will retry automatically.",
-          );
           return;
         }
 
@@ -136,18 +113,8 @@ export function FilesContent({
         // Replace pending files with uploaded files
         const withoutPending = files.filter((f) => !f.pending);
         onFilesChange([...withoutPending, ...(data.files as EncounterFile[])]);
-
-        if (uploadResults.length < allFiles.length) {
-          const failedCount = allFiles.length - uploadResults.length;
-          toast.warning(
-            `${failedCount} file(s) failed to upload but are saved for retry.`,
-          );
-        }
       } catch (err) {
         console.error("File upload error:", err);
-        toast.error(
-          "File upload failed. Files are saved and will retry automatically.",
-        );
       } finally {
         setIsUploading(false);
       }

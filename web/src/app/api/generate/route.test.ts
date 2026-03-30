@@ -83,6 +83,9 @@ describe("POST /api/generate - validation", () => {
     vi.mocked(requireAuth).mockResolvedValue({
       userId: "user-123",
       supabase: mockSupabase as never,
+      isImpersonating: false,
+      realUserId: "user-123",
+      realUserEmail: "test@example.com",
     });
 
     mockSupabase.single.mockResolvedValue({

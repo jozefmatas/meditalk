@@ -51,9 +51,9 @@ function StreamWaveform({
   fftSize = 256,
   className,
   // Consume props that StreamWaveform doesn't need (avoid spreading onto div)
-  historySize: _hs,
-  updateRate: _ur,
-  mode: _mode,
+  historySize: _hs, // eslint-disable-line @typescript-eslint/no-unused-vars
+  updateRate: _ur, // eslint-disable-line @typescript-eslint/no-unused-vars
+  mode: _mode, // eslint-disable-line @typescript-eslint/no-unused-vars
   ...divProps
 }: StreamWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
