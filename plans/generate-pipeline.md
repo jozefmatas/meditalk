@@ -1,12 +1,78 @@
 # MediTalk Generation Pipeline Optimization Plan
 
+## Executive Summary
+
+**Original baseline:** 117 seconds (file extraction: 51s, generation: 57s)
+
+**Status:** Phase 1 partially complete - real-time transcript usage implemented ✅
+
+**Next priority:** Complete Phase 1 (caching), then Phase 2 (two-pass generation)
+
+---
+
+## 📋 Quick Reference: What's Done vs What's Next
+
+| Phase       | Item                              | Status     | Impact            | Effort       |
+| ----------- | --------------------------------- | ---------- | ----------------- | ------------ |
+| **Phase 1** | Language parameter                | ✅ DONE    | Accuracy          | Complete     |
+| **Phase 1** | transcriptText bug fix            | ✅ DONE    | Critical          | Complete     |
+| **Phase 1** | Verify real-time transcript usage | ⚠️ Partial | 40-50s            | 0.5 day      |
+| **Phase 1** | Mark uploaded files with source   | ⏳ TODO    | 30-45s/file       | 0.5 day      |
+| **Phase 1** | Cache file extractions            | ⏳ TODO    | 51s regenerate    | 1 day        |
+| **Phase 2** | Two-pass generation (Haiku+Opus)  | ⏳ TODO    | 25-30s            | 2-3 days     |
+| **Phase 3** | Early clinical analysis           | ⏳ TODO    | 5-10s             | 0.5 day      |
+| **Phase 3** | Cache clinical analysis           | ⏳ TODO    | 20-30s regenerate | 0.5 day      |
+| **Phase 4** | Voice anonymization               | ✅ DONE    | Privacy           | Disabled     |
+| **Phase 4** | Remove WAV conversion             | ⏳ TODO    | Upload speed      | Low priority |
+| **Phase 4** | Audio optimization (ffmpeg)       | ⏳ TODO    | 15-20s/file       | Low priority |
+
+**Next Action:** Complete Phase 1 (file caching) for massive regenerate speedup
+
+---
+
+## ✅ Completed Optimizations
+
+### 1. Language Parameter for Transcription
+
+- **Status:** ✅ DONE
+- **Implementation:** Added `languageCode` parameter to ElevenLabs Scribe (Slovak/Czech/English)
+- **Files:** `web/src/lib/elevenlabs.ts`, `web/src/lib/file-extraction.ts`, `web/src/app/api/generate/route.ts`
+- **Impact:** Improved transcription accuracy for non-English medical terms
+
+### 2. Real-time Transcript Bug Fix
+
+- **Status:** ✅ DONE (CRITICAL)
+- **Problem:** `transcriptText` wasn't being passed to Claude generation, causing empty or incomplete notes
+- **Fix:** Pass real-time transcript to generation pipeline via `transcriptChunks`
+- **Files:** `web/src/app/api/generate/route.ts`
+- **Impact:** Production bug fixed - notes now include conversation transcript
+
+### 3. Voice Anonymization
+
+- **Status:** ✅ DONE (currently disabled in production)
+- **Implementation:** Server-side ffmpeg with pitch shifting (±3 semitones) + formant preservation
+- **Files:** `web/src/lib/server/audio-anonymization.ts`
+- **Feature flag:** `ENABLE_AUDIO_ANONYMIZATION=false` (ready to enable)
+- **Impact:** Privacy improvement - prevents patient identification via voice biometrics
+
+### 4. WebSocket Error Suppression
+
+- **Status:** ✅ DONE
+- **Problem:** Code 1006 errors spammed console when pausing recording
+- **Fix:** Suppress expected WebSocket closure errors
+- **Files:** `web/src/components/encounters/recording-bar.tsx`
+- **Impact:** Clean console logs during normal operation
+
+---
+
 ## Context
 
-Current generation pipeline takes **117 seconds** (almost 2 minutes!), with two major bottlenecks:
-1. **File extraction: 51 seconds** - transcribing audio files that were already transcribed in real-time
-2. **Generation: 57 seconds** - using Sonnet 4.5 for entire note (slow but high quality)
+Current generation pipeline still takes **~117 seconds** with major bottlenecks:
 
-**Key insight:** Real-time Scribe transcript is available instantly (107 chars in logs) but the server still transcribes audio files via ElevenLabs batch API, wasting 40-50 seconds per generation.
+1. **File extraction: ~51 seconds** - transcribing audio files that were already transcribed in real-time
+2. **Generation: ~57 seconds** - using Sonnet 4.5 for entire note (slow but high quality)
+
+**Key insight:** Real-time Scribe transcript is available instantly but files may still be batch-transcribed unnecessarily in some cases.
 
 ## Current Pipeline Breakdown
 
@@ -28,49 +94,33 @@ User clicks "Generate" → 117 seconds total
 
 ## Optimization Strategy
 
-### Phase 1: Quick Wins (50-60 seconds savings) - Days 1-2
+### Phase 1: Quick Wins (50-60 seconds savings) ⚠️ PARTIALLY COMPLETE
 
-#### 1. Skip Audio Transcription When Real-time Transcript Available
+#### 1. ✅ Skip Audio Transcription When Real-time Transcript Available
 
-**Problem:** Lines 130-132 in [generate/route.ts](web/src/app/api/generate/route.ts) only use `transcriptText` for the FIRST recording file.
+**Status:** ✅ DONE (Bug fix: transcriptText now properly passed to generation)
 
-**Current code:**
-```typescript
-if (file.source === "recording" && transcriptText) {
-  file.extracted_text = transcriptText;
-  return; // ← Only works for ONE file!
-}
-// Otherwise: transcribe via ElevenLabs batch (SLOW!)
-```
+**Problem:** Real-time transcript wasn't being used in generation pipeline
 
-**Fix:**
-```typescript
-// NEW: Use real-time transcript for ALL audio from recording
-if (transcriptText && file.source === "recording" && file.type.startsWith("audio/")) {
-  file.extracted_text = transcriptText;
-  logAudit({
-    event: "file.extraction.skipped",
-    userId,
-    visitId,
-    metadata: {
-      reason: "realtime_transcript_available",
-      file: file.name,
-      savedTime: "~30-45s"
-    }
-  });
-  return; // Skip batch transcription
-}
-```
+**Fix applied:**
 
-**Expected savings:** 40-50 seconds (no batch transcription of recording audio)
+- Real-time transcript now properly passed via `transcriptChunks` to Claude generation
+- Language parameter added to improve transcription accuracy
+- Voice anonymization implemented (disabled in production)
 
-#### 2. Mark Uploaded Files with Source
+**Actual savings:** Variable (depends on file extraction optimizations)
+
+**Remaining work:** Need to verify audio files are correctly skipping batch transcription when real-time transcript exists
+
+#### 2. ⏳ Mark Uploaded Files with Source (NOT STARTED)
+
+**Status:** ⏳ TODO - High priority
 
 **Problem:** User-uploaded M4A files don't have `source: "recording"` so they always get transcribed even if they're from the same recording session.
 
-**Fix:** When files are uploaded during a recording session, mark them with `source: "recording-upload"` so they can use the same real-time transcript.
+**Fix needed:** When files are uploaded during a recording session, mark them with `source: "recording-upload"` so they can use the same real-time transcript.
 
-**File:** [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts)
+**File to modify:** [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts)
 
 ```typescript
 // In handleFileUpload or similar
@@ -82,13 +132,19 @@ await uploadWithPersistence(blob, filename, visitId, {
 
 **Expected savings:** 30-45 seconds per uploaded audio file
 
-#### 3. Cache File Extractions in Metadata
+**Effort:** Low (1-2 hours)
+
+#### 3. ⏳ Cache File Extractions in Metadata (NOT STARTED)
+
+**Status:** ⏳ TODO - High priority (huge savings on regenerate)
 
 **Problem:** No caching - regenerating the same visit re-extracts all files
 
 **Current:** Lines 112-114 filter `!f.extracted_text` but files don't persist extracted text
 
-**Fix:** Save extracted text back to metadata after extraction
+**Fix needed:** Save extracted text back to metadata after extraction
+
+**File to modify:** [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
 
 ```typescript
 // After extraction completes
@@ -97,23 +153,30 @@ await supabase
   .update({
     metadata: {
       ...visit.metadata,
-      files: uploadedFiles // Now includes extracted_text
-    }
+      files: uploadedFiles, // Now includes extracted_text
+    },
   })
   .eq("id", visitId);
 ```
 
 **Expected savings:** 51 seconds on regenerate (all file extraction skipped)
 
-### Phase 2: Fast Model First, Opus Refinement (20-30 seconds savings) - Days 3-4
+**Effort:** Low (2-3 hours)
 
-#### 4. Two-Pass Generation Strategy
+---
+
+### Phase 2: Fast Model First, Opus Refinement (20-30 seconds savings) ⏳ NOT STARTED
+
+#### 4. ⏳ Two-Pass Generation Strategy (NOT STARTED)
+
+**Status:** ⏳ TODO - Medium priority (significant speed improvement)
 
 **Approach:** Use Haiku for fast draft, then Opus 4.6 for refinement
 
 **Current:** One pass with Sonnet 4.5 (57s)
 
 **New:**
+
 ```
 Pass 1 (Haiku): Generate full note structure + content (~15-20s)
   ↓
@@ -151,6 +214,7 @@ const refinedResponse = await anthropic.messages.create({
 ```
 
 **Why this works:**
+
 - Haiku is 3-5x faster than Sonnet for draft
 - Opus 4.6 is better at medical accuracy than Sonnet
 - Two smaller generations faster than one large generation
@@ -183,9 +247,15 @@ const sectionResults = await Promise.all(sectionPromises);
 
 **Decision:** Use two-pass approach (simpler, better quality)
 
-### Phase 3: Clinical Analysis Optimization (5-10 seconds savings) - Day 5
+**Effort:** Medium (1-2 days)
 
-#### 6. Run Clinical Analysis on Transcript Only (Don't Wait for Files)
+---
+
+### Phase 3: Clinical Analysis Optimization (5-10 seconds savings) ⏳ NOT STARTED
+
+#### 6. ⏳ Run Clinical Analysis on Transcript Only (Don't Wait for Files) (NOT STARTED)
+
+**Status:** ⏳ TODO - Medium priority
 
 **Problem:** Clinical analysis waits for file extraction (51s) before running
 
@@ -217,7 +287,11 @@ const [clinicalAnalysis, extractedFiles] = await Promise.all([
 
 **Expected savings:** 5-10 seconds (clinical analysis overlaps with file extraction)
 
-#### 7. Cache Clinical Analysis Results
+**Effort:** Low (1 day)
+
+#### 7. ⏳ Cache Clinical Analysis Results (NOT STARTED)
+
+**Status:** ⏳ TODO - High priority for regenerate performance
 
 **Problem:** Every regenerate re-runs clinical analysis (20-30s wasted)
 
@@ -252,11 +326,19 @@ if (existingAnalysis && existingAnalysis.contentHash === contentHash) {
 
 **Expected savings:** 20-30 seconds on regenerate
 
-### Phase 4: Audio Optimization for Faster Transcription - Days 6-7
+**Effort:** Low (1 day)
+
+---
+
+### Phase 4: Audio Optimization for Faster Transcription ⚠️ PARTIALLY COMPLETE
 
 **Insight:** Small, clean audio files transcribe MUCH faster than large, noisy files
 
-#### 8. Remove WAV Conversion, Upload WebM/Opus Directly
+**Note:** Voice anonymization (item 10) is complete but disabled in production
+
+#### 8. ⏳ Remove WAV Conversion, Upload WebM/Opus Directly (NOT STARTED)
+
+**Status:** ⏳ TODO - Medium priority (faster uploads)
 
 **Problem:** Converting to WAV creates 10x larger files (slow upload on slow internet)
 
@@ -264,7 +346,11 @@ if (existingAnalysis && existingAnalysis.contentHash === contentHash) {
 
 **Expected savings:** 8-10x faster upload on slow connections
 
-#### 9. Pre-process Uploaded Audio Files with ffmpeg
+**Effort:** Low (remove existing WAV conversion code)
+
+#### 9. ⏳ Pre-process Uploaded Audio Files with ffmpeg (NOT STARTED)
+
+**Status:** ⏳ TODO - Low priority (nice to have)
 
 **Problem:** User-uploaded audio files (M4A, MP3, etc.) may be large, noisy, or poorly encoded
 
@@ -279,12 +365,14 @@ ffmpeg -i input.m4a \
 ```
 
 **Benefits:**
+
 - **Smaller files:** 32kbps Opus vs 128-256kbps M4A = 4-8x smaller
 - **Faster upload to ElevenLabs:** Smaller file = faster API call
 - **Cleaner audio:** Noise reduction = faster processing by Scribe
 - **Faster transcription:** Optimized audio processes quicker
 
 **Expected speedup:**
+
 - Large M4A (5MB, 10min): ~30s transcription
 - Optimized Opus (600KB, 10min): ~10-15s transcription
 - **Savings:** 15-20s per uploaded audio file
@@ -300,10 +388,16 @@ if (file.type.startsWith("audio/") && file.type !== "audio/opus") {
   const originalBuffer = await downloadFile(file.path);
 
   // Optimize with ffmpeg
-  const optimizedBuffer = await optimizeAudioForTranscription(originalBuffer, file.type);
+  const optimizedBuffer = await optimizeAudioForTranscription(
+    originalBuffer,
+    file.type,
+  );
 
   // Transcribe optimized version (faster!)
-  const text = await transcribeAudio(optimizedBuffer, "audio/opus", language, { userId, visitId });
+  const text = await transcribeAudio(optimizedBuffer, "audio/opus", language, {
+    userId,
+    visitId,
+  });
 
   // Note: Keep original file in storage, just transcribe the optimized version
   file.extracted_text = text;
@@ -316,7 +410,7 @@ if (file.type.startsWith("audio/") && file.type !== "audio/opus") {
 // admin/lib/audio-optimization.ts (NEW)
 export async function optimizeAudioForTranscription(
   inputBuffer: Buffer,
-  inputMimeType: string
+  inputMimeType: string,
 ): Promise<Buffer> {
   const tempInput = `/tmp/${crypto.randomUUID()}.${getExtension(inputMimeType)}`;
   const tempOutput = `/tmp/${crypto.randomUUID()}.opus`;
@@ -334,10 +428,7 @@ export async function optimizeAudioForTranscription(
   const optimizedBuffer = await fs.readFile(tempOutput);
 
   // Cleanup
-  await Promise.all([
-    fs.unlink(tempInput),
-    fs.unlink(tempOutput)
-  ]);
+  await Promise.all([fs.unlink(tempInput), fs.unlink(tempOutput)]);
 
   return optimizedBuffer;
 }
@@ -345,19 +436,32 @@ export async function optimizeAudioForTranscription(
 
 **Expected savings:** 15-20 seconds per uploaded audio file + faster transcription
 
-#### 10. Voice Anonymization (Optional - Privacy)
+**Effort:** Medium (2-3 days, ffmpeg setup required)
 
-**Approach:** After optimization, add pitch shift for privacy
+#### 10. ✅ Voice Anonymization (COMPLETE - Disabled in Production)
 
-**Implementation:** See [cryptic-baking-thunder.md](../.claude/plans/cryptic-baking-thunder.md) for details
+**Status:** ✅ DONE - Implementation complete, feature flag disabled
 
-**Expected impact:** Privacy improvement, minimal speed impact (done during optimization)
+**Implementation:** Server-side ffmpeg with pitch shifting (±3 semitones) + formant preservation
+
+**Files:** `web/src/lib/server/audio-anonymization.ts`, `web/src/app/api/generate/route.ts`
+
+**Feature flag:** `ENABLE_AUDIO_ANONYMIZATION=false` (can enable when ready)
+
+**Details:** See [cryptic-baking-thunder.md](../.claude/plans/cryptic-baking-thunder.md) for full implementation
+
+**Expected impact:** Privacy improvement (prevents voice biometric identification), minimal speed impact
+
+**Next step:** Enable in production after testing
+
+---
 
 ## Expected Performance Improvements
 
 ### Timeline Comparison
 
 **Current:**
+
 ```
 0s ────────────────────────────────────────────────── 117s
    │
@@ -368,6 +472,7 @@ export async function optimizeAudioForTranscription(
 ```
 
 **Optimized:**
+
 ```
 0s ──────────────────────────────────── 35s (70% faster!)
    │
@@ -380,47 +485,126 @@ export async function optimizeAudioForTranscription(
 
 ### Savings Breakdown
 
-| Optimization | Time Saved | Effort |
-|--------------|------------|--------|
-| Skip audio transcription (use real-time) | 40-50s | Low (2 lines of code) |
-| Optimize uploaded audio with ffmpeg | 15-20s per file | Medium (add ffmpeg) |
-| Cache file extractions | 51s (on regenerate) | Low (metadata update) |
-| Two-pass generation (Haiku + Opus) | 25-30s | Medium (refactor) |
-| Early clinical analysis | 5-10s | Low (parallel start) |
-| Cache clinical analysis | 20-30s (on regenerate) | Low (hash check) |
-| Remove WAV conversion | 8x faster upload | Low (remove code) |
-| **TOTAL FIRST RUN** | **85-110s** | **3-4 days** |
-| **TOTAL REGENERATE** | **90-110s** | **Same code** |
+| Optimization                             | Time Saved             | Status        | Effort             |
+| ---------------------------------------- | ---------------------- | ------------- | ------------------ |
+| Skip audio transcription (use real-time) | 40-50s                 | ⚠️ Partial    | Low (verify logic) |
+| Mark uploaded files with source          | 30-45s per file        | ⏳ TODO       | Low (1-2 hours)    |
+| Cache file extractions                   | 51s (on regenerate)    | ⏳ TODO       | Low (2-3 hours)    |
+| Two-pass generation (Haiku + Opus)       | 25-30s                 | ⏳ TODO       | Medium (2-3 days)  |
+| Early clinical analysis                  | 5-10s                  | ⏳ TODO       | Low (1 day)        |
+| Cache clinical analysis                  | 20-30s (on regenerate) | ⏳ TODO       | Low (1 day)        |
+| Remove WAV conversion                    | 8x faster upload       | ⏳ TODO       | Low (remove code)  |
+| Optimize uploaded audio with ffmpeg      | 15-20s per file        | ⏳ TODO       | Medium (2-3 days)  |
+| Voice anonymization                      | Privacy win            | ✅ DONE       | (disabled)         |
+| Language parameter                       | Accuracy win           | ✅ DONE       | Complete           |
+| transcriptText bug fix                   | Critical fix           | ✅ DONE       | Complete           |
+| **TOTAL POTENTIAL SAVINGS (FIRST RUN)**  | **85-110s**            | **~1 week**   | **3-4 days work**  |
+| **TOTAL POTENTIAL SAVINGS (REGENERATE)** | **90-110s**            | **Same code** | **Same work**      |
 
 ### Performance Targets
 
-| Metric | Current | Target | Improvement |
-|--------|---------|--------|-------------|
-| First generation | 117s | **35-40s** | **70% faster** |
-| Regeneration | 117s | **10-15s** | **90% faster** |
-| File extraction | 51s | **<5s** | **10x faster** |
-| Generation | 57s | **25-30s** | **50% faster** |
-| Upload (10min audio, 5 Mbps) | 30s | **3s** | **10x faster** |
+| Metric                       | Current | Target     | Improvement    |
+| ---------------------------- | ------- | ---------- | -------------- |
+| First generation             | 117s    | **35-40s** | **70% faster** |
+| Regeneration                 | 117s    | **10-15s** | **90% faster** |
+| File extraction              | 51s     | **<5s**    | **10x faster** |
+| Generation                   | 57s     | **25-30s** | **50% faster** |
+| Upload (10min audio, 5 Mbps) | 30s     | **3s**     | **10x faster** |
 
-## Implementation Plan
+## 🎯 Current Status & Immediate Next Steps
 
-### Day 1-2: Quick Wins (File Extraction Optimization)
+### Priority 1: Complete Phase 1 (File Extraction - HIGH IMPACT) ⚠️
+
+**Estimated time:** 1-2 days
+**Expected savings:** 40-50 seconds per generation, 51s on regenerate
+
+**Tasks:**
+
+1. ⏳ Verify real-time transcript is skipping batch transcription (Item #1)
+   - Check generate/route.ts logic for audio file handling
+   - Add audit logging for skipped extractions
+   - Test: ensure recording audio doesn't get re-transcribed
+
+2. ⏳ Mark uploaded files with recording source (Item #2)
+   - Modify use-encounter-generation.ts to tag files with `source: "recording-upload"`
+   - Enable these files to use real-time transcript too
+
+3. ⏳ Cache file extractions in metadata (Item #3)
+   - Save extracted_text to visit.metadata.files after extraction
+   - Skip extraction if extracted_text already exists
+   - HUGE savings on regenerate (51 seconds → <1 second)
+
+### Priority 2: Two-Pass Generation (Phase 2 - MEDIUM IMPACT) ⏳
+
+**Estimated time:** 2-3 days
+**Expected savings:** 25-30 seconds per generation
+
+**Tasks:**
+
+1. Implement Haiku draft pass (fast structure generation)
+2. Implement Opus 4.6 refinement pass (medical accuracy)
+3. Add feature flag `ENABLE_TWO_PASS_GENERATION`
+4. Test quality vs current Sonnet single-pass
+
+### Priority 3: Clinical Analysis Optimization (Phase 3 - LOW IMPACT) ⏳
+
+**Estimated time:** 1-2 days
+**Expected savings:** 5-10 seconds first run, 20-30s on regenerate
+
+**Tasks:**
+
+1. Run clinical analysis early (parallel with file extraction)
+2. Cache clinical analysis results with content hash
+
+---
+
+## Implementation Plan (Consolidated)
+
+### ✅ COMPLETED: Language & Transcript Fixes
+
+**What was done:**
+
+- Added language parameter to ElevenLabs Scribe (Slovak/Czech/English)
+- Fixed transcriptText not being passed to Claude (production bug)
+- Implemented voice anonymization (disabled in production)
+- Suppressed expected WebSocket 1006 errors
+
+**Files modified:**
+
+- `web/src/lib/elevenlabs.ts`
+- `web/src/lib/file-extraction.ts`
+- `web/src/app/api/generate/route.ts`
+- `web/src/lib/server/audio-anonymization.ts`
+- `web/src/components/encounters/recording-bar.tsx`
+
+---
+
+### ⏳ NEXT: Complete Phase 1 (File Extraction Optimization)
 
 **Files to modify:**
+
 1. [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
-   - Lines 130-145: Expand real-time transcript usage to ALL audio files
-   - Lines 215-230: Save extracted_text back to metadata for caching
+   - Verify real-time transcript logic for ALL audio files
+   - Save extracted_text back to metadata for caching
    - Add audit logging for skipped extractions
 
-**Testing:**
-- Record audio, generate note → verify no batch transcription
-- Check logs: "file.extraction.skipped" events
-- Regenerate same visit → verify cached extraction used
-- Measure: File extraction should be <5s
+2. [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts)
+   - Mark uploaded files with `source: "recording-upload"`
 
-### Day 3-4: Two-Pass Generation
+**Testing:**
+
+- Record audio, generate note → verify no batch transcription
+- Upload audio during recording → verify uses real-time transcript
+- Check logs: "file.extraction.skipped" events
+- Regenerate same visit → verify cached extraction used (51s savings!)
+- Measure: File extraction should be <5s first run, <1s regenerate
+
+---
+
+### ⏳ FUTURE: Phase 2 - Two-Pass Generation
 
 **Files to modify:**
+
 1. [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
    - Lines 418-759: Refactor into two-pass approach
    - Pass 1: Haiku with max_tokens 4096
@@ -428,6 +612,7 @@ export async function optimizeAudioForTranscription(
    - Stream both passes to client
 
 **Environment variables:**
+
 ```env
 # Enable two-pass generation
 ENABLE_TWO_PASS_GENERATION=true
@@ -438,6 +623,7 @@ REFINE_MODEL=claude-opus-4-6
 ```
 
 **Testing:**
+
 - Generate note, measure total time
 - Compare quality: two-pass vs single-pass Sonnet
 - Verify streaming works for both passes
@@ -446,12 +632,14 @@ REFINE_MODEL=claude-opus-4-6
 ### Day 5: Clinical Analysis Optimization
 
 **Files to modify:**
+
 1. [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
    - Lines 347-373: Start clinical analysis early (don't wait for files)
    - Add caching with content hash
    - Save to visit metadata
 
 **Testing:**
+
 - First generation: verify clinical analysis runs in parallel
 - Regenerate: verify cache hit, no re-analysis
 - Measure: Clinical analysis should overlap with file extraction
@@ -459,17 +647,19 @@ REFINE_MODEL=claude-opus-4-6
 ### Day 6-7: Audio Optimization
 
 **Files to create:**
+
 1. `admin/lib/audio-optimization.ts` (NEW)
    - ffmpeg optimization function
    - File size reduction
    - Audio enhancement for transcription
 
-**Files to modify:**
-2. [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
-   - Optimize uploaded audio before transcription
-   - Use optimized version for ElevenLabs API
+**Files to modify:** 2. [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
+
+- Optimize uploaded audio before transcription
+- Use optimized version for ElevenLabs API
 
 **Testing:**
+
 - Upload M4A file, verify ffmpeg optimization
 - Measure transcription time improvement
 - Verify audio quality sufficient for transcription
@@ -477,6 +667,7 @@ REFINE_MODEL=claude-opus-4-6
 ### Day 8: Voice Anonymization (Lower Priority)
 
 **Files to modify:**
+
 1. [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts)
    - Remove WAV conversion
    - Upload WebM directly
@@ -517,6 +708,7 @@ ENABLE_VOICE_ANONYMIZATION=false
 ### Performance Testing
 
 **Test 1: File Extraction Speed**
+
 ```bash
 # Before optimization
 time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", ...}'
@@ -528,6 +720,7 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 ```
 
 **Test 2: Generation Speed**
+
 ```bash
 # Measure Haiku draft time
 # Measure Opus refinement time
@@ -535,6 +728,7 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 ```
 
 **Test 3: Regeneration Speed**
+
 ```bash
 # First generation: ~35-40s
 # Second generation (cached): ~10-15s
@@ -543,16 +737,19 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 ### Quality Testing
 
 **Test 1: Transcript Quality**
+
 - Record audio with real-time Scribe
 - Verify transcript accuracy is maintained
 - Compare: real-time vs batch transcription
 
 **Test 2: Note Quality**
+
 - Generate with Haiku + Opus two-pass
 - Compare to Sonnet single-pass
 - Verify medical accuracy, completeness, formatting
 
 **Test 3: Clinical Analysis**
+
 - Verify specialty inference accuracy
 - Check ICD code suggestions
 - Ensure early analysis doesn't miss critical info
@@ -571,6 +768,7 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 ### Metrics to Track
 
 **Performance Metrics:**
+
 - File extraction time (target: <5s)
 - Generation time (target: <35s)
 - Total generation time (target: <40s)
@@ -578,11 +776,13 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 - Cache hit rate for clinical analysis (target: >90% on regenerate)
 
 **Quality Metrics:**
+
 - Note completeness (compare two-pass vs single-pass)
 - Medical accuracy (specialist review)
 - User satisfaction (faster = better UX)
 
 **Error Metrics:**
+
 - File extraction failures
 - Generation failures (model errors)
 - Cache corruption or misses
@@ -590,6 +790,7 @@ time curl -X POST /api/generate -d '{"visitId": "...", "transcriptText": "...", 
 ### Rollback Strategy
 
 **If performance degrades:**
+
 ```env
 # Disable optimizations one by one
 SKIP_AUDIO_TRANSCRIPTION_WITH_REALTIME=false
@@ -599,6 +800,7 @@ ENABLE_AUDIO_OPTIMIZATION=false
 ```
 
 **If quality degrades:**
+
 - Switch back to Sonnet single-pass
 - Disable caching
 - Force re-extraction
@@ -608,11 +810,13 @@ ENABLE_AUDIO_OPTIMIZATION=false
 ### Current Costs (per generation)
 
 **ElevenLabs Scribe:**
+
 - Real-time streaming: $0.40/hour (during recording)
 - Batch transcription: $0.40/hour × 3 files = $1.20
 - **Total:** $1.60 per generation
 
 **Anthropic Claude:**
+
 - Sonnet 4.5: 5375 input + 2773 output tokens
 - Cost: ~$0.015 per generation
 
@@ -621,11 +825,13 @@ ENABLE_AUDIO_OPTIMIZATION=false
 ### Optimized Costs (per generation)
 
 **ElevenLabs Scribe:**
+
 - Real-time streaming: $0.40/hour (during recording)
 - Batch transcription: **$0** (skipped!)
 - **Total:** $0.40 per generation
 
 **Anthropic Claude:**
+
 - Haiku draft: 4000 input + 2000 output = ~$0.001
 - Opus refinement: 3000 input + 1500 output = ~$0.020
 - **Total:** ~$0.021 per generation
@@ -667,27 +873,68 @@ The 5 most critical files for this implementation:
 
 ## Timeline
 
-**Total estimated time:** 1 week
+**Original estimate:** 1 week full implementation
 
-- **Days 1-2:** File extraction optimization (HUGE WIN: 70s savings)
-- **Days 3-4:** Two-pass generation (25-30s savings)
-- **Day 5:** Clinical analysis optimization (5-10s savings + regenerate speedup)
-- **Days 6-7:** Audio optimization (15-20s per file)
-- **Day 8:** Testing, monitoring, rollout
+**Current progress:** ~20% complete (language, bug fixes, anonymization infrastructure)
+
+**Remaining work:**
+
+### High Priority (Next 2-3 days) - Phase 1 Complete
+
+- **Days 1-2:** Complete file extraction optimization
+  - Verify real-time transcript usage (0.5 day)
+  - Mark uploaded files with source (0.5 day)
+  - Cache file extractions in metadata (1 day)
+  - **Expected savings:** 40-50s first run, 51s regenerate
+
+### Medium Priority (Next 3-5 days) - Phase 2
+
+- **Days 3-5:** Two-pass generation (Haiku + Opus)
+  - Implement draft pass (1 day)
+  - Implement refinement pass (1 day)
+  - Testing and quality comparison (1 day)
+  - **Expected savings:** 25-30s per generation
+
+### Lower Priority (Next 2-3 days) - Phase 3
+
+- **Days 6-7:** Clinical analysis optimization
+  - Early parallel execution (0.5 day)
+  - Caching with content hash (0.5 day)
+  - **Expected savings:** 5-10s first run, 20-30s regenerate
+
+### Optional (Future)
+
+- Remove WAV conversion (Low priority - minor upload speed improvement)
+- Audio optimization with ffmpeg (Low priority - only for uploaded files)
+
+---
 
 ## Success Criteria
 
-### Week 1 Target
-- ✅ File extraction: 51s → <5s (90% improvement)
-- ✅ Generation: 57s → <35s (40% improvement)
-- ✅ Total: 117s → <40s (66% improvement)
-- ✅ Cost: $1.62 → $0.42 (74% reduction)
+### ✅ Already Achieved
 
-### Week 2 Target (Regeneration)
-- ✅ File extraction: <1s (cached)
-- ✅ Clinical analysis: <1s (cached)
-- ✅ Generation: <30s (two-pass)
-- ✅ Total: <15s (87% improvement)
+- ✅ Language parameter added (improved transcription accuracy)
+- ✅ transcriptText bug fixed (critical production fix)
+- ✅ Voice anonymization implemented (privacy win, disabled in production)
+- ✅ WebSocket error suppression (clean console logs)
+
+### 🎯 Phase 1 Target (Next 2-3 days)
+
+- ⏳ File extraction: 51s → <5s (90% improvement)
+- ⏳ Regeneration: 51s → <1s (98% improvement)
+- ⏳ Cost: Save $1.20 per generation (skip batch transcription)
+
+### 🎯 Phase 2 Target (Next 3-5 days)
+
+- ⏳ Generation: 57s → 25-30s (50% improvement)
+- ⏳ Quality: Maintain or improve with Opus refinement
+- ⏳ Streaming: Both passes stream to client
+
+### 🎯 Final Target (After all phases)
+
+- ⏳ Total first generation: 117s → 35-40s (70% faster)
+- ⏳ Total regeneration: 117s → 10-15s (90% faster)
+- ⏳ Cost: $1.62 → $0.42 (74% reduction)
 
 ## References
 

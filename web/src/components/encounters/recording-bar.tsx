@@ -678,11 +678,12 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             try {
               const { savePendingUpload } =
                 await import("@/lib/indexeddb/pending-uploads");
+              const ext = audioMimeToExt(mimeTypeRef.current);
               await savePendingUpload({
                 id: segmentId,
                 visitId,
                 blob,
-                name: `recording-segment-${segmentsRef.current.length}.webm`,
+                name: `recording-segment-${segmentsRef.current.length}${ext}`,
                 type: mimeTypeRef.current,
                 size: blob.size,
                 source: "recording-segment",
@@ -794,11 +795,12 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           try {
             const { savePendingUpload } =
               await import("@/lib/indexeddb/pending-uploads");
+            const ext = audioMimeToExt(mimeTypeRef.current);
             await savePendingUpload({
               id: segmentId,
               visitId,
               blob,
-              name: `recording-segment-${segmentsRef.current.length}.webm`,
+              name: `recording-segment-${segmentsRef.current.length}${ext}`,
               type: mimeTypeRef.current,
               size: blob.size,
               source: "recording-segment",
