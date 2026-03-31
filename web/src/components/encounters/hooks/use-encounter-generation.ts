@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
 import { type RecordingBarRef } from "@/components/encounters/recording-bar";
@@ -11,6 +11,7 @@ import {
   setPreferredTemplateId,
 } from "@/lib/templates";
 import { uploadToStorage } from "@/lib/supabase/upload";
+import { useGenerationTimer } from "@/hooks/use-generation-timer";
 
 /** Map MIME type to file extension for fallback uploads. */
 function mimeToExt(mime: string): string {
@@ -154,10 +155,21 @@ export function useEncounterGeneration({
   // Resume pending uploads from IndexedDB on mount
   useEffect(() => {
     (async () => {
-      const { getPendingUploadsForVisit, deletePendingUpload } =
-        await import("@/lib/indexeddb/pending-uploads");
+      const {
+        getPendingUploadsForVisit,
+        deletePendingUpload,
+        clearOldPendingUploads,
+      } = await import("@/lib/indexeddb/pending-uploads");
       const { resumePendingUpload } =
         await import("@/lib/upload/upload-with-persistence");
+
+      // Clean up old failed uploads (>24h) first
+      const deletedCount = await clearOldPendingUploads();
+      if (deletedCount > 0) {
+        console.log(
+          `[upload] Cleaned up ${deletedCount} old pending upload(s)`,
+        );
+      }
 
       const pending = await getPendingUploadsForVisit(visitId);
       if (pending.length === 0) return;
@@ -170,9 +182,12 @@ export function useEncounterGeneration({
       // This prevents duplicates when page is refreshed after upload succeeded
       // but before IndexedDB cleanup completed
       setFiles((prev: EncounterFile[]) => {
-        const existingIds = new Set(prev.map((f) => f.id));
+        // Check by name+source since IDs change after upload (uploadId != fileId)
+        const existingKeys = new Set(
+          prev.map((f) => `${f.name}:${f.source || "manual"}`),
+        );
         const newPending = pending
-          .filter((p) => !existingIds.has(p.id))
+          .filter((p) => !existingKeys.has(`${p.name}:${p.source || "manual"}`))
           .map((p) => ({
             id: p.id,
             name: p.name,
@@ -185,22 +200,27 @@ export function useEncounterGeneration({
         return newPending.length > 0 ? [...prev, ...newPending] : prev;
       });
 
-      // Get current files to check for duplicates
-      let currentFileIds: Set<string> = new Set();
+      // Get current files to check for duplicates (by name+source)
+      let currentFileKeys: Set<string> = new Set();
       setFiles((prev: EncounterFile[]) => {
-        currentFileIds = new Set(prev.map((f) => f.id));
+        currentFileKeys = new Set(
+          prev.map((f) => `${f.name}:${f.source || "manual"}`),
+        );
         return prev;
       });
 
       // Delete from IndexedDB if already uploaded
       pending.forEach((p) => {
-        if (currentFileIds.has(p.id)) {
+        const key = `${p.name}:${p.source || "manual"}`;
+        if (currentFileKeys.has(key)) {
           deletePendingUpload(p.id).catch(() => {});
         }
       });
 
       // Only resume uploads for files that aren't already uploaded
-      const toResume = pending.filter((p) => !currentFileIds.has(p.id));
+      const toResume = pending.filter(
+        (p) => !currentFileKeys.has(`${p.name}:${p.source || "manual"}`),
+      );
 
       if (toResume.length === 0) return;
 
@@ -236,16 +256,87 @@ export function useEncounterGeneration({
     })();
   }, [visitId, setFiles]);
 
+  const handleRecordingStart = useCallback(
+    (pendingId: string, name: string) => {
+      // Add pending file to UI immediately when recording starts
+      setFiles((prev: EncounterFile[]) => [
+        ...prev,
+        {
+          id: pendingId,
+          name,
+          size: 0, // Will be updated when upload completes
+          type: "audio/wav",
+          source: "recording",
+          pending: true,
+          isRecording: true, // Spinner will rotate
+        },
+      ]);
+    },
+    [setFiles],
+  );
+
   const handleRecordingComplete = useCallback(
-    async (blob: Blob) => {
-      setAudioBlob(blob);
+    async (
+      blob: Blob | null,
+      pendingId: string | null,
+      segmentIds: string[],
+    ) => {
+      // If no blob and no segments, nothing to upload
+      if (!blob && segmentIds.length === 0) {
+        console.warn("[recording] No blob or segments to upload");
+        return;
+      }
+
+      // Load segments from IndexedDB if any exist
+      let finalBlob = blob;
+      if (segmentIds.length > 0) {
+        try {
+          const { getPendingUploadsForVisit, deletePendingUpload } =
+            await import("@/lib/indexeddb/pending-uploads");
+
+          const allPending = await getPendingUploadsForVisit(visitId);
+          const segments = allPending
+            .filter((p) => p.source === "recording-segment")
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+          if (segments.length > 0) {
+            console.log(
+              `[recording] Merging ${segments.length} segments from IndexedDB`,
+            );
+
+            // Merge all segments into one blob
+            const mergedBlob = new Blob(
+              segments.map((s) => s.blob),
+              { type: segments[0]?.type || "audio/webm" },
+            );
+
+            finalBlob = mergedBlob;
+
+            // Cleanup segments from IndexedDB
+            await Promise.all(segments.map((s) => deletePendingUpload(s.id)));
+          }
+        } catch (err) {
+          console.error(
+            "[recording] Failed to load/merge segments from IndexedDB:",
+            err,
+          );
+          // Continue with in-memory blob if available
+        }
+      }
+
+      if (!finalBlob) {
+        console.warn("[recording] No blob available after segment loading");
+        return;
+      }
+
+      setAudioBlob(finalBlob);
 
       // Convert to WAV for reliable ElevenLabs compatibility
       let uploadBlob: Blob;
       let uploadName: string;
       try {
         const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-        uploadBlob = await convertToWav(blob);
+        uploadBlob = await convertToWav(finalBlob);
         uploadName = "recording.wav";
       } catch (convErr) {
         // WAV conversion failed — upload original blob so audio is never lost
@@ -253,29 +344,12 @@ export function useEncounterGeneration({
           "[recording] WAV conversion failed, uploading original blob:",
           convErr,
         );
-        uploadBlob = blob;
-        const ext = mimeToExt(blob.type);
+        uploadBlob = finalBlob;
+        const ext = mimeToExt(finalBlob.type);
         uploadName = `recording${ext}`;
       }
 
-      // Show recording in files list immediately (before upload)
-      const pendingId = crypto.randomUUID();
-      setFiles((prev: EncounterFile[]) => [
-        ...prev,
-        {
-          id: pendingId,
-          name: uploadName,
-          size: uploadBlob.size,
-          type: uploadBlob.type,
-          source: "recording",
-          pending: true,
-        },
-      ]);
-
       // Upload with IndexedDB persistence and retry
-      // Note: uploadWithPersistence handles IndexedDB save/delete internally.
-      // Do NOT manually call savePendingUpload here — it creates a second entry
-      // that never gets cleaned up, causing duplicates on page refresh.
       const { uploadWithPersistence } =
         await import("@/lib/upload/upload-with-persistence");
 
@@ -305,10 +379,18 @@ export function useEncounterGeneration({
         const data = await res.json();
 
         // Replace pending file with uploaded file
-        setFiles((prev: EncounterFile[]) => {
-          const withoutPending = prev.filter((f) => f.id !== pendingId);
-          return [...withoutPending, ...(data.files as EncounterFile[])];
-        });
+        if (pendingId) {
+          setFiles((prev: EncounterFile[]) => {
+            const withoutPending = prev.filter((f) => f.id !== pendingId);
+            return [...withoutPending, ...(data.files as EncounterFile[])];
+          });
+        } else {
+          // No pending ID (old flow or recovery), just add the files
+          setFiles((prev: EncounterFile[]) => [
+            ...prev,
+            ...(data.files as EncounterFile[]),
+          ]);
+        }
       } catch (err) {
         console.error("[recording] Upload failed after all retries:", err);
       }
@@ -319,6 +401,16 @@ export function useEncounterGeneration({
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
       setHasActiveRecording(recordingState !== "idle");
+
+      // Update pending recording file's isRecording flag for dynamic spinner
+      setFiles((prev: EncounterFile[]) =>
+        prev.map((f) =>
+          f.source === "recording" && f.pending
+            ? { ...f, isRecording: recordingState === "recording" }
+            : f,
+        ),
+      );
+
       // Don't override status during generation — finalize() triggers an "idle"
       // state change that would overwrite "processing" and break the UI flow.
       if (activeGenerations.has(visitId)) return;
@@ -336,7 +428,7 @@ export function useEncounterGeneration({
         body: JSON.stringify({ status }),
       }).catch(() => {});
     },
-    [visitId, setVisit],
+    [visitId, setVisit, setFiles],
   );
 
   const handleGenerate = useCallback(
@@ -371,12 +463,20 @@ export function useEncounterGeneration({
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
+      const pendingId = finalized?.pendingId ?? null;
+      const segmentIds = finalized?.segmentIds ?? [];
 
       try {
-        // If there's a recorded audio that hasn't been uploaded yet AND we don't
-        // have a streaming transcript, upload now as fallback.
-        // Read from ref (not stale state) — handleRecordingComplete may have
-        // uploaded the file between our capture and finalize().
+        // If there's a recorded audio that hasn't been uploaded yet, upload it now
+        if (
+          (blobToProcess || segmentIds.length > 0) &&
+          !audioStoragePathRef.current
+        ) {
+          // Upload via handleRecordingComplete (handles segment merging)
+          await handleRecordingComplete(blobToProcess, pendingId, segmentIds);
+        }
+
+        // Legacy fallback: If still no audio path and no transcript, try direct upload
         if (
           blobToProcess &&
           !audioStoragePathRef.current &&
@@ -518,6 +618,13 @@ export function useEncounterGeneration({
                       letter: event.letter || "",
                     });
                     setGeneratedNoteHtml(event.generatedNote);
+
+                    // Calculate auto-title immediately (needs capturedTitle from closure)
+                    const autoTitle = !capturedTitle.trim()
+                      ? (event.suggestedTitle as string)
+                      : null;
+
+                    // ATOMIC UPDATE: Set note content + status + title together
                     setVisit((prev) => {
                       if (!prev) return prev;
                       const existingMeta = (prev.metadata ?? {}) as Record<
@@ -528,9 +635,11 @@ export function useEncounterGeneration({
                         ...prev,
                         encounter_note: event.generatedNote,
                         patient_letter: event.letter,
+                        status: "to_review", // Set status atomically
                         ...(streamingTranscript
                           ? { raw_text: streamingTranscript }
                           : {}),
+                        ...(autoTitle ? { title: autoTitle } : {}), // Set title atomically
                         metadata: {
                           ...existingMeta,
                           ...(event.clinicalAnalysis
@@ -539,6 +648,20 @@ export function useEncounterGeneration({
                         },
                       };
                     });
+
+                    // Update title callback if auto-title was generated
+                    if (autoTitle) updateTitleRef.current(autoTitle);
+
+                    // Dispatch event immediately for sidebar sync
+                    window.dispatchEvent(
+                      new CustomEvent("encounter-update", {
+                        detail: {
+                          id: visitId,
+                          status: "to_review",
+                          ...(autoTitle ? { title: autoTitle } : {}),
+                        },
+                      }),
+                    );
                   } else if (event.type === "error") {
                     throw new Error(event.error);
                   }
@@ -565,7 +688,7 @@ export function useEncounterGeneration({
           }
         }
 
-        // Handle post-generation (title, status transition) using completed event
+        // Persist to database (fire-and-forget, UI already updated)
         if (completedEvent) {
           const autoTitle = !capturedTitle.trim()
             ? (completedEvent.suggestedTitle as string)
@@ -573,22 +696,12 @@ export function useEncounterGeneration({
           const patchBody: Record<string, string> = { status: "to_review" };
           if (autoTitle) patchBody.title = autoTitle;
 
-          await fetch(`/api/encounters/${visitId}`, {
+          // Fire-and-forget: don't await, don't block UI
+          fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patchBody),
-          });
-          if (autoTitle) updateTitleRef.current(autoTitle);
-          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-          window.dispatchEvent(
-            new CustomEvent("encounter-update", {
-              detail: {
-                id: visitId,
-                status: "to_review",
-                ...(autoTitle ? { title: autoTitle } : {}),
-              },
-            }),
-          );
+          }).catch(() => {}); // Silent fail - state already updated
 
           // Email is now sent server-side in /api/generate after saving to DB
         }
@@ -623,7 +736,15 @@ export function useEncounterGeneration({
         );
       }
     },
-    [visitId, selectedTemplateId, doctorNotes, audioBlob, setVisit, setError],
+    [
+      visitId,
+      selectedTemplateId,
+      doctorNotes,
+      audioBlob,
+      setVisit,
+      setError,
+      handleRecordingComplete,
+    ],
   );
 
   /* ------------------------------------------------------------------ */
@@ -782,6 +903,8 @@ export function useEncounterGeneration({
                   letter: event.letter || "",
                 });
                 setGeneratedNoteHtml(event.generatedNote);
+
+                // ATOMIC UPDATE: Set note content + status together
                 setVisit((prev) => {
                   if (!prev) return prev;
                   const existingMeta = (prev.metadata ?? {}) as Record<
@@ -792,6 +915,7 @@ export function useEncounterGeneration({
                     ...prev,
                     encounter_note: event.generatedNote,
                     patient_letter: event.letter,
+                    status: "to_review", // Set status atomically
                     ...(streamingTranscript
                       ? { raw_text: streamingTranscript }
                       : {}),
@@ -803,6 +927,13 @@ export function useEncounterGeneration({
                     },
                   };
                 });
+
+                // Dispatch event immediately for sidebar sync
+                window.dispatchEvent(
+                  new CustomEvent("encounter-update", {
+                    detail: { id: visitId, status: "to_review" },
+                  }),
+                );
               } else if (event.type === "error") {
                 throw new Error(event.error);
               }
@@ -817,19 +948,13 @@ export function useEncounterGeneration({
           }
         }
 
-        // Post-generation: transition to to_review
+        // Persist to database (fire-and-forget, UI already updated)
         if (completedEvent) {
-          await fetch(`/api/encounters/${visitId}`, {
+          fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "to_review" }),
-          });
-          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-          window.dispatchEvent(
-            new CustomEvent("encounter-update", {
-              detail: { id: visitId, status: "to_review" },
-            }),
-          );
+          }).catch(() => {}); // Silent fail - state already updated
         }
 
         // Update doctor notes to include merged version
@@ -1211,6 +1336,28 @@ export function useEncounterGeneration({
     return () => stopPolling();
   }, [visit?.status, isStreaming, visitId, setVisit, stopPolling]);
 
+  // Calculate content metrics for timer estimation
+  // Note: fileCount and imageCount are not available in this hook yet
+  // They should be passed from the page component for more accurate estimation
+  const contentMetrics = useMemo(
+    () => ({
+      transcriptLength: visit?.raw_text?.length || 0,
+      doctorNotesLength: doctorNotes.length,
+      fileCount: 0, // TODO: Pass files from page component
+      imageCount: 0, // TODO: Pass files from page component
+    }),
+    [visit?.raw_text, doctorNotes],
+  );
+
+  // Generation timer for countdown display
+  // Use actual section count from SSE, or fallback to 8 sections (typical template)
+  const timerState = useGenerationTimer({
+    isGenerating: isStreaming || visit?.status === "processing",
+    totalSections: streamingSectionIds.length || 8,
+    completedSections: streamedSections.length,
+    contentMetrics,
+  });
+
   return {
     generationLanguage,
     selectedTemplateId,
@@ -1228,6 +1375,7 @@ export function useEncounterGeneration({
     recordingBarRef,
     syncTitle,
     initFromVisit,
+    handleRecordingStart,
     handleRecordingComplete,
     handleRecordingStateChange,
     handleGenerate,
@@ -1235,5 +1383,6 @@ export function useEncounterGeneration({
     handleTemplateChange,
     handleRegenerate,
     handleAdjustGenerate,
+    timerState,
   };
 }

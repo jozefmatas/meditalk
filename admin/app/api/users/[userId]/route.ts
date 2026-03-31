@@ -11,7 +11,6 @@ async function listAllFiles(
   let offset = 0;
   const limit = 1000;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { data, error } = await sb.storage
       .from(bucket)

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import sharp from "sharp";
 import { extractTextFromUpload } from "@/lib/file-extraction";
+import { supabaseAdmin } from "@/lib/supabase";
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -60,6 +62,9 @@ IMPORTANT:
 - Return ONLY valid JSON, no markdown or explanation.`;
 
 export async function POST(request: NextRequest) {
+  const supabase = supabaseAdmin();
+  let tempFilePath: string | null = null;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
@@ -69,10 +74,71 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const base64 = buffer.toString("base64");
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf";
+    const isText = file.type === "text/plain" || file.type === "text/markdown";
 
-    // Step 1: Extract text from the file
-    const extractedText = await extractTextFromUpload(base64, file.type);
+    // Step 1: Upload to storage and create signed URL (for images/PDFs, no 5MB limit)
+    let extractedText: string | null = null;
+
+    if (isText) {
+      // Plain text: extract directly
+      extractedText = await extractTextFromUpload({ buffer }, file.type);
+    } else if (isPdf || isImage) {
+      // Upload to temporary storage location
+      const fileId = crypto.randomUUID();
+      tempFilePath = `temp/analyze-note/${fileId}-${file.name}`;
+
+      let finalBuffer: Buffer<ArrayBufferLike> = buffer;
+
+      // For images: EXIF auto-rotate before uploading (fixes phone photos)
+      if (isImage) {
+        console.log("[analyze-note] EXIF auto-rotating image before upload");
+        finalBuffer = await sharp(buffer).rotate().toBuffer();
+      }
+
+      const { error: uploadError } = await supabase.storage
+        .from("encounter-files")
+        .upload(tempFilePath, finalBuffer, {
+          contentType: file.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("[analyze-note] Upload failed:", uploadError);
+        return NextResponse.json(
+          { error: "Failed to upload file" },
+          { status: 500 },
+        );
+      }
+
+      // Create signed URL (5 min expiry)
+      const { data: urlData, error: urlError } = await supabase.storage
+        .from("encounter-files")
+        .createSignedUrl(tempFilePath, 300);
+
+      if (urlError || !urlData?.signedUrl) {
+        console.error("[analyze-note] Signed URL failed:", urlError);
+        return NextResponse.json(
+          { error: "Failed to create signed URL" },
+          { status: 500 },
+        );
+      }
+
+      // Extract text using signed URL (no size limit)
+      if (isPdf) {
+        extractedText = await extractTextFromUpload(
+          { pdfUrl: urlData.signedUrl },
+          file.type,
+        );
+      } else {
+        extractedText = await extractTextFromUpload(
+          { imageUrl: urlData.signedUrl },
+          file.type,
+        );
+      }
+    }
+
     if (!extractedText) {
       return NextResponse.json(
         {
@@ -120,5 +186,15 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error("[admin] analyze-note error:", err);
     return NextResponse.json({ error: "Analysis failed" }, { status: 500 });
+  } finally {
+    // Clean up temporary file
+    if (tempFilePath) {
+      await supabase.storage
+        .from("encounter-files")
+        .remove([tempFilePath])
+        .catch((err) =>
+          console.error("[analyze-note] Failed to delete temp file:", err),
+        );
+    }
   }
 }

@@ -543,11 +543,13 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
   }
 
   // ── New template detection ──
-  // A template is "new" if all name values in the initial data are empty
-  const isNewTemplate = useMemo(
-    () => Object.values(initialData.name).every((v) => !v.trim()),
-    [initialData.name],
+  // Track whether the template has ever been successfully saved
+  const [hasBeenSaved, setHasBeenSaved] = useState(() =>
+    Object.values(initialData.name).some((v) => v.trim()),
   );
+
+  // A template is "new" if it has never been saved
+  const isNewTemplate = !hasBeenSaved;
 
   // Name is required for saving — at least one locale must have a name
   const hasName = useMemo(
@@ -778,6 +780,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             style_guide: styleGuide,
           }),
         );
+        setHasBeenSaved(true);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       }

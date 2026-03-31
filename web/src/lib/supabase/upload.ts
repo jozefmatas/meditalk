@@ -6,6 +6,31 @@ export interface UploadResult {
 }
 
 /**
+ * Sanitize filename for storage - remove/replace special characters.
+ * Keeps ASCII letters, numbers, dots, hyphens, underscores.
+ * Preserves file extension.
+ */
+function sanitizeFilename(filename: string): string {
+  // Split name and extension
+  const lastDotIndex = filename.lastIndexOf(".");
+  const name =
+    lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
+  const ext = lastDotIndex > 0 ? filename.substring(lastDotIndex) : "";
+
+  // Normalize unicode characters (e.g., č → c, á → a)
+  const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Replace spaces and special chars with hyphens, keep only safe characters
+  const sanitized = normalized
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return sanitized + ext;
+}
+
+/**
  * Upload a file directly to Supabase Storage from the browser.
  * Bypasses Vercel's 4.5 MB serverless body-size limit by going
  * straight to the storage bucket (RLS enforces userId prefix).
@@ -27,9 +52,10 @@ export async function uploadToStorage(
   }
 
   const fileId = crypto.randomUUID();
+  const sanitizedFileName = sanitizeFilename(fileName);
   const path = opts?.encounterId
-    ? `${user.id}/${opts.encounterId}/${fileId}-${fileName}`
-    : `${user.id}/${fileId}-${fileName}`;
+    ? `${user.id}/${opts.encounterId}/${fileId}-${sanitizedFileName}`
+    : `${user.id}/${fileId}-${sanitizedFileName}`;
 
   const contentType =
     file instanceof File ? file.type : "application/octet-stream";
