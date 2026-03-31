@@ -95,7 +95,20 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updateData.encounter_note = body.encounter_note;
     if (body.patient_letter !== undefined)
       updateData.patient_letter = body.patient_letter;
-    if (body.metadata !== undefined) updateData.metadata = body.metadata;
+
+    // Merge metadata instead of replacing to prevent race conditions
+    if (body.metadata !== undefined) {
+      // Fetch current metadata to merge with
+      const { data: current } = await supabase
+        .from("visits")
+        .select("metadata")
+        .eq("id", visitId)
+        .eq("user_id", userId)
+        .single();
+
+      const currentMeta = (current?.metadata ?? {}) as Record<string, unknown>;
+      updateData.metadata = { ...currentMeta, ...body.metadata };
+    }
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json(

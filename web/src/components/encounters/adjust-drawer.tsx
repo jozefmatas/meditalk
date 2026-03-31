@@ -54,6 +54,10 @@ interface AdjustDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   visitId: string;
+  metadata?: {
+    recording_consent?: boolean;
+    recording_consent_date?: string;
+  };
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
   generationLanguage: SupportedLanguage;
@@ -72,6 +76,7 @@ export function AdjustDrawer({
   open,
   onOpenChange,
   visitId,
+  metadata,
   files,
   onFilesChange,
   generationLanguage,
@@ -107,6 +112,24 @@ export function AdjustDrawer({
     files,
     onFilesChange,
   ]);
+
+  const handleRecordingStart = useCallback(
+    (pendingId: string, name: string) => {
+      setNewFiles((prev) => [
+        ...prev,
+        {
+          id: pendingId,
+          name,
+          size: 0,
+          type: "audio/wav",
+          source: "recording",
+          pending: true,
+          isRecording: true,
+        },
+      ]);
+    },
+    [],
+  );
 
   const handleRecordingComplete = useCallback(() => {
     // Recording blob is handled via finalize() in handleAdjustGenerate
@@ -170,6 +193,9 @@ export function AdjustDrawer({
                     <div className="[&_div.hidden]:w-full [&_div.hidden]:justify-between">
                       <RecordingBar
                         ref={adjustRecordingBarRef}
+                        visitId={visitId}
+                        metadata={metadata}
+                        onRecordingStart={handleRecordingStart}
                         onRecordingComplete={handleRecordingComplete}
                         onRecordingStateChange={setRecordingState}
                       />

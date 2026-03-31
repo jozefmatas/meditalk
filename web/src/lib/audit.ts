@@ -17,8 +17,14 @@ export interface AuditEntry {
  * Uses admin client to bypass RLS.
  */
 export function logAudit(entry: AuditEntry): void {
+  const client = createAdminClient();
+  if (!client) {
+    // Admin client unavailable (missing service role key) — skip silently
+    return;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- audit_logs not in generated types until migration is pushed
-  (createAdminClient().from("audit_logs") as any)
+  (client.from("audit_logs") as any)
     .insert({
       actor_id: entry.actorId,
       actor_email: entry.actorEmail ?? null,
@@ -31,7 +37,10 @@ export function logAudit(entry: AuditEntry): void {
       target_user_id: entry.targetUserId ?? null,
     })
     .then(({ error }: { error: { message: string } | null }) => {
-      if (error) console.error("[audit] Insert failed:", error.message);
+      // Only log errors in development — production fails silently
+      if (error && process.env.NODE_ENV === "development") {
+        console.error("[audit] Insert failed:", error.message);
+      }
     })
     .catch(() => {
       // Network-level fetch failure — silently drop

@@ -50,9 +50,16 @@ export async function requireAuth() {
   const impersonateUserId = cookieStore.get(IMPERSONATE_COOKIE)?.value;
 
   if (impersonateUserId && isAdminEmail(user.email)) {
+    const adminClient = createAdminClient();
+    if (!adminClient) {
+      throw new Response(
+        JSON.stringify({ error: "Admin client unavailable" }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      );
+    }
     return {
       userId: impersonateUserId,
-      supabase: createAdminClient(),
+      supabase: adminClient,
       isImpersonating: true,
       realUserId: user.id,
       realUserEmail: user.email,

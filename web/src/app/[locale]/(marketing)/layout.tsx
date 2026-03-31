@@ -1,5 +1,6 @@
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import { CookieConsent } from "@/components/shared/cookie-consent";
 
 function MarketingNav() {
   const t = useTranslations("marketing.nav");
@@ -8,7 +9,7 @@ function MarketingNav() {
   return (
     <header className="border-b border-border bg-background">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-        <Link href="/" className="text-xl font-bold">
+        <Link href="/landing" className="text-xl font-bold">
           MediTalk
         </Link>
         <nav className="flex items-center gap-6">
@@ -29,10 +30,24 @@ function MarketingFooter() {
 
   return (
     <footer className="border-t border-border bg-background">
-      <div className="mx-auto flex h-16 max-w-5xl items-center px-6">
+      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
         <p className="text-sm text-foreground/65">
           {t("copyright", { year: new Date().getFullYear() })}
         </p>
+        <div className="flex items-center gap-6">
+          <Link
+            href="/privacy-policy"
+            className="text-sm text-foreground/65 transition-colors hover:text-foreground"
+          >
+            {t("privacyPolicy")}
+          </Link>
+          <Link
+            href="/terms-of-service"
+            className="text-sm text-foreground/65 transition-colors hover:text-foreground"
+          >
+            {t("termsOfService")}
+          </Link>
+        </div>
       </div>
     </footer>
   );
@@ -48,6 +63,7 @@ export default function MarketingLayout({
       <MarketingNav />
       <main className="flex-1">{children}</main>
       <MarketingFooter />
+      <CookieConsent />
     </div>
   );
 }

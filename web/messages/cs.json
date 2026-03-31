@@ -132,7 +132,13 @@
       "leaveWhileRecordingStay": "Zůstat na stránce",
       "leaveWhileRecordingLeave": "Opustit stránku",
       "micError": "Nepodařilo se získat přístup k mikrofonu. Zkontrolujte oprávnění a zkuste to znovu.",
+      "recordingNotificationTitle": "Probíhá nahrávání",
+      "recordingNotificationBody": "MediTalk nahrává. Nezavírejte toto upozornění.",
       "generatingEncounter": "Generuji",
+      "generatingReadyIn": "Hotovo za {time}",
+      "generatingInitializing": "Inicializuji...",
+      "lessThanMinute": "< 1 min",
+      "minutesRemaining": "{minutes} min",
       "regenerating": "Regeneruji zprávu...",
       "note": "Zpráva",
       "addDocument": "Přidat dokument",
@@ -164,7 +170,15 @@
       "adjustTabRecord": "Nahrát / Soubory",
       "adjustTabNotes": "Volné poznámky",
       "adjustRegenerate": "Přegenerovat",
-      "adjustNotesPlaceholder": "Přidejte další kontext..."
+      "adjustNotesPlaceholder": "Přidejte další kontext...",
+      "recordingConsent": {
+        "title": "Souhlas s nahráváním",
+        "description": "Před spuštěním nahrávání je potřeba souhlas pacienta",
+        "explanation": "Před začátkem nahrávání potvrďte, že jste získali souhlas pacienta na nahrání této konzultace.",
+        "confirmCheckbox": "Tímto potvrzuji, že jsem získal souhlas pacienta na nahrání této konzultace.",
+        "iConsent": "Souhlasím",
+        "cancel": "Zrušit"
+      }
     },
     "insufficientContext": "Nedostatek klinických informací pro vygenerování záznamu. Nahrajte konzultaci, přidejte poznámky s klinickými detaily nebo nahrajte relevantní soubory.",
     "generationInterrupted": "Generování bylo přerušeno. Vaše nahrávka a soubory jsou v bezpečí — stiskněte Opakovat pro pokračování.",
@@ -340,7 +354,329 @@
       "cta": "Začít zdarma"
     },
     "footer": {
-      "copyright": "© {year} MediTalk. Všechna práva vyhrazena."
+      "copyright": "© {year} MediTalk. Všechna práva vyhrazena.",
+      "privacyPolicy": "Zásady ochrany osobních údajů",
+      "termsOfService": "Podmínky používání"
+    },
+    "privacyPolicy": {
+      "title": "Zásady ochrany osobních údajů",
+      "effectiveDate": "Datum účinnosti: 31. března 2026",
+      "lastModified": "Poslední aktualizace: 31. března 2026",
+      "s1": {
+        "title": "Úvod a rozsah působnosti",
+        "p1": "MediTalk s.r.o. (\"MediTalk\", \"my\", \"nás\" nebo \"náš\") se zavazuje chránit soukromí a bezpečnost osobních údajů v souladu s Obecným nařízením o ochraně osobních údajů (EU) 2016/679 (\"GDPR\") a platnými slovenskými a evropskými zákony o ochraně údajů.",
+        "p2": "Tyto Zásady ochrany osobních údajů popisují, jak shromažďujeme, používáme, zveřejňujeme a chráníme osobní údaje při používání naší platformy pro lékařskou dokumentaci (\"Služba\"). Používáním MediTalk potvrzujete, že jste si přečetli a porozuměli těmto Zásadám ochrany osobních údajů."
+      },
+      "s2": {
+        "title": "Data Controller",
+        "p1": "For the purposes of GDPR Article 4(7), MediTalk s.r.o. is the data controller responsible for your personal data:",
+        "company": "MediTalk s.r.o.",
+        "address": "Bratislava, Slovak Republic",
+        "email": "Email: privacy@meditalk.ai"
+      },
+      "s3": {
+        "title": "What Personal Data We Collect",
+        "intro": "We collect and process the following categories of personal data:",
+        "s1": {
+          "title": "Identity and Contact Data",
+          "i1": "Full name and professional title",
+          "i2": "Email address",
+          "i3": "Phone number (if provided)",
+          "i4": "Professional license number and credentials"
+        },
+        "s2": {
+          "title": "Health Information (Special Category Data under GDPR Article 9)",
+          "i1": "Patient names and identification numbers",
+          "i2": "Audio recordings of medical consultations",
+          "i3": "Transcripts of medical consultations",
+          "i4": "Clinical notes and medical documentation generated through the Service"
+        },
+        "s3": {
+          "title": "Technical Data",
+          "i1": "IP address, browser type, and device information",
+          "i2": "Usage analytics and interaction data",
+          "i3": "Session cookies for authentication and functionality"
+        }
+      },
+      "s4": {
+        "title": "Legal Basis for Processing",
+        "intro": "We process personal data only when we have a valid legal basis under GDPR Article 6(1):",
+        "i1": {
+          "title": "Contract Performance (Article 6(1)(b)):",
+          "desc": "Processing necessary to provide the Service and fulfill our contractual obligations to healthcare providers."
+        },
+        "i2": {
+          "title": "Legal Obligation (Article 6(1)(c)):",
+          "desc": "Compliance with healthcare record retention requirements and applicable medical regulations."
+        },
+        "i3": {
+          "title": "Legitimate Interests (Article 6(1)(f)):",
+          "desc": "Service improvement, security, and fraud prevention, where such interests are not overridden by data subject rights."
+        }
+      },
+      "s5": {
+        "title": "How We Use Your Data",
+        "i1": "Transcription of medical consultations using AI speech-to-text technology",
+        "i2": "Generation of clinical documentation and structured medical notes",
+        "i3": "Secure storage and retrieval of medical records",
+        "i4": "Service improvement and quality assurance (anonymized data only)",
+        "i5": "Communication regarding service updates, security notices, and administrative matters"
+      },
+      "s6": {
+        "title": "AI Processing and Third-Party Services",
+        "p1": "MediTalk utilizes artificial intelligence services from third-party processors to provide transcription and documentation generation. These processors act as data processors under GDPR Article 28:",
+        "anthropic": {
+          "title": "Anthropic (Claude AI):",
+          "desc": "Used for clinical note generation and medical text analysis. Data is processed in accordance with Anthropic's Business Associate Agreement (BAA) for HIPAA compliance and their GDPR-compliant Data Processing Addendum."
+        },
+        "openai": {
+          "title": "OpenAI (Whisper, GPT):",
+          "desc": "Used for audio transcription and text embeddings. Data is processed under OpenAI's Business Associate Agreement and their GDPR-compliant Data Processing Addendum."
+        },
+        "p2": "Important: These AI services do not use your data to train their models. Audio recordings and transcripts are processed transiently and are not retained by the AI providers beyond the time necessary for processing."
+      },
+      "s7": {
+        "title": "Data Sharing and Disclosure",
+        "p1": "We do not sell personal data to third parties. We share data only in the following limited circumstances:",
+        "i1": "With AI service providers (Anthropic, OpenAI) as data processors under strict contractual safeguards",
+        "i2": "With cloud infrastructure providers (Supabase, Vercel) for secure data storage and application hosting",
+        "i3": "When required by law, court order, or regulatory authority, or to protect the rights, property, or safety of MediTalk, our users, or others"
+      },
+      "s8": {
+        "title": "Data Retention",
+        "p1": "Clinical records (consultations, transcripts, notes) are retained for a minimum period required by Slovak healthcare regulations (typically 10 years from the date of the last medical intervention). After this period, data may be archived or deleted in accordance with legal requirements.",
+        "p2": "Account and user data is retained for the duration of your account plus an additional period as required for legal compliance, dispute resolution, and enforcement of agreements."
+      },
+      "s9": {
+        "title": "Data Security",
+        "p1": "We implement technical and organizational measures to protect personal data against unauthorized access, alteration, disclosure, or destruction:",
+        "i1": "End-to-end encryption for data in transit (TLS 1.3)",
+        "i2": "Encryption at rest for all database storage (AES-256)",
+        "i3": "Access controls and authentication mechanisms (multi-factor authentication available)",
+        "i4": "Regular security audits and vulnerability assessments"
+      },
+      "s10": {
+        "title": "Your Rights Under GDPR",
+        "intro": "As a data subject, you have the following rights under GDPR:",
+        "i1": {
+          "title": "Right of Access (Article 15):",
+          "desc": "You may request a copy of the personal data we hold about you."
+        },
+        "i2": {
+          "title": "Right to Rectification (Article 16):",
+          "desc": "You may request correction of inaccurate or incomplete personal data."
+        },
+        "i3": {
+          "title": "Right to Erasure (Article 17):",
+          "desc": "You may request deletion of your personal data, subject to legal retention obligations."
+        },
+        "i4": {
+          "title": "Right to Restriction (Article 18):",
+          "desc": "You may request that we limit processing of your personal data in certain circumstances."
+        },
+        "i5": {
+          "title": "Right to Data Portability (Article 20):",
+          "desc": "You may request transfer of your data to another controller in a structured, machine-readable format."
+        },
+        "i6": {
+          "title": "Right to Object (Article 21):",
+          "desc": "You may object to processing based on legitimate interests or for direct marketing purposes."
+        },
+        "exercise": "To exercise any of these rights, please contact us at privacy@meditalk.ai. We will respond to your request within one month as required by GDPR Article 12(3)."
+      },
+      "s11": {
+        "title": "International Data Transfers",
+        "p1": "Your data may be transferred to and processed in countries outside the European Economic Area (EEA), including the United States, where our AI service providers operate. Such transfers are conducted in accordance with GDPR Chapter V:",
+        "p2": "We ensure appropriate safeguards through Standard Contractual Clauses (SCCs) approved by the European Commission, supplemented by additional technical and organizational measures to ensure GDPR-level protection."
+      },
+      "s12": {
+        "title": "Cookies and Tracking",
+        "p1": "We use cookies and similar tracking technologies only with your consent. Analytics cookies (Vercel Analytics) are used to understand service usage patterns and improve user experience. You may withdraw consent at any time through our cookie banner or browser settings."
+      },
+      "s13": {
+        "title": "Changes to This Privacy Policy",
+        "p1": "We may update this Privacy Policy from time to time to reflect changes in our practices or legal requirements. Material changes will be communicated via email or prominent notice on the Service at least 30 days before taking effect."
+      },
+      "s14": {
+        "title": "Contact and Complaints",
+        "p1": "For questions, concerns, or requests regarding this Privacy Policy or your personal data, please contact us:",
+        "emailLabel": "Email:",
+        "email": "privacy@meditalk.ai",
+        "addressLabel": "Postal Address:",
+        "address": "MediTalk s.r.o., Bratislava, Slovak Republic",
+        "supervisory": "If you believe your data protection rights have been violated, you have the right to lodge a complaint with the Slovak Data Protection Authority (Úrad na ochranu osobných údajov Slovenskej republiky) or your local supervisory authority under GDPR Article 77."
+      },
+      "footer": "Tyto Zásady ochrany osobních údajů se řídí slovenským právem a GDPR. Poslední kontrola: březen 2026. Pro naše Podmínky používání viz",
+      "footerLink": "Podmínky používání"
+    },
+    "termsOfService": {
+      "title": "Podmínky používání",
+      "effectiveDate": "Datum účinnosti: 31. března 2026",
+      "lastModified": "Poslední aktualizace: 31. března 2026",
+      "s1": {
+        "title": "Acceptance of Terms",
+        "p1": "These Terms of Service (\"Terms\") constitute a legally binding agreement between you (\"User\", \"you\", or \"your\") and MediTalk s.r.o. (\"MediTalk\", \"we\", \"us\", or \"our\") governing your access to and use of the MediTalk medical documentation platform (the \"Service\").",
+        "p2": "By creating an account, accessing, or using the Service, you acknowledge that you have read, understood, and agree to be bound by these Terms and our Privacy Policy. If you do not agree to these Terms, you must not access or use the Service."
+      },
+      "s2": {
+        "title": "Definitions",
+        "i1": {
+          "term": "Service",
+          "def": "refers to the MediTalk platform, including all software, applications, features, and functionality provided by MediTalk."
+        },
+        "i2": {
+          "term": "User",
+          "def": "refers to any licensed healthcare professional who registers for and uses the Service."
+        },
+        "i3": {
+          "term": "Patient Data",
+          "def": "refers to any personal health information, medical records, or protected health information (PHI) entered into or processed through the Service."
+        },
+        "i4": {
+          "term": "Generated Content",
+          "def": "refers to clinical notes, transcripts, summaries, or other documentation created by the Service's artificial intelligence systems."
+        },
+        "i5": {
+          "term": "Account",
+          "def": "refers to the user account created to access the Service."
+        }
+      },
+      "s3": {
+        "title": "Eligibility and Account Registration",
+        "p1": "The Service is intended solely for use by licensed healthcare professionals in the practice of medicine. By registering for an Account, you represent and warrant that:",
+        "i1": "You are a licensed healthcare professional authorized to practice medicine in your jurisdiction",
+        "i2": "You are at least 18 years of age",
+        "i3": "You have the legal capacity to enter into binding contracts",
+        "i4": "All information you provide during registration is accurate, current, and complete"
+      },
+      "s4": {
+        "title": "Account Security and Responsibilities",
+        "p1": "You are responsible for maintaining the confidentiality of your Account credentials and for all activities that occur under your Account. You agree to:",
+        "p2": "Notify MediTalk immediately of any unauthorized use of your Account or any other breach of security.",
+        "p3": "Not share your Account credentials with any third party or allow any other person to access your Account."
+      },
+      "s5": {
+        "title": "User Obligations and Responsibilities",
+        "intro": "As a User of the Service, you agree to the following obligations:",
+        "s1": {
+          "title": "Patient Consent",
+          "p1": "You must obtain appropriate informed consent from patients before recording consultations or entering patient data into the Service. You are solely responsible for ensuring compliance with applicable consent requirements under local healthcare regulations and professional standards."
+        },
+        "s2": {
+          "title": "Professional Responsibility",
+          "p1": "You acknowledge that MediTalk is a documentation tool and does not replace your professional medical judgment. You remain solely responsible for all clinical decisions, diagnoses, treatment plans, and patient care. The Service does not provide medical advice."
+        },
+        "s3": {
+          "title": "Data Accuracy",
+          "p1": "You are responsible for verifying the accuracy and completeness of all Generated Content before incorporating it into official medical records or using it for patient care. AI-generated content may contain errors or omissions."
+        },
+        "s4": {
+          "title": "Compliance with Laws",
+          "p1": "You agree to use the Service in compliance with all applicable laws, regulations, and professional standards, including but not limited to GDPR, healthcare privacy laws, and medical practice regulations."
+        }
+      },
+      "s6": {
+        "title": "AI-Generated Content and Disclaimers",
+        "p1": "The Service uses artificial intelligence to generate clinical documentation. While we strive for accuracy, AI-generated content is not infallible and must not be relied upon without human review and verification.",
+        "p2": "You acknowledge and agree that: (a) Generated Content may contain inaccuracies, errors, or omissions; (b) Generated Content does not constitute medical advice or diagnosis; (c) You must review, verify, and approve all Generated Content before use in patient care; (d) MediTalk makes no warranties regarding the accuracy, completeness, or reliability of Generated Content.",
+        "warning": "⚠️ CRITICAL: Always review and verify AI-generated clinical notes before finalizing medical records. Never rely solely on AI-generated content for patient care decisions."
+      },
+      "s7": {
+        "title": "Prohibited Conduct",
+        "intro": "You agree not to:",
+        "i1": "Record consultations or process patient data without appropriate consent",
+        "i2": "Use the Service for any unlawful purpose or in violation of these Terms",
+        "i3": "Attempt to circumvent any security measures or access restrictions",
+        "i4": "Upload viruses, malware, or any harmful code",
+        "i5": "Interfere with or disrupt the Service or servers/networks connected to the Service",
+        "i6": "Reverse engineer, decompile, or disassemble any portion of the Service",
+        "i7": "Use the Service to train, develop, or improve any competing artificial intelligence system",
+        "i8": "Share Account access with unauthorized persons or sublicense the Service"
+      },
+      "s8": {
+        "title": "Intellectual Property Rights",
+        "p1": "The Service, including all software, algorithms, user interfaces, designs, and documentation, is owned by MediTalk and is protected by copyright, trademark, patent, and other intellectual property laws.",
+        "p2": "Subject to your compliance with these Terms, MediTalk grants you a limited, non-exclusive, non-transferable, revocable license to access and use the Service solely for your professional medical documentation purposes.",
+        "p3": "You retain all rights to Patient Data you input into the Service. By using the Service, you grant MediTalk a limited license to process Patient Data solely to provide the Service and as described in our Privacy Policy."
+      },
+      "s9": {
+        "title": "Service Availability and Modifications",
+        "p1": "MediTalk strives to maintain Service availability but does not guarantee uninterrupted or error-free operation. We reserve the right to modify, suspend, or discontinue any aspect of the Service at any time with reasonable notice.",
+        "p2": "We may perform scheduled maintenance that temporarily affects Service availability. We will provide advance notice of scheduled maintenance when reasonably possible."
+      },
+      "s10": {
+        "title": "Termination",
+        "s1": {
+          "title": "Termination by User",
+          "p1": "You may terminate your Account at any time through the Settings page. Upon termination, your access to the Service will cease, and your data will be handled in accordance with our Privacy Policy and applicable data retention requirements."
+        },
+        "s2": {
+          "title": "Termination by MediTalk",
+          "p1": "We reserve the right to suspend or terminate your Account immediately, without prior notice, if you violate these Terms, engage in prohibited conduct, or if we reasonably believe such action is necessary to protect MediTalk, other users, or patients."
+        },
+        "s3": {
+          "title": "Effect of Termination",
+          "p1": "Upon termination: (a) your license to use the Service immediately ceases; (b) you remain responsible for any obligations accrued prior to termination; (c) provisions that by their nature should survive termination (including liability limitations, indemnification, and dispute resolution) will remain in effect."
+        }
+      },
+      "s11": {
+        "title": "Disclaimer of Warranties",
+        "p1": "TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE SERVICE IS PROVIDED \"AS IS\" AND \"AS AVAILABLE\" WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE.",
+        "p2": "MEDITALK EXPRESSLY DISCLAIMS ALL WARRANTIES, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND ANY WARRANTIES ARISING FROM COURSE OF DEALING OR USAGE OF TRADE. MEDITALK DOES NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR SECURE, OR THAT DEFECTS WILL BE CORRECTED."
+      },
+      "s12": {
+        "title": "Limitation of Liability",
+        "p1": "TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, YOU EXPRESSLY UNDERSTAND AND AGREE THAT MEDITALK SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, INCLUDING BUT NOT LIMITED TO DAMAGES FOR LOSS OF PROFITS, GOODWILL, USE, DATA, OR OTHER INTANGIBLE LOSSES.",
+        "p2": "IN NO EVENT SHALL MEDITALK'S TOTAL LIABILITY TO YOU FOR ALL CLAIMS ARISING OUT OF OR RELATED TO THESE TERMS OR THE SERVICE EXCEED THE AMOUNT YOU PAID TO MEDITALK IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR ONE HUNDRED EUROS (€100), WHICHEVER IS GREATER."
+      },
+      "s13": {
+        "title": "Indemnification",
+        "p1": "You agree to indemnify, defend, and hold harmless MediTalk, its affiliates, officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, costs, or expenses (including reasonable attorneys' fees) arising out of or related to: (a) your use of the Service; (b) your violation of these Terms; (c) your violation of any applicable law or regulation; (d) your violation of any rights of another party; or (e) Patient Data you provide or clinical decisions you make using Generated Content."
+      },
+      "s14": {
+        "title": "Governing Law and Dispute Resolution",
+        "p1": "These Terms shall be governed by and construed in accordance with the laws of the Slovak Republic, without regard to its conflict of law principles.",
+        "p2": "Any dispute arising out of or relating to these Terms or the Service shall be subject to the exclusive jurisdiction of the courts of Bratislava, Slovak Republic."
+      },
+      "s15": {
+        "title": "Changes to Terms",
+        "p1": "We reserve the right to modify these Terms at any time. Material changes will be communicated via email or prominent notice on the Service at least thirty (30) days before the effective date of such changes.",
+        "p2": "Your continued use of the Service after the effective date of revised Terms constitutes your acceptance of the changes. If you do not agree to the revised Terms, you must discontinue use of the Service and terminate your Account."
+      },
+      "s16": {
+        "title": "Severability",
+        "p1": "If any provision of these Terms is held to be invalid, illegal, or unenforceable, the remaining provisions shall continue in full force and effect. The invalid provision shall be modified to the minimum extent necessary to make it valid and enforceable while preserving the original intent."
+      },
+      "s17": {
+        "title": "Contact Information",
+        "p1": "For questions, concerns, or notices regarding these Terms, please contact us at:",
+        "company": "MediTalk s.r.o.",
+        "address": "Bratislava, Slovak Republic",
+        "emailLabel": "Email:",
+        "email": "legal@meditalk.ai"
+      },
+      "footer": "These Terms of Service are governed by Slovak law. Last reviewed: March 2026. For our Privacy Policy, see",
+      "footerLink": "Privacy Policy"
+    }
+  },
+  "cookieConsent": {
+    "title": "Oznámení o cookies",
+    "message": "Používáme soubory cookie k analýze návštěvnosti a zlepšení vaší zkušenosti.",
+    "learnMore": "Zjistit více",
+    "accept": "Přijmout",
+    "decline": "Odmítnout"
+  },
+  "onboarding": {
+    "dataNotice": {
+      "title": "Zpracování údajů a soukromí",
+      "intro": "Vaše data jsou v bezpečí. Před začátkem práce s MediTalk byste měli vědět:",
+      "point1": "Všechna data jsou šifrována při přenosu i uložení. Nahrávky jsou vymazány ihned po vygenerování dokumentace.",
+      "point2": "Na generování klinické dokumentace používáme AI modely. Tyto služby zpracovávají data v USA pod přísnou ochranou.",
+      "point3": "Vaše data se nikdy nepoužívají k trénování AI modelů. Máte plnou kontrolu — data můžete kdykoliv vymazat.",
+      "learnMore": "Více informací najdete v našich",
+      "privacyPolicyLink": "Zásady ochrany osobních údajů",
+      "checkbox": "Rozumím a souhlasím se zpracováním údajů podle zásad ochrany osobních údajů.",
+      "continue": "Pokračovat"
     }
   }
 }

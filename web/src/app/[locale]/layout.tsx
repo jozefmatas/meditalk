@@ -8,7 +8,7 @@ import { getMessages } from "next-intl/server";
 import { PageTitleProvider } from "@/components/nav/page-title-context";
 import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import { ImpersonationProvider } from "@/components/admin/impersonation-context";
-import { Analytics } from "@vercel/analytics/next";
+import { ConditionalAnalytics } from "@/components/analytics/conditional-analytics";
 import { Toaster } from "@/components/shared/sonner";
 import "../globals.css";
 
@@ -67,7 +67,7 @@ export default async function LocaleLayout({
           </PageTitleProvider>
           <Toaster />
         </NextIntlClientProvider>
-        <Analytics />
+        <ConditionalAnalytics />
       </body>
     </html>
   );

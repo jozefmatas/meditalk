@@ -31,20 +31,38 @@ import {
 } from "@/components/shared/dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Mic01Icon } from "@hugeicons/core-free-icons";
+import { RecordingConsentDialog } from "@/components/encounters/recording-consent-dialog";
+import { useRecordingConsent } from "@/hooks/use-recording-consent";
 
 type RecordingState = "idle" | "recording" | "paused";
 
 export interface RecordingBarRef {
-  /** Stop recorder + Scribe stream, return blob and pre-transcribed text. */
-  finalize: () => Promise<{ blob: Blob | null; transcript: string | null }>;
+  /** Stop recorder + Scribe stream, return blob, transcript, pending ID, and segment IDs. */
+  finalize: () => Promise<{
+    blob: Blob | null;
+    transcript: string | null;
+    pendingId: string | null;
+    segmentIds: string[];
+  }>;
+}
+
+/** Detect if the device is Android */
+function isAndroid(): boolean {
+  return /Android/i.test(navigator.userAgent);
 }
 
 interface RecordingBarProps {
   disabled?: boolean;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange?: (state: RecordingState) => void;
+  onRecordingStart?: (pendingId: string, name: string) => void;
   templateId?: string;
   onTemplateChange?: (id: string) => void;
+  visitId: string;
+  metadata?: {
+    recording_consent?: boolean;
+    recording_consent_date?: string;
+  };
 }
 
 function formatDuration(seconds: number) {
@@ -83,13 +101,20 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       disabled,
       onRecordingComplete,
       onRecordingStateChange,
+      onRecordingStart,
       templateId,
       onTemplateChange,
+      visitId,
+      metadata,
     },
     ref,
   ) {
     const t = useTranslations("encounters.detail");
     const router = useRouter();
+
+    // Recording consent hook
+    const { showConsentDialog, setShowConsentDialog, saveConsent } =
+      useRecordingConsent(visitId, metadata);
 
     const [state, setState] = useState<RecordingState>("idle");
     const [duration, setDuration] = useState(0);
@@ -113,10 +138,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // Recording refs
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
+    const segmentsRef = useRef<Blob[]>([]); // Accumulate recording segments from pause/resume
+    const pendingRecordingIdRef = useRef<string | null>(null); // Track pending file ID for replacement
+    const segmentIdsRef = useRef<string[]>([]); // Track IndexedDB segment IDs for cleanup
     const mimeTypeRef = useRef<string>("audio/webm");
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const elapsedBeforePauseRef = useRef(0);
     const recordingStartRef = useRef(0);
+    const recordingStreamRef = useRef<MediaStream | null>(null);
 
     // Scribe streaming refs
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,6 +155,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     // Wake Lock — keeps screen on during recording (no audio interaction)
     const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+    // Android notification — prevents tab suspension when screen locks
+    const notificationRef = useRef<Notification | null>(null);
 
     const acquireWakeLock = useCallback(async () => {
       if (!("wakeLock" in navigator)) return;
@@ -142,6 +174,44 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const releaseWakeLock = useCallback(() => {
       wakeLockRef.current?.release();
       wakeLockRef.current = null;
+    }, []);
+
+    /** Show persistent notification on Android to prevent tab suspension */
+    const showRecordingNotification = useCallback(async () => {
+      // Only for Android devices with Notification API support
+      if (!isAndroid() || !("Notification" in window)) return;
+
+      try {
+        // Request permission if not already granted
+        if (Notification.permission === "default") {
+          await Notification.requestPermission();
+        }
+
+        // Create notification if permission granted
+        if (Notification.permission === "granted") {
+          notificationRef.current = new Notification(
+            t("recordingNotificationTitle"),
+            {
+              body: t("recordingNotificationBody"),
+              requireInteraction: true,
+              icon: "/icon-192.png",
+              badge: "/icon-192.png",
+              tag: "meditalk-recording", // Replaces previous notification if any
+            },
+          );
+        }
+      } catch (err) {
+        // Notification failed — not critical, recording will still work
+        console.warn("[notification] Failed to show notification:", err);
+      }
+    }, [t]);
+
+    /** Close recording notification */
+    const closeRecordingNotification = useCallback(() => {
+      if (notificationRef.current) {
+        notificationRef.current.close();
+        notificationRef.current = null;
+      }
     }, []);
 
     // Re-acquire wake lock when page becomes visible (OS releases it on hide)
@@ -243,8 +313,10 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         // Release wake lock
         wakeLockRef.current?.release();
         wakeLockRef.current = null;
+        // Close notification
+        closeRecordingNotification();
       };
-    }, []);
+    }, [closeRecordingNotification]);
 
     // Enumerate audio devices on mount (labels may be empty until permission is granted)
     useEffect(() => {
@@ -394,6 +466,18 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       }
     }, []);
 
+    // Merge all recording segments into a single blob
+    const mergeSegments = useCallback((finalSegment: Blob | null) => {
+      const allSegments = [...segmentsRef.current];
+      if (finalSegment) allSegments.push(finalSegment);
+
+      if (allSegments.length === 0) return null;
+      if (allSegments.length === 1) return allSegments[0];
+
+      // Merge all segments into one blob with the same MIME type
+      return new Blob(allSegments, { type: mimeTypeRef.current });
+    }, []);
+
     /** Expose finalize() so the page can stop & grab the blob + transcript */
     useImperativeHandle(
       ref,
@@ -410,6 +494,17 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           if (!recorder || recorder.state === "inactive") {
             const blob = buildBlob();
             chunksRef.current = [];
+            const mergedBlob = mergeSegments(blob);
+            segmentsRef.current = []; // Clear segments
+
+            // Capture values to return
+            const pendingId = pendingRecordingIdRef.current;
+            const segmentIds = [...segmentIdsRef.current];
+
+            // Reset refs for next recording
+            pendingRecordingIdRef.current = null;
+            segmentIdsRef.current = [];
+
             // Cleanup
             if (recordingStreamRef.current) {
               recordingStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -421,10 +516,16 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               timerRef.current = null;
             }
             releaseWakeLock();
+            closeRecordingNotification();
             setState("idle");
             setDuration(0);
             elapsedBeforePauseRef.current = 0;
-            return Promise.resolve({ blob, transcript });
+            return Promise.resolve({
+              blob: mergedBlob,
+              transcript,
+              pendingId,
+              segmentIds,
+            });
           }
 
           // Wait for onstop to fire (ensures all data is flushed, especially
@@ -434,10 +535,23 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           return new Promise<{
             blob: Blob | null;
             transcript: string | null;
+            pendingId: string | null;
+            segmentIds: string[];
           }>((resolve) => {
             recorder.onstop = () => {
               const blob = buildBlob();
               chunksRef.current = [];
+              const mergedBlob = mergeSegments(blob);
+              segmentsRef.current = []; // Clear segments
+
+              // Capture values to return
+              const pendingId = pendingRecordingIdRef.current;
+              const segmentIds = [...segmentIdsRef.current];
+
+              // Reset refs for next recording
+              pendingRecordingIdRef.current = null;
+              segmentIdsRef.current = [];
+
               // Cleanup AFTER data is fully flushed
               if (recordingStreamRef.current) {
                 recordingStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -449,16 +563,23 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
                 timerRef.current = null;
               }
               releaseWakeLock();
+              closeRecordingNotification();
               setState("idle");
               setDuration(0);
               elapsedBeforePauseRef.current = 0;
-              resolve({ blob, transcript });
+              resolve({ blob: mergedBlob, transcript, pendingId, segmentIds });
             };
             recorder.stop();
           });
         },
       }),
-      [buildBlob, stopScribe, releaseWakeLock],
+      [
+        buildBlob,
+        stopScribe,
+        releaseWakeLock,
+        closeRecordingNotification,
+        mergeSegments,
+      ],
     );
 
     const startTimer = useCallback(() => {
@@ -485,17 +606,22 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         Math.floor((Date.now() - recordingStartRef.current) / 1000);
     }, []);
 
-    // We manage the recording stream ourselves, independent of LiveWaveform.
-    // LiveWaveform is purely visual — it creates its own stream for visualization.
-    const recordingStreamRef = useRef<MediaStream | null>(null);
-
     // --- Actions ---
 
-    const handleStart = useCallback(async () => {
+    // Actual recording start logic (extracted from old handleStart)
+    const startRecordingFlow = useCallback(async () => {
       setDuration(0);
       setMicError(false);
       elapsedBeforePauseRef.current = 0;
       transcriptRef.current = "";
+      segmentsRef.current = []; // Clear segments from previous recording
+      segmentIdsRef.current = []; // Clear segment IDs from previous recording
+
+      // Generate pending file ID and notify parent
+      const pendingId = crypto.randomUUID();
+      pendingRecordingIdRef.current = pendingId;
+      const recordingName = "recording.wav";
+      onRecordingStart?.(pendingId, recordingName);
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -518,10 +644,38 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           }
         };
 
-        recorder.onstop = () => {
+        recorder.onstop = async () => {
           const blob = buildBlob();
           chunksRef.current = [];
-          if (blob) onRecordingComplete(blob);
+
+          // Store segment in IndexedDB (encrypted) and in-memory
+          if (blob) {
+            segmentsRef.current.push(blob);
+
+            // Save to IndexedDB for recovery on page refresh
+            const segmentId = crypto.randomUUID();
+            segmentIdsRef.current.push(segmentId);
+
+            try {
+              const { savePendingUpload } =
+                await import("@/lib/indexeddb/pending-uploads");
+              await savePendingUpload({
+                id: segmentId,
+                visitId,
+                blob,
+                name: `recording-segment-${segmentsRef.current.length}.webm`,
+                type: mimeTypeRef.current,
+                size: blob.size,
+                source: "recording-segment",
+                timestamp: Date.now(),
+              });
+            } catch (err) {
+              console.error(
+                "[recording] Failed to save segment to IndexedDB:",
+                err,
+              );
+            }
+          }
         };
 
         // No timeslice — stop() delivers a single valid file.
@@ -536,6 +690,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         // Keep screen awake during recording
         acquireWakeLock();
 
+        // Show persistent notification on Android to prevent tab suspension
+        await showRecordingNotification();
+
         startTimer();
         setState("recording");
         onRecordingStateChange?.("recording");
@@ -546,12 +703,26 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     }, [
       selectedDeviceId,
       buildBlob,
-      onRecordingComplete,
       startTimer,
       onRecordingStateChange,
+      onRecordingStart,
       startScribe,
       acquireWakeLock,
+      showRecordingNotification,
+      visitId,
     ]);
+
+    // New handleStart - checks consent before recording
+    const handleStart = useCallback(() => {
+      // Check if we already have consent from metadata
+      if (metadata?.recording_consent === true) {
+        // Already have consent, start recording immediately
+        startRecordingFlow();
+      } else {
+        // Need consent first, show dialog
+        setShowConsentDialog(true);
+      }
+    }, [metadata, startRecordingFlow, setShowConsentDialog]);
 
     const handlePause = useCallback(() => {
       const recorder = mediaRecorderRef.current;
@@ -561,10 +732,17 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       }
       // Close Scribe on pause to avoid transcribing silence
       stopScribe();
+      // Close notification on pause
+      closeRecordingNotification();
       pauseTimer();
       setState("paused");
       onRecordingStateChange?.("paused");
-    }, [pauseTimer, onRecordingStateChange, stopScribe]);
+    }, [
+      pauseTimer,
+      onRecordingStateChange,
+      stopScribe,
+      closeRecordingNotification,
+    ]);
 
     const handleResume = useCallback(() => {
       // Start a NEW recorder for the next segment (previous one was stopped on pause)
@@ -582,20 +760,57 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         }
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const blob = buildBlob();
         chunksRef.current = [];
-        if (blob) onRecordingCompleteRef.current(blob);
+
+        // Store segment in IndexedDB (encrypted) and in-memory
+        if (blob) {
+          segmentsRef.current.push(blob);
+
+          // Save to IndexedDB for recovery on page refresh
+          const segmentId = crypto.randomUUID();
+          segmentIdsRef.current.push(segmentId);
+
+          try {
+            const { savePendingUpload } =
+              await import("@/lib/indexeddb/pending-uploads");
+            await savePendingUpload({
+              id: segmentId,
+              visitId,
+              blob,
+              name: `recording-segment-${segmentsRef.current.length}.webm`,
+              type: mimeTypeRef.current,
+              size: blob.size,
+              source: "recording-segment",
+              timestamp: Date.now(),
+            });
+          } catch (err) {
+            console.error(
+              "[recording] Failed to save segment to IndexedDB:",
+              err,
+            );
+          }
+        }
       };
 
       recorder.start();
 
       // Reconnect Scribe using the existing recording stream
       startScribe(stream);
+      // Re-show notification on resume
+      showRecordingNotification();
       startTimer();
       setState("recording");
       onRecordingStateChange?.("recording");
-    }, [startTimer, onRecordingStateChange, startScribe, buildBlob]);
+    }, [
+      startTimer,
+      onRecordingStateChange,
+      startScribe,
+      buildBlob,
+      showRecordingNotification,
+      visitId,
+    ]);
 
     // Navigation guard dialog — shared between recording & paused states
     const navGuardDialog = (
@@ -700,6 +915,16 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           {micError && (
             <p className="text-sm text-destructive">{t("micError")}</p>
           )}
+
+          {/* Recording consent dialog */}
+          <RecordingConsentDialog
+            open={showConsentDialog}
+            onOpenChange={setShowConsentDialog}
+            onConsent={async () => {
+              await saveConsent();
+              await startRecordingFlow();
+            }}
+          />
         </div>
       );
     }

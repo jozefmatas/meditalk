@@ -326,6 +326,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               onAdjustGenerate={generation.handleAdjustGenerate}
               adjustDrawerOpen={adjustDrawerOpen}
               onAdjustDrawerOpenChange={setAdjustDrawerOpen}
+              timerState={generation.timerState}
               t={t}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
@@ -333,7 +334,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
         </div>
       ) : data.visit.status === "processing" ? (
         /* Processing overlay — server generating, SSE not connected */
-        <ProcessingOverlay />
+        <ProcessingOverlay
+          estimatedSeconds={generation.timerState?.estimatedSecondsRemaining}
+        />
       ) : isDraft ? (
         /* Draft mode — recording + editor */
         <>
@@ -347,7 +350,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 formattedDate={formattedDate}
                 error={data.error}
                 recordingBarRef={generation.recordingBarRef}
-                onRecordingComplete={generation.handleRecordingComplete}
+                onRecordingStart={generation.handleRecordingStart}
+                onRecordingComplete={() => {}}
                 onRecordingStateChange={generation.handleRecordingStateChange}
                 selectedTemplateId={generation.selectedTemplateId}
                 onTemplateChange={generation.handleTemplateChange}

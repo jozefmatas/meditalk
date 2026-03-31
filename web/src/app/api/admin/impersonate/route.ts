@@ -27,6 +27,13 @@ export async function GET() {
     await requireAdmin();
 
     const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json(
+        { error: "Admin client unavailable" },
+        { status: 500 },
+      );
+    }
+
     const { data, error } = await admin.auth.admin.listUsers({ perPage: 100 });
 
     if (error) {
@@ -73,6 +80,13 @@ export async function POST(request: NextRequest) {
 
     // Verify target user exists
     const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json(
+        { error: "Admin client unavailable" },
+        { status: 500 },
+      );
+    }
+
     const { data, error } = await admin.auth.admin.getUserById(userId);
     if (error || !data.user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });

@@ -9,10 +9,26 @@ const handleI18nRouting = createIntlMiddleware(routing);
 // App-only route segments (after stripping locale prefix)
 const APP_ROUTE_PREFIXES = ["/encounters", "/settings", "/templates"];
 
+// Public marketing routes (after stripping locale prefix)
+const MARKETING_ROUTE_PREFIXES = [
+  "/landing",
+  "/privacy-policy",
+  "/terms-of-service",
+];
+
 function isAppRoute(pathname: string): boolean {
   // Strip locale prefix if present (e.g. /cs/encounters → /encounters)
   const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
   return APP_ROUTE_PREFIXES.some(
+    (prefix) =>
+      withoutLocale === prefix || withoutLocale.startsWith(`${prefix}/`),
+  );
+}
+
+function isMarketingRoute(pathname: string): boolean {
+  // Strip locale prefix if present
+  const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
+  return MARKETING_ROUTE_PREFIXES.some(
     (prefix) =>
       withoutLocale === prefix || withoutLocale.startsWith(`${prefix}/`),
   );
@@ -157,7 +173,8 @@ export async function proxy(request: NextRequest) {
     const isLoginPage = pathname.includes("/login");
 
     // Unauthenticated user on a protected page → redirect to login
-    if (!user && !isLoginPage) {
+    // Skip redirect for marketing routes (public pages)
+    if (!user && !isLoginPage && !isMarketingRoute(pathname)) {
       const localeMatch = pathname.match(/^\/(sk|cs|en)(\/|$)/);
       const localePrefix = localeMatch ? `/${localeMatch[1]}` : "";
       const loginUrl = new URL(`${localePrefix}/login`, request.url);

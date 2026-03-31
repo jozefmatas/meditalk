@@ -28,12 +28,16 @@ export interface EncounterFile {
   source?: string;
   /** True if file is saved to IndexedDB but upload pending */
   pending?: boolean;
+  /** True if recording is actively in progress (stops spinner when paused) */
+  isRecording?: boolean;
 }
 
 interface FilesContentProps {
   visitId: string;
   files: EncounterFile[];
-  onFilesChange: (files: EncounterFile[]) => void;
+  onFilesChange: (
+    files: EncounterFile[] | ((prev: EncounterFile[]) => EncounterFile[]),
+  ) => void;
 }
 
 type FilesPanelProps = FilesContentProps;
@@ -110,9 +114,14 @@ export function FilesContent({
 
         const data = await res.json();
 
-        // Replace pending files with uploaded files
-        const withoutPending = files.filter((f) => !f.pending);
-        onFilesChange([...withoutPending, ...(data.files as EncounterFile[])]);
+        // Replace only the pending files that were just uploaded (preserve recording file)
+        onFilesChange((prevFiles) => {
+          const uploadedIds = new Set(pendingFiles.map((f) => f.id));
+          const withoutTheseUploads = prevFiles.filter(
+            (f) => !uploadedIds.has(f.id),
+          );
+          return [...withoutTheseUploads, ...(data.files as EncounterFile[])];
+        });
       } catch (err) {
         console.error("File upload error:", err);
       } finally {
@@ -215,12 +224,18 @@ export function FilesContent({
                     <div className="flex min-w-0 items-center gap-1">
                       <HugeiconsIcon
                         icon={
-                          file.pending ? Loading03Icon : iconForType(file.type)
+                          file.pending
+                            ? file.source === "recording" && !file.isRecording
+                              ? Mic01Icon
+                              : Loading03Icon
+                            : iconForType(file.type)
                         }
                         size={14}
                         className={cn(
                           "shrink-0 text-muted-foreground",
-                          file.pending && "animate-spin",
+                          file.pending &&
+                            (file.source !== "recording" || file.isRecording) &&
+                            "animate-spin",
                         )}
                       />
                       <span className="min-w-0 flex-1 truncate">

@@ -132,7 +132,13 @@
       "leaveWhileRecordingStay": "Zostať na stránke",
       "leaveWhileRecordingLeave": "Opustiť stránku",
       "micError": "Nepodarilo sa získať prístup k mikrofónu. Skontrolujte povolenia a skúste znova.",
+      "recordingNotificationTitle": "Prebieha nahrávanie",
+      "recordingNotificationBody": "MediTalk nahráva. Nezatvárať toto upozornenie.",
       "generatingEncounter": "Generujem",
+      "generatingReadyIn": "Hotové za {time}",
+      "generatingInitializing": "Inicializujem...",
+      "lessThanMinute": "< 1 min",
+      "minutesRemaining": "{minutes} min",
       "regenerating": "Pregenerovávam správu...",
       "note": "Správa",
       "addDocument": "Pridať dokument",
@@ -164,7 +170,15 @@
       "adjustTabRecord": "Nahrať / Súbory",
       "adjustTabNotes": "Voľné poznámky",
       "adjustRegenerate": "Pregenerovať",
-      "adjustNotesPlaceholder": "Pridajte ďalší kontext..."
+      "adjustNotesPlaceholder": "Pridajte ďalší kontext...",
+      "recordingConsent": {
+        "title": "Súhlas s nahrávaním",
+        "description": "Pred spustením nahrávania je potrebný súhlas pacienta",
+        "explanation": "Pred začatím nahrávania potvrďte, že ste získali súhlas pacienta na nahratie tejto konzultácie.",
+        "confirmCheckbox": "Týmto potvrdzujem, že som získal súhlas pacienta na nahratie tejto konzultácie.",
+        "iConsent": "Súhlasím",
+        "cancel": "Zrušiť"
+      }
     },
     "insufficientContext": "Nedostatok klinických informácií na vygenerovanie záznamu. Nahrajte konzultáciu, pridajte poznámky s klinickými detailmi alebo nahrajte relevantné súbory.",
     "generationInterrupted": "Generovanie bolo prerušené. Vaša nahrávka a súbory sú v bezpečí — stlačte Opakovať pre pokračovanie.",
@@ -340,7 +354,329 @@
       "cta": "Začať zadarmo"
     },
     "footer": {
-      "copyright": "© {year} MediTalk. Všetky práva vyhradené."
+      "copyright": "© {year} MediTalk. Všetky práva vyhradené.",
+      "privacyPolicy": "Zásady ochrany osobných údajov",
+      "termsOfService": "Podmienky používania"
+    },
+    "privacyPolicy": {
+      "title": "Zásady ochrany osobných údajov",
+      "effectiveDate": "Dátum účinnosti: 31. marca 2026",
+      "lastModified": "Posledná aktualizácia: 31. marca 2026",
+      "s1": {
+        "title": "Úvod a rozsah pôsobnosti",
+        "p1": "MediTalk s.r.o. (\"MediTalk\", \"my\", \"nás\" alebo \"náš\") sa zaväzuje chrániť súkromie a bezpečnosť osobných údajov v súlade s Všeobecným nariadením o ochrane údajov (EÚ) 2016/679 (\"GDPR\") a platnými slovenskými a európskymi zákonmi o ochrane údajov.",
+        "p2": "Tieto Zásady ochrany osobných údajov popisujú, ako zhromažďujeme, používame, zverejňujeme a chránime osobné údaje pri používaní našej platformy pre lekársku dokumentáciu (\"Služba\"). Používaním MediTalk potvrdzujete, že ste si prečítali a porozumeli týmto Zásadám ochrany osobných údajov."
+      },
+      "s2": {
+        "title": "Prevádzkovateľ údajov",
+        "p1": "Na účely článku 4(7) GDPR je MediTalk s.r.o. prevádzkovateľom zodpovedným za vaše osobné údaje:",
+        "company": "MediTalk s.r.o.",
+        "address": "Bratislava, Slovenská republika",
+        "email": "E-mail: privacy@meditalk.ai"
+      },
+      "s3": {
+        "title": "Aké osobné údaje zhromažďujeme",
+        "intro": "Zhromažďujeme a spracúvame nasledujúce kategórie osobných údajov:",
+        "s1": {
+          "title": "Identifikačné a kontaktné údaje",
+          "i1": "Celé meno a profesionálny titul",
+          "i2": "E-mailová adresa",
+          "i3": "Telefónne číslo (ak je poskytnuté)",
+          "i4": "Číslo profesionálnej licencie a oprávnenia"
+        },
+        "s2": {
+          "title": "Zdravotné informácie (Osobitná kategória údajov podľa článku 9 GDPR)",
+          "i1": "Mená pacientov a identifikačné čísla",
+          "i2": "Zvukové nahrávky lekárskych konzultácií",
+          "i3": "Prepisy lekárskych konzultácií",
+          "i4": "Klinické záznamy a lekárska dokumentácia vygenerovaná prostredníctvom Služby"
+        },
+        "s3": {
+          "title": "Technické údaje",
+          "i1": "IP adresa, typ prehliadača a informácie o zariadení",
+          "i2": "Analytické údaje o používaní a údaje o interakcii",
+          "i3": "Relácie cookies pre autentifikáciu a funkčnosť"
+        }
+      },
+      "s4": {
+        "title": "Právny základ pre spracúvanie",
+        "intro": "Osobné údaje spracúvame len vtedy, keď máme platný právny základ podľa článku 6(1) GDPR:",
+        "i1": {
+          "title": "Plnenie zmluvy (Článok 6(1)(b)):",
+          "desc": "Spracúvanie potrebné na poskytovanie Služby a plnenie našich zmluvných záväzkov voči poskytovateľom zdravotnej starostlivosti."
+        },
+        "i2": {
+          "title": "Právna povinnosť (Článok 6(1)(c)):",
+          "desc": "Dodržiavanie požiadaviek na uchovávanie zdravotných záznamov a platných medicínskych predpisov."
+        },
+        "i3": {
+          "title": "Oprávnené záujmy (Článok 6(1)(f)):",
+          "desc": "Zlepšovanie služieb, bezpečnosť a predchádzanie podvodom, ak takéto záujmy nie sú prevážené právami dotknutých osôb."
+        }
+      },
+      "s5": {
+        "title": "Ako používame vaše údaje",
+        "i1": "Prepis lekárskych konzultácií pomocou AI technológie reči na text",
+        "i2": "Generovanie klinickej dokumentácie a štruktúrovaných lekárskych záznamov",
+        "i3": "Bezpečné ukladanie a získavanie lekárskych záznamov",
+        "i4": "Zlepšovanie služieb a zabezpečenie kvality (len anonymizované údaje)",
+        "i5": "Komunikácia týkajúca sa aktualizácií služieb, bezpečnostných upozornení a administratívnych záležitostí"
+      },
+      "s6": {
+        "title": "AI spracovanie a služby tretích strán",
+        "p1": "MediTalk využíva služby umelej inteligencie od spracovateľov tretích strán na poskytovanie prepisu a generovania dokumentácie. Títo spracovatelia pôsobia ako spracovatelia údajov podľa článku 28 GDPR:",
+        "anthropic": {
+          "title": "Anthropic (Claude AI):",
+          "desc": "Používa sa na generovanie klinických záznamov a analýzu lekárskeho textu. Údaje sa spracúvajú v súlade s dohodou Anthropic Business Associate Agreement (BAA) pre dodržiavanie HIPAA a ich dodatkom o spracúvaní údajov v súlade s GDPR."
+        },
+        "openai": {
+          "title": "OpenAI (Whisper, GPT):",
+          "desc": "Používa sa na prepis zvuku a textové embeddingy. Údaje sa spracúvajú podľa dohody OpenAI Business Associate Agreement a ich dodatkom o spracúvaní údajov v súlade s GDPR."
+        },
+        "p2": "Dôležité: Tieto AI služby nepoužívajú vaše údaje na trénovanie svojich modelov. Zvukové nahrávky a prepisy sa spracúvajú prechodne a poskytovateľmi AI sa neuchovávajú dlhšie, ako je nevyhnutné na spracovanie."
+      },
+      "s7": {
+        "title": "Zdieľanie a zverejňovanie údajov",
+        "p1": "Osobné údaje nepredávame tretím stranám. Údaje zdieľame len v nasledujúcich obmedzených prípadoch:",
+        "i1": "S poskytovateľmi AI služieb (Anthropic, OpenAI) ako spracovateľmi údajov pod prísnymi zmluvnými ochranami",
+        "i2": "S poskytovateľmi cloudovej infraštruktúry (Supabase, Vercel) pre bezpečné ukladanie údajov a hosting aplikácie",
+        "i3": "Keď to vyžaduje zákon, súdny príkaz alebo regulačný orgán, alebo na ochranu práv, majetku alebo bezpečnosti MediTalk, našich používateľov alebo iných"
+      },
+      "s8": {
+        "title": "Uchovávanie údajov",
+        "p1": "Klinické záznamy (konzultácie, prepisy, poznámky) sa uchovávajú minimálne po dobu požadovanú slovenskými zdravotníckymi predpismi (zvyčajne 10 rokov od dátumu posledného lekárskeho zákroku). Po uplynutí tejto doby môžu byť údaje archivované alebo vymazané v súlade s právnymi požiadavkami.",
+        "p2": "Údaje o účte a používateľovi sa uchovávajú po dobu trvania vášho účtu plus dodatočnú dobu požadovanú pre dodržiavanie právnych predpisov, riešenie sporov a vymáhanie dohôd."
+      },
+      "s9": {
+        "title": "Bezpečnosť údajov",
+        "p1": "Implementujeme technické a organizačné opatrenia na ochranu osobných údajov proti neoprávnenému prístupu, zmene, zverejneniu alebo zničeniu:",
+        "i1": "End-to-end šifrovanie pre údaje v prenose (TLS 1.3)",
+        "i2": "Šifrovanie v pokoji pre všetko databázové úložisko (AES-256)",
+        "i3": "Kontroly prístupu a autentifikačné mechanizmy (k dispozícii viacfaktorová autentifikácia)",
+        "i4": "Pravidelné bezpečnostné audity a hodnotenia zraniteľnosti"
+      },
+      "s10": {
+        "title": "Vaše práva podľa GDPR",
+        "intro": "Ako dotknutá osoba máte nasledujúce práva podľa GDPR:",
+        "i1": {
+          "title": "Právo na prístup (Článok 15):",
+          "desc": "Môžete požiadať o kópiu osobných údajov, ktoré o vás uchov ávame."
+        },
+        "i2": {
+          "title": "Právo na opravu (Článok 16):",
+          "desc": "Môžete požiadať o opravu nepresných alebo neúplných osobných údajov."
+        },
+        "i3": {
+          "title": "Právo na vymazanie (Článok 17):",
+          "desc": "Môžete požiadať o vymazanie vašich osobných údajov, s výhradou zákonných povinností uchovávania."
+        },
+        "i4": {
+          "title": "Právo na obmedzenie (Článok 18):",
+          "desc": "Môžete požiadať, aby sme obmedzili spracúvanie vašich osobných údajov v určitých prípadoch."
+        },
+        "i5": {
+          "title": "Právo na prenosnosť údajov (Článok 20):",
+          "desc": "Môžete požiadať o prenos vašich údajov inému prevádzkovateľovi v štruktúrovanom, strojovo čitateľnom formáte."
+        },
+        "i6": {
+          "title": "Právo namietať (Článok 21):",
+          "desc": "Môžete namietať proti spracúvaniu založenému na oprávnených záujmoch alebo na účely priameho marketingu."
+        },
+        "exercise": "Na uplatnenie ktoréhokoľvek z týchto práv nás kontaktujte na privacy@meditalk.ai. Odpovieme na vašu žiadosť do jedného mesiaca, ako to vyžaduje článok 12(3) GDPR."
+      },
+      "s11": {
+        "title": "Medzinárodné prenosy údajov",
+        "p1": "Vaše údaje môžu byť prenesené a spracúvané v krajinách mimo Európskeho hospodárskeho priestoru (EHP), vrátane Spojených štátov, kde pôsobia naši poskytovatelia AI služieb. Takéto prenosy sa vykonávajú v súlade s kapitolou V GDPR:",
+        "p2": "Zabezpečujeme primerané záruky prostredníctvom štandardných zmluvných doložiek (SCC) schválených Európskou komisiou, doplnených dodatočnými technickými a organizačnými opatreniami na zabezpečenie ochrany na úrovni GDPR."
+      },
+      "s12": {
+        "title": "Cookies a sledovanie",
+        "p1": "Cookies a podobné sledovacie technológie používame len s vaším súhlasom. Analytické cookies (Vercel Analytics) sa používajú na pochopenie vzorcov používania služby a zlepšenie používateľskej skúsenosti. Súhlas môžete kedykoľvek odvolať prostredníctvom nášho banneru cookies alebo nastavení prehliadača."
+      },
+      "s13": {
+        "title": "Zmeny týchto Zásad ochrany osobných údajov",
+        "p1": "Tieto Zásady ochrany osobných údajov môžeme čas od času aktualizovať, aby odrážali zmeny v našich postupoch alebo právnych požiadavkách. Podstatné zmeny budú oznámené e-mailom alebo viditeľným upozornením v Službe najmenej 30 dní pred nadobudnutím účinnosti."
+      },
+      "s14": {
+        "title": "Kontakt a sťažnosti",
+        "p1": "Pre otázky, obavy alebo žiadosti týkajúce sa týchto Zásad ochrany osobných údajov alebo vašich osobných údajov nás prosím kontaktujte:",
+        "emailLabel": "E-mail:",
+        "email": "privacy@meditalk.ai",
+        "addressLabel": "Poštová adresa:",
+        "address": "MediTalk s.r.o., Bratislava, Slovenská republika",
+        "supervisory": "Ak sa domnievate, že vaše práva na ochranu údajov boli porušené, máte právo podať sťažnosť na Úrad na ochranu osobných údajov Slovenskej republiky alebo na váš miestny dozorný orgán podľa článku 77 GDPR."
+      },
+      "footer": "Tieto Zásady ochrany osobných údajov sa riadia slovenským právom a GDPR. Posledná kontrola: marec 2026. Pre naše Podmienky používania pozri",
+      "footerLink": "Podmienky používania"
+    },
+    "termsOfService": {
+      "title": "Podmienky používania",
+      "effectiveDate": "Dátum účinnosti: 31. marca 2026",
+      "lastModified": "Posledná aktualizácia: 31. marca 2026",
+      "s1": {
+        "title": "Prijatie podmienok",
+        "p1": "Tieto Podmienky používania (\"Podmienky\") predstavujú právne záväznú dohodu medzi vami (\"Používateľ\", \"vy\" alebo \"váš\") a MediTalk s.r.o. (\"MediTalk\", \"my\", \"nás\" alebo \"náš\"), ktorá upravuje váš prístup a používanie platformy MediTalk pre lekársku dokumentáciu (\"Služba\").",
+        "p2": "Vytvorením účtu, pristupovaním alebo používaním Služby potvrdzujete, že ste si prečítali, porozumeli a súhlasíte s tým, že budete viazaní týmito Podmienkami a našimi Zásadami ochrany osobných údajov. Ak nesúhlasíte s týmito Podmienkami, nesmíte pristupovať ani používať Službu."
+      },
+      "s2": {
+        "title": "Definície",
+        "i1": {
+          "term": "Služba",
+          "def": "označuje platformu MediTalk vrátane všetkého softvéru, aplikácií, funkcií a funkcionality poskytovaných spoločnosťou MediTalk."
+        },
+        "i2": {
+          "term": "Používateľ",
+          "def": "označuje akéhokoľvek licencovaného zdravotníckeho pracovníka, ktorý sa registruje a používa Službu."
+        },
+        "i3": {
+          "term": "Údaje pacienta",
+          "def": "označuje akékoľvek osobné zdravotné informácie, lekárske záznamy alebo chránené zdravotné informácie (PHI) zadané do Služby alebo spracované prostredníctvom nej."
+        },
+        "i4": {
+          "term": "Generovaný obsah",
+          "def": "označuje klinické záznamy, prepisy, zhrnutia alebo inú dokumentáciu vytvorenú systémami umelej inteligencie Služby."
+        },
+        "i5": {
+          "term": "Účet",
+          "def": "označuje používateľský účet vytvorený na prístup k Službe."
+        }
+      },
+      "s3": {
+        "title": "Oprávnenosť a registrácia účtu",
+        "p1": "Služba je určená výlučne na používanie licencovanými zdravotníckymi pracovníkmi pri výkone medicíny. Registráciou Účtu vyhlasujete a zaručujete, že:",
+        "i1": "Ste licencovaný zdravotnícky pracovník oprávnený vykonávať medicínu vo vašej jurisdikcii",
+        "i2": "Máte aspoň 18 rokov",
+        "i3": "Máte právnu spôsobilosť uzatvárať záväzné zmluvy",
+        "i4": "Všetky informácie, ktoré poskytujete počas registrácie, sú presné, aktuálne a úplné"
+      },
+      "s4": {
+        "title": "Bezpečnosť účtu a zodpovednosti",
+        "p1": "Ste zodpovedný za zachovanie dôvernosti vašich prístupových údajov k Účtu a za všetky aktivity, ktoré sa vyskytujú pod vaším Účtom. Súhlasíte s tým, že:",
+        "p2": "Okamžite informujete MediTalk o akomkoľvek neoprávnenom použití vášho Účtu alebo akomkoľvek inom porušení bezpečnosti.",
+        "p3": "Nebudete zdieľať svoje prístupové údaje k Účtu s treťou stranou ani nedovolíte inej osobe pristupovať k vášmu Účtu."
+      },
+      "s5": {
+        "title": "Povinnosti a zodpovednosti používateľa",
+        "intro": "Ako Používateľ Služby súhlasíte s nasledujúcimi povinnosťami:",
+        "s1": {
+          "title": "Súhlas pacienta",
+          "p1": "Musíte získať príslušný informovaný súhlas od pacientov pred nahrávaním konzultácií alebo zadávaním údajov o pacientoch do Služby. Ste výlučne zodpovedný za zabezpečenie dodržiavania platných požiadaviek na súhlas podľa miestnych zdravotníckych predpisov a profesionálnych štandardov."
+        },
+        "s2": {
+          "title": "Profesionálna zodpovednosť",
+          "p1": "Berieť na vedomie, že MediTalk je nástroj na dokumentáciu a nenahradí váš profesionálny lekársky úsudok. Ste výlučne zodpovedný za všetky klinické rozhodnutia, diagnózy, liečebné plány a starostlivosť o pacientov. Služba neposkytuje lekárske poradenstvo."
+        },
+        "s3": {
+          "title": "Presnosť údajov",
+          "p1": "Ste zodpovedný za overenie presnosti a úplnosti všetkého Generovaného obsahu pred jeho začlenením do oficiálnych lekárskych záznamov alebo použitím na starostlivosť o pacientov. AI-generovaný obsah môže obsahovať chyby alebo opomenutia."
+        },
+        "s4": {
+          "title": "Dodržiavanie zákonov",
+          "p1": "Súhlasíte s používaním Služby v súlade so všetkými platnými zákonmi, predpismi a profesionálnymi štandardmi, vrátane, ale nie výlučne, GDPR, zákonov o ochrane zdravotného súkromia a predpisov o lekárskej praxi."
+        }
+      },
+      "s6": {
+        "title": "AI-generovaný obsah a vyhlásenia",
+        "p1": "Služba používa umelú inteligenciu na generovanie klinickej dokumentácie. Aj keď sa snažíme o presnosť, AI-generovaný obsah nie je neomylný a nesmie sa na neho spoliehať bez ľudskej kontroly a overenia.",
+        "p2": "Beriete na vedomie a súhlasíte s tým, že: (a) Generovaný obsah môže obsahovať nepresnosti, chyby alebo opomenutia; (b) Generovaný obsah nepredstavuje lekárske poradenstvo ani diagnózu; (c) Musíte skontrolovať, overiť a schváliť všetok Generovaný obsah pred použitím v starostlivosti o pacientov; (d) MediTalk neposkytuje žiadne záruky týkajúce sa presnosti, úplnosti alebo spoľahlivosti Generovaného obsahu.",
+        "warning": "⚠️ KRITICKÉ: Vždy skontrolujte a overte AI-generované klinické záznamy pred dokončením lekárskych záznamov. Nikdy sa nespoliehajte výlučne na AI-generovaný obsah pri rozhodovaní o starostlivosti o pacientov."
+      },
+      "s7": {
+        "title": "Zakázané konanie",
+        "intro": "Súhlasíte s tým, že nebudete:",
+        "i1": "Nahrávať konzultácie ani spracúvať údaje o pacientoch bez príslušného súhlasu",
+        "i2": "Používať Službu na akýkoľvek nezákonný účel alebo v rozpore s týmito Podmienkami",
+        "i3": "Pokúšať sa obísť akékoľvek bezpečnostné opatrenia alebo obmedzenia prístupu",
+        "i4": "Nahrávať vírusy, malvér alebo akýkoľvek škodlivý kód",
+        "i5": "Zasahovať do Služby alebo narúšať servery/siete pripojené k Službe",
+        "i6": "Reverzne inžinierstvo, dekompilovať alebo rozobrať akúkoľvek časť Služby",
+        "i7": "Používať Službu na trénovanie, vývoj alebo zlepšovanie akéhokoľvek konkurenčného systému umelej inteligencie",
+        "i8": "Zdieľať prístup k Účtu s neoprávnenými osobami alebo poskytovať Službu v sublicencii"
+      },
+      "s8": {
+        "title": "Práva duševného vlastníctva",
+        "p1": "Služba vrátane všetkého softvéru, algoritmov, používateľských rozhraní, dizajnov a dokumentácie je vo vlastníctve spoločnosti MediTalk a je chránená autorským právom, ochrannými známkami, patentmi a inými zákonmi o duševnom vlastníctve.",
+        "p2": "Za predpokladu dodržiavania týchto Podmienok vám MediTalk udeľuje obmedzenú, nevýhradnú, neprenosnú, odvolateľnú licenciu na prístup a používanie Služby výlučne na vaše profesionálne účely lekárskej dokumentácie.",
+        "p3": "Zachovávate si všetky práva k Údajom pacienta, ktoré zadávate do Služby. Používaním Služby udeľujete spoločnosti MediTalk obmedzenú licenciu na spracovanie Údajov pacienta výlučne na poskytovanie Služby a ako je opísané v našich Zásadách ochrany osobných údajov."
+      },
+      "s9": {
+        "title": "Dostupnosť a úpravy služby",
+        "p1": "MediTalk sa snaží udržiavať dostupnosť Služby, ale nezaručuje neprerušovanú alebo bezchybnú prevádzku. Vyhradzujeme si právo kedykoľvek upraviť, pozastaviť alebo prerušiť akýkoľvek aspekt Služby s primeraným upozornením.",
+        "p2": "Môžeme vykonávať plánovanú údržbu, ktorá dočasne ovplyvní dostupnosť Služby. Poskytneme vopred upozornenie na plánovanú údržbu, keď to bude rozumne možné."
+      },
+      "s10": {
+        "title": "Ukončenie",
+        "s1": {
+          "title": "Ukončenie používateľom",
+          "p1": "Svoj Účet môžete kedykoľvek zrušiť prostredníctvom stránky Nastavenia. Po ukončení prestane váš prístup k Službe a vaše údaje budú spracované v súlade s našimi Zásadami ochrany osobných údajov a platnými požiadavkami na uchovávanie údajov."
+        },
+        "s2": {
+          "title": "Ukončenie spoločnosťou MediTalk",
+          "p1": "Vyhradzujeme si právo okamžite pozastaviť alebo zrušiť váš Účet bez predchádzajúceho upozornenia, ak porušíte tieto Podmienky, zapojíte sa do zakázaného konania alebo ak sa dôvodne domnievame, že takéto opatrenie je potrebné na ochranu spoločnosti MediTalk, ostatných používateľov alebo pacientov."
+        },
+        "s3": {
+          "title": "Účinok ukončenia",
+          "p1": "Po ukončení: (a) vaša licencia na používanie Služby okamžite zaniká; (b) zostávate zodpovedný za akékoľvek záväzky vzniknuté pred ukončením; (c) ustanovenia, ktoré by svojou povahou mali prežiť ukončenie (vrátane obmedzení zodpovednosti, odškodnenia a riešenia sporov), zostanú v platnosti."
+        }
+      },
+      "s11": {
+        "title": "Vyhlásenie o zárukách",
+        "p1": "V MAXIMÁLNOM ROZSAHU POVOLENOM PLATNÝM PRÁVOM SA SLUŽBA POSKYTUJE \"TAK, AKO JE\" A \"AKO JE K DISPOZÍCII\" BEZ AKÝCHKOĽVEK ZÁRUK, ČI UŽ VÝSLOVNÝCH, IMPLIKOVANÝCH, ZÁKONNÝCH ALEBO INÝCH.",
+        "p2": "MEDITALK VÝSLOVNE VYLUČUJE VŠETKY ZÁRUKY VRÁTANE, ALE NIE VÝLUČNE, IMPLIKOVANÝCH ZÁRUK OBCHODOVATEĽNOSTI, VHODNOSTI NA KONKRÉTNY ÚČEL, NEPORUŠENIA PRÁV A AKÝCHKOĽVEK ZÁRUK VYPLÝVAJÚCICH Z OBCHODNÉHO STYKU ALEBO ZVYKLOSTÍ. MEDITALK NEZARUČUJE, ŽE SLUŽBA BUDE NEPRERUŠOVANÁ, BEZCHYBNÁ ALEBO ZABEZPEČENÁ, ALEBO ŽE CHYBY BUDÚ OPRAVENÉ."
+      },
+      "s12": {
+        "title": "Obmedzenie zodpovednosti",
+        "p1": "V MAXIMÁLNOM ROZSAHU POVOLENOM PLATNÝM PRÁVOM VÝSLOVNE ROZUMIETE A SÚHLASÍTE S TÝM, ŽE MEDITALK NEBUDE ZODPOVEDNÝ ZA AKÉKOĽVEK NEPRIAME, NÁHODNÉ, ŠPECIÁLNE, NÁSLEDNÉ ALEBO PRÍKLADNÉ ŠKODY VRÁTANE, ALE NIE VÝLUČNE, ŠKÔD ZA STRATU ZISKU, DOBREJ VÔLE, POUŽÍVANIA, ÚDAJOV ALEBO INÝCH NEHMOTNÝCH STRÁT.",
+        "p2": "V ŽIADNOM PRÍPADE CELKOVÁ ZODPOVEDNOSŤ SPOLOČNOSTI MEDITALK VOČI VÁM ZA VŠETKY NÁROKY VYPLÝVAJÚCE Z TÝCHTO PODMIENOK ALEBO SLUŽBY NEPRESAHUJE SUMU, KTORÚ STE ZAPLATILI SPOLOČNOSTI MEDITALK V DVANÁSTICH (12) MESIACOCH PRED NÁROKOM, ALEBO STO EUR (€100), PODĽA TOHO, ČOHO HODNOTA JE VYŠŠIA."
+      },
+      "s13": {
+        "title": "Odškodnenie",
+        "p1": "Súhlasíte s odškodnením, obhajobou a ochranou spoločnosti MediTalk, jej pridružených spoločností, predstaviteľov, riaditeľov, zamestnancov a zástupcov pred akýmikoľvek nárokmi, záväzkami, škodami, stratami, nákladmi alebo výdavkami (vrátane primeraných právnych poplatkov) vyplývajúcimi z alebo súvisiacimi s: (a) vaším používaním Služby; (b) vaším porušením týchto Podmienok; (c) vaším porušením akéhokoľvek platného zákona alebo predpisu; (d) vaším porušením akýchkoľvek práv inej strany; alebo (e) Údajmi pacienta, ktoré poskytujete, alebo klinickými rozhodnutiami, ktoré robíte pomocou Generovaného obsahu."
+      },
+      "s14": {
+        "title": "Rozhodné právo a riešenie sporov",
+        "p1": "Tieto Podmienky sa riadia a vykladajú v súlade so zákonmi Slovenskej republiky bez ohľadu na jej kolízne normy.",
+        "p2": "Akýkoľvek spor vyplývajúci z týchto Podmienok alebo týkajúci sa Služby podlieha výlučnej jurisdikcii súdov v Bratislave, Slovenská republika."
+      },
+      "s15": {
+        "title": "Zmeny podmienok",
+        "p1": "Vyhradzujeme si právo kedykoľvek upraviť tieto Podmienky. Podstatné zmeny budú oznámené e-mailom alebo viditeľným upozornením v Službe najmenej tridsať (30) dní pred dátumom nadobudnutia účinnosti takýchto zmien.",
+        "p2": "Vaše pokračujúce používanie Služby po dátume nadobudnutia účinnosti revidovaných Podmienok predstavuje váš súhlas so zmenami. Ak nesúhlasíte s revidovanými Podmienkami, musíte prerušiť používanie Služby a zrušiť svoj Účet."
+      },
+      "s16": {
+        "title": "Oddeliteľnosť",
+        "p1": "Ak bude akékoľvek ustanovenie týchto Podmienok považované za neplatné, nezákonné alebo nevymáhateľné, zostávajúce ustanovenia zostanú v plnej platnosti a účinnosti. Neplatné ustanovenie bude upravené v minimálnom rozsahu potrebnom na to, aby bolo platné a vymáhateľné, pričom sa zachová pôvodný zámer."
+      },
+      "s17": {
+        "title": "Kontaktné informácie",
+        "p1": "Pre otázky, obavy alebo oznámenia týkajúce sa týchto Podmienok nás prosím kontaktujte na:",
+        "company": "MediTalk s.r.o.",
+        "address": "Bratislava, Slovenská republika",
+        "emailLabel": "E-mail:",
+        "email": "legal@meditalk.ai"
+      },
+      "footer": "Tieto Podmienky používania sa riadia slovenským právom. Posledná kontrola: marec 2026. Pre naše Zásady ochrany osobných údajov pozri",
+      "footerLink": "Zásady ochrany osobných údajov"
+    }
+  },
+  "cookieConsent": {
+    "title": "Oznámenie o cookies",
+    "message": "Používame súbory cookie na analýzu návštevnosti a zlepšenie vašej skúsenosti.",
+    "learnMore": "Zistiť viac",
+    "accept": "Prijať",
+    "decline": "Odmietnuť"
+  },
+  "onboarding": {
+    "dataNotice": {
+      "title": "Spracovanie údajov a súkromie",
+      "intro": "Vaše dáta sú v bezpečí. Pred začatím práce s MediTalk by ste mali vedieť:",
+      "point1": "Všetky údaje sú šifrované pri prenose aj uložení. Nahrávky sú vymazané ihneď po vygenerovaní dokumentácie.",
+      "point2": "Na generovanie klinickej dokumentácie používame AI modely. Tieto služby spracovávajú dáta v USA pod prísnou ochranou.",
+      "point3": "Vaše dáta sa nikdy nepoužívajú na trénovanie AI modelov. Máte plnú kontrolu — dáta môžete kedykoľvek vymazať.",
+      "learnMore": "Viac informácií nájdete v našich",
+      "privacyPolicyLink": "Zásady ochrany osobných údajov",
+      "checkbox": "Rozumiem a súhlasím so spracovaním údajov podľa zásad ochrany osobných údajov.",
+      "continue": "Pokračovať"
     }
   }
 }

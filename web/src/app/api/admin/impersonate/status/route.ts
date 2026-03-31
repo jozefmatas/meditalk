@@ -24,6 +24,10 @@ export async function GET() {
     }
 
     const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json({ isAdmin: true, isImpersonating: false });
+    }
+
     const { data } = await admin.auth.admin.getUserById(impersonateUserId);
 
     return NextResponse.json({

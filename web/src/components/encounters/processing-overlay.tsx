@@ -5,8 +5,25 @@ import { Spiral } from "./spiral";
 import { AnimatedMagicWand } from "./animated-magic-wand";
 import { TextShimmer } from "@/components/shared/text-shimmer";
 
-export function ProcessingOverlay({ message }: { message?: string }) {
+interface ProcessingOverlayProps {
+  message?: string;
+  estimatedSeconds?: number;
+}
+
+export function ProcessingOverlay({
+  message,
+  estimatedSeconds,
+}: ProcessingOverlayProps) {
   const t = useTranslations("encounters.detail");
+
+  // Format estimated time
+  const formatEstimatedTime = (seconds: number): string => {
+    if (seconds < 60) {
+      return t("lessThanMinute");
+    }
+    const minutes = Math.ceil(seconds / 60);
+    return minutes === 1 ? "1" : minutes.toString();
+  };
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 py-12">
@@ -19,7 +36,16 @@ export function ProcessingOverlay({ message }: { message?: string }) {
         </div>
       </div>
       <TextShimmer className="text-sm" duration={3}>
-        {message ?? t("generatingEncounter")}
+        {estimatedSeconds !== undefined
+          ? t("generatingReadyIn", {
+              time:
+                estimatedSeconds < 60
+                  ? t("lessThanMinute")
+                  : t("minutesRemaining", {
+                      minutes: formatEstimatedTime(estimatedSeconds),
+                    }),
+            })
+          : (message ?? t("generatingEncounter"))}
       </TextShimmer>
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { Textarea } from "@/components/shared/textarea";
 import { Badge } from "@/components/shared/badge";
 import { ErrorAlert } from "@/components/shared/error-alert";
@@ -83,7 +84,11 @@ interface ReviewViewProps {
   visitId?: string;
   files?: import("@/components/encounters/files-panel").EncounterFile[];
   onFilesChange?: (
-    files: import("@/components/encounters/files-panel").EncounterFile[],
+    files:
+      | import("@/components/encounters/files-panel").EncounterFile[]
+      | ((
+          prev: import("@/components/encounters/files-panel").EncounterFile[],
+        ) => import("@/components/encounters/files-panel").EncounterFile[]),
   ) => void;
   generationLanguage?: import("@/lib/types").SupportedLanguage;
   onLanguageChange?: (lang: import("@/lib/types").SupportedLanguage) => void;
@@ -95,6 +100,10 @@ interface ReviewViewProps {
   }) => Promise<void>;
   adjustDrawerOpen?: boolean;
   onAdjustDrawerOpenChange?: (open: boolean) => void;
+  // Timer
+  timerState?:
+    | import("@/hooks/use-generation-timer").GenerationTimerState
+    | null;
   // i18n
   t: (key: string) => string;
 }
@@ -132,8 +141,11 @@ export function ReviewView({
   onAdjustGenerate,
   adjustDrawerOpen = false,
   onAdjustDrawerOpenChange,
+  timerState,
   t,
 }: ReviewViewProps) {
+  const tDetail = useTranslations("encounters.detail");
+
   // Tab state — desktop uses "resources" | "note" | "add-document", mobile uses "note" | "codes"
   const [activeTab, setActiveTab] = useState("note");
   const [mobileTab, setMobileTab] = useState<"note" | "codes">("note");
@@ -827,10 +839,30 @@ export function ReviewView({
               >
                 <h2 className="text-lg font-medium">{t("detail.note")}</h2>
                 {isActivelyStreaming ? (
-                  <TextShimmer className="text-sm" duration={3}>
-                    {isStreamingGeneration
-                      ? t("detail.generatingEncounter")
-                      : t("detail.regenerating")}
+                  <TextShimmer
+                    className="flex items-center gap-2 text-sm"
+                    duration={3}
+                  >
+                    {timerState
+                      ? tDetail("generatingReadyIn", {
+                          time:
+                            timerState.estimatedSecondsRemaining < 60
+                              ? tDetail("lessThanMinute")
+                              : tDetail("minutesRemaining", {
+                                  minutes: Math.ceil(
+                                    timerState.estimatedSecondsRemaining / 60,
+                                  ).toString(),
+                                }),
+                        })
+                      : isStreamingGeneration
+                        ? t("detail.generatingEncounter")
+                        : t("detail.regenerating")}
+                    {streamingSectionLabels && (
+                      <span className="text-xs">
+                        ({streamedSections.length}/
+                        {Object.keys(streamingSectionLabels).length})
+                      </span>
+                    )}
                   </TextShimmer>
                 ) : (
                   <div className="flex gap-2">
@@ -896,6 +928,7 @@ export function ReviewView({
             open={adjustDrawerOpen}
             onOpenChange={onAdjustDrawerOpenChange}
             visitId={visitId}
+            metadata={visit.metadata}
             files={files}
             onFilesChange={onFilesChange}
             generationLanguage={generationLanguage}

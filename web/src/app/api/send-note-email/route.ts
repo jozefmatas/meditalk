@@ -43,6 +43,13 @@ export async function POST(request: Request) {
     // Get user email — use admin.getUserById instead of supabase.auth.getUser()
     // because during impersonation supabase is a service-role client with no session.
     const admin = createAdminClient();
+    if (!admin) {
+      return NextResponse.json(
+        { error: "Admin client unavailable" },
+        { status: 500 },
+      );
+    }
+
     const { data: userData } = await admin.auth.admin.getUserById(userId);
     const userEmail = userData?.user?.email;
 

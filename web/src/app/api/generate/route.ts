@@ -699,6 +699,9 @@ export async function POST(request: NextRequest) {
           if (sendAsEmail) {
             try {
               const admin = createAdminClient();
+              if (!admin) {
+                throw new Error("Admin client unavailable");
+              }
               // Use admin.getUserById instead of supabase.auth.getUser() —
               // during impersonation, supabase is a service-role client with no session.
               const { data: userData } =

@@ -41,6 +41,7 @@ interface DraftViewProps {
   error: string | null;
   // Recording
   recordingBarRef: React.RefObject<RecordingBarRef | null>;
+  onRecordingStart: (pendingId: string, name: string) => void;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange: (state: "idle" | "recording" | "paused") => void;
   // Template
@@ -53,7 +54,9 @@ interface DraftViewProps {
   // Files (for mobile tab)
   visitId: string;
   files: EncounterFile[];
-  onFilesChange: (files: EncounterFile[]) => void;
+  onFilesChange: (
+    files: EncounterFile[] | ((prev: EncounterFile[]) => EncounterFile[]),
+  ) => void;
   // Retry
   onRetry?: () => void;
   // i18n
@@ -68,6 +71,7 @@ export function DraftView({
   formattedDate,
   error,
   recordingBarRef,
+  onRecordingStart,
   onRecordingComplete,
   onRecordingStateChange,
   selectedTemplateId,
@@ -266,6 +270,9 @@ export function DraftView({
         </div>
         <RecordingBar
           ref={recordingBarRef}
+          visitId={visitId}
+          metadata={visit.metadata}
+          onRecordingStart={onRecordingStart}
           onRecordingComplete={onRecordingComplete}
           onRecordingStateChange={onRecordingStateChange}
           templateId={selectedTemplateId}

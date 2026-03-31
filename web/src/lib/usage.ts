@@ -55,10 +55,16 @@ function calculateCost(params: UsageParams): number {
  * Fire-and-forget usage log. Never throws, never blocks.
  */
 export function logUsage(params: UsageParams): void {
+  const client = createAdminClient();
+  if (!client) {
+    // Admin client unavailable — skip silently
+    return;
+  }
+
   const cost = calculateCost(params);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- api_usage not in generated types until migration is pushed
-  (createAdminClient().from("api_usage") as any)
+  (client.from("api_usage") as any)
     .insert({
       user_id: params.userId,
       visit_id: params.visitId ?? null,
@@ -71,9 +77,23 @@ export function logUsage(params: UsageParams): void {
       duration_seconds: params.durationSeconds ?? null,
     })
     .then(({ error }: { error: { message: string } | null }) => {
-      if (error) console.error("[usage-log] Insert failed:", error.message);
+      if (error) {
+        console.error("[usage-log] Insert failed:", {
+          message: error.message,
+          provider: params.provider,
+          model: params.model,
+          operation: params.operation,
+        });
+      }
     })
-    .catch(() => {
-      // Network-level fetch failure — nothing we can do, silently drop
+    .catch((err: unknown) => {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error("[usage-log] Network/fetch error:", {
+        error: error.message,
+        name: error.name,
+        cause: error.cause,
+        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      });
     });
 }
