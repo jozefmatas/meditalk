@@ -25,7 +25,6 @@ import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 
-const SONNET_MODEL = "claude-sonnet-4-5-20250929";
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: "English",
   sk: "Slovak",
@@ -168,10 +167,16 @@ export async function POST(request: NextRequest) {
 
       const langLabel = LANGUAGE_LABELS[language];
       const sectionList = allIds
-        .map((id) => `- "${id}": ${sectionLabels[id] || id}`)
+        .map((id) => {
+          const label = sectionLabels[id] || id;
+          const context = sectionContexts[id];
+          return context
+            ? `- "${id}": ${label}\n  Context: ${context}`
+            : `- "${id}": ${label}`;
+        })
         .join("\n");
 
-      streamModels = [SONNET_MODEL];
+      streamModels = GENERATION_MODELS;
 
       systemPrompt = `You reorganize medical documentation between template formats.
 Rules:
@@ -179,7 +184,8 @@ Rules:
 2. Preserve the EXACT tone, voice, and writing style of the original note. Do not rephrase, simplify, or embellish — copy the wording verbatim where it fits and only restructure when necessary to fit a different section.
 3. Write in ${langLabel}, except medical terms.
 4. Sections with no relevant content: use empty string "".
-5. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}`;
+5. Follow each section's Context instructions carefully (e.g., exclude certain types of information if specified).
+6. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}`;
 
       userMessage = `CURRENT NOTE SECTIONS:\n\n${currentSections}\n\nReorganize into these target template sections:\n${sectionList}\n\nReturn valid JSON.`;
 
