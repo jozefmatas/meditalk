@@ -281,6 +281,9 @@ export function useEncounterGeneration({
       pendingId: string | null,
       segmentIds: string[],
     ) => {
+      console.log(
+        `[recording] handleRecordingComplete called — pendingId: ${pendingId}, segmentIds: ${segmentIds.length}, blob size: ${blob?.size || 0}`,
+      );
       // If no blob and no segments, nothing to upload
       if (!blob && segmentIds.length === 0) {
         console.warn("[recording] No blob or segments to upload");
@@ -452,6 +455,10 @@ export function useEncounterGeneration({
       const streamingTranscript = finalized?.transcript ?? null;
       const pendingId = finalized?.pendingId ?? null;
       const segmentIds = finalized?.segmentIds ?? [];
+
+      console.log(
+        `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes, pendingId: ${pendingId}`,
+      );
 
       try {
         // If there's a recorded audio that hasn't been uploaded yet, upload it now

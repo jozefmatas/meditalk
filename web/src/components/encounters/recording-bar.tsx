@@ -346,6 +346,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     /** Start Scribe real-time streaming in manual audio mode (shares existing mic stream) */
     const startScribe = useCallback(
       async (stream: MediaStream) => {
+        console.log("[scribe] Starting real-time transcription...");
         try {
           const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
           if (!tokenRes.ok) {
@@ -397,6 +398,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
                 transcriptRef.current = transcriptRef.current
                   ? transcriptRef.current + " " + msg.text
                   : msg.text;
+                console.log(
+                  `[scribe] Received transcript chunk (total: ${transcriptRef.current.length} chars)`,
+                );
               }
             },
           );
@@ -455,6 +459,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           silent.connect(audioCtx.destination);
 
           scribeRef.current = connection;
+          console.log("[scribe] Real-time connection established successfully");
         } catch (err) {
           console.warn("[scribe] Failed to start streaming:", err);
         }
@@ -502,6 +507,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           // Stop Scribe and grab transcript
           stopScribe();
           const transcript = transcriptRef.current || null;
+          console.log(
+            `[recording] finalize() — transcript length: ${transcript?.length || 0} chars`,
+          );
           transcriptRef.current = "";
 
           const recorder = mediaRecorderRef.current;
