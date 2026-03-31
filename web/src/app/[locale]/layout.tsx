@@ -10,6 +10,7 @@ import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import { ImpersonationProvider } from "@/components/admin/impersonation-context";
 import { ConditionalAnalytics } from "@/components/analytics/conditional-analytics";
 import { Toaster } from "@/components/shared/sonner";
+import { ErudaLoader } from "@/components/debug/eruda-loader";
 import "../globals.css";
 
 const figtree = Figtree({
@@ -68,6 +69,7 @@ export default async function LocaleLayout({
           <Toaster />
         </NextIntlClientProvider>
         <ConditionalAnalytics />
+        <ErudaLoader />
       </body>
     </html>
   );
