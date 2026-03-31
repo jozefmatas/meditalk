@@ -218,9 +218,10 @@ export function buildTemplateUserMessage(
  * try the next one in the list before giving up.
  */
 export const GENERATION_MODELS = [
-  "claude-opus-4-6",
-  "claude-sonnet-4-5-20250929",
-  "claude-sonnet-4-20250514",
+  "claude-opus-4-6",           // Primary
+  "claude-sonnet-4-6",         // Fallback 1
+  "claude-sonnet-4-5-20250929", // Fallback 2
+  "claude-sonnet-4-20250514",   // Fallback 3
 ] as const;
 
 export const GENERATION_MODEL = GENERATION_MODELS[0];

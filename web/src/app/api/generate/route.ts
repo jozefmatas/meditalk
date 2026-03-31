@@ -177,7 +177,19 @@ export async function POST(request: NextRequest) {
               );
               file.extracted_text = text;
             } else if (isAudio) {
-              // Audio: download, anonymize (if recording), then use transcript or transcribe
+              // Audio: use real-time transcript if available, otherwise transcribe
+              const isRecording = file.source === "recording";
+
+              // Priority 1: Use real-time transcript if available (fastest!)
+              if (isRecording && transcriptText) {
+                console.log(
+                  `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping file download`,
+                );
+                file.extracted_text = transcriptText;
+                return;
+              }
+
+              // Priority 2: Download audio and decide whether to anonymize
               const { data: fileData, error: dlError } = await supabase.storage
                 .from("encounter-files")
                 .download(file.path);
@@ -190,12 +202,11 @@ export async function POST(request: NextRequest) {
 
               const buffer = Buffer.from(await fileData.arrayBuffer());
 
-              // Check if anonymization is enabled and if this is a recording
+              // Check if anonymization is enabled
               const enableAnonymization =
-                process.env.ENABLE_AUDIO_ANONYMIZATION !== "false"; // Default: true
-              const isRecording = file.source === "recording";
+                process.env.ENABLE_AUDIO_ANONYMIZATION === "true"; // Default: false
 
-              // ALWAYS anonymize recordings (privacy first!), even if we have transcriptText
+              // ONLY anonymize if explicitly enabled AND this is a recording
               if (enableAnonymization && isRecording) {
                 // Server-side anonymization pipeline
                 const crypto = await import("crypto");
@@ -211,21 +222,7 @@ export async function POST(request: NextRequest) {
 
                 if (!ffmpegAvailable) {
                   console.warn(
-                    "[generate] ffmpeg not available - skipping anonymization",
-                  );
-
-                  // Check if we have real-time transcript first (fast!)
-                  if (transcriptText) {
-                    console.log(
-                      `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping transcription`,
-                    );
-                    file.extracted_text = transcriptText;
-                    return;
-                  }
-
-                  // Fallback: transcribe original if no real-time transcript
-                  console.log(
-                    "[generate] No real-time transcript, transcribing original audio",
+                    "[generate] ffmpeg not available - skipping anonymization, transcribing original",
                   );
                   const text = await extractTextFromFile(
                     { buffer },

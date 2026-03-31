@@ -180,7 +180,7 @@ await supabase
 ```
 Pass 1 (Haiku): Generate full note structure + content (~15-20s)
   ↓
-Pass 2 (Opus 4.6): Refine medical accuracy + add details (~10-15s)
+Pass 2 (Opus 4.6 / Sonnet 4.6): Refine medical accuracy + add details (~10-15s)
   ↓
 Total: ~30s (vs 57s)
 Savings: ~27s
@@ -201,9 +201,9 @@ const draftResponse = await anthropic.messages.create({
 // Extract draft content
 const draftNote = extractNote(draftResponse);
 
-// Pass 2: Refinement with Opus 4.6
+// Pass 2: Refinement with fallback chain (Opus 4.6 → Sonnet 4.6 → Sonnet 4.5)
 const refinedResponse = await anthropic.messages.create({
-  model: "claude-opus-4-6",
+  model: "claude-opus-4-6", // Falls back to claude-sonnet-4-6 if overloaded
   max_tokens: 3072,
   system: `${systemPrompt}\n\nRefine this draft note for medical accuracy, completeness, and professional language.`,
   messages: [
@@ -216,7 +216,8 @@ const refinedResponse = await anthropic.messages.create({
 **Why this works:**
 
 - Haiku is 3-5x faster than Sonnet for draft
-- Opus 4.6 is better at medical accuracy than Sonnet
+- Opus 4.6 is best at medical accuracy
+- Sonnet 4.6 provides good quality fallback when Opus is overloaded
 - Two smaller generations faster than one large generation
 - User sees draft quickly, refinement streams in
 
