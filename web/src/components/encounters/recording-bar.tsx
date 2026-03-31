@@ -59,6 +59,7 @@ interface RecordingBarProps {
   templateId?: string;
   onTemplateChange?: (id: string) => void;
   visitId: string;
+  language?: string;
   metadata?: {
     recording_consent?: boolean;
     recording_consent_date?: string;
@@ -105,6 +106,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       templateId,
       onTemplateChange,
       visitId,
+      language,
       metadata,
     },
     ref,
@@ -342,109 +344,123 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     }, []);
 
     /** Start Scribe real-time streaming in manual audio mode (shares existing mic stream) */
-    const startScribe = useCallback(async (stream: MediaStream) => {
-      try {
-        const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
-        if (!tokenRes.ok) {
-          console.warn("[scribe] Token fetch failed, will fall back to batch");
-          return;
+    const startScribe = useCallback(
+      async (stream: MediaStream) => {
+        try {
+          const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
+          if (!tokenRes.ok) {
+            console.warn(
+              "[scribe] Token fetch failed, will fall back to batch",
+            );
+            return;
+          }
+          const { token } = await tokenRes.json();
+
+          const { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } =
+            await import("@elevenlabs/client");
+
+          // Create AudioContext to read PCM from the existing recording stream
+          const audioCtx = new AudioContext();
+          await audioCtx.resume(); // mobile browsers may start suspended
+          scribeAudioCtxRef.current = audioCtx;
+          const source = audioCtx.createMediaStreamSource(stream);
+
+          // Map native sample rate → Scribe format (most browsers = 48 kHz)
+          const rate = audioCtx.sampleRate;
+          const formatMap: Partial<
+            Record<number, (typeof AudioFormat)[keyof typeof AudioFormat]>
+          > = {
+            8000: AudioFormat.PCM_8000,
+            16000: AudioFormat.PCM_16000,
+            22050: AudioFormat.PCM_22050,
+            24000: AudioFormat.PCM_24000,
+            44100: AudioFormat.PCM_44100,
+            48000: AudioFormat.PCM_48000,
+          };
+          const audioFormat = formatMap[rate] ?? AudioFormat.PCM_16000;
+          const targetRate = formatMap[rate] ? rate : 16000;
+          const needsDownsample = !formatMap[rate];
+
+          const connection = Scribe.connect({
+            token,
+            modelId: "scribe_v2_realtime",
+            audioFormat,
+            sampleRate: targetRate,
+            commitStrategy: CommitStrategy.VAD,
+            ...(language && { languageCode: language }),
+          });
+
+          connection.on(
+            RealtimeEvents.COMMITTED_TRANSCRIPT,
+            (msg: { text: string }) => {
+              if (msg.text) {
+                transcriptRef.current = transcriptRef.current
+                  ? transcriptRef.current + " " + msg.text
+                  : msg.text;
+              }
+            },
+          );
+
+          connection.on(RealtimeEvents.ERROR, (err: unknown) => {
+            // Suppress expected "1006 - No reason provided" when pausing/stopping
+            const errStr = String(err);
+            if (
+              errStr.includes("1006") ||
+              errStr.includes("No reason provided")
+            ) {
+              return; // Expected when closing connection (pause/stop)
+            }
+            console.warn("[scribe] Streaming error:", err);
+          });
+
+          // Pipe PCM from our mic stream → Scribe via ScriptProcessorNode
+          const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          processor.onaudioprocess = (e) => {
+            const float32 = e.inputBuffer.getChannelData(0);
+            let pcm: Float32Array;
+            if (needsDownsample) {
+              const ratio = rate / targetRate;
+              const len = Math.floor(float32.length / ratio);
+              pcm = new Float32Array(len);
+              for (let i = 0; i < len; i++) {
+                pcm[i] = float32[Math.floor(i * ratio)];
+              }
+            } else {
+              pcm = float32;
+            }
+            // Float32 → Int16 PCM
+            const int16 = new Int16Array(pcm.length);
+            for (let i = 0; i < pcm.length; i++) {
+              const s = Math.max(-1, Math.min(1, pcm[i]));
+              int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            // Base64 encode and send
+            const bytes = new Uint8Array(int16.buffer);
+            let bin = "";
+            for (let i = 0; i < bytes.length; i++) {
+              bin += String.fromCharCode(bytes[i]);
+            }
+            try {
+              connection.send({ audioBase64: btoa(bin) });
+            } catch {
+              // Connection closed
+            }
+          };
+
+          // Connect pipeline: source → processor → silent gain (no speaker output)
+          const silent = audioCtx.createGain();
+          silent.gain.value = 0;
+          source.connect(processor);
+          processor.connect(silent);
+          silent.connect(audioCtx.destination);
+
+          scribeRef.current = connection;
+        } catch (err) {
+          console.warn("[scribe] Failed to start streaming:", err);
         }
-        const { token } = await tokenRes.json();
-
-        const { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } =
-          await import("@elevenlabs/client");
-
-        // Create AudioContext to read PCM from the existing recording stream
-        const audioCtx = new AudioContext();
-        await audioCtx.resume(); // mobile browsers may start suspended
-        scribeAudioCtxRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(stream);
-
-        // Map native sample rate → Scribe format (most browsers = 48 kHz)
-        const rate = audioCtx.sampleRate;
-        const formatMap: Partial<
-          Record<number, (typeof AudioFormat)[keyof typeof AudioFormat]>
-        > = {
-          8000: AudioFormat.PCM_8000,
-          16000: AudioFormat.PCM_16000,
-          22050: AudioFormat.PCM_22050,
-          24000: AudioFormat.PCM_24000,
-          44100: AudioFormat.PCM_44100,
-          48000: AudioFormat.PCM_48000,
-        };
-        const audioFormat = formatMap[rate] ?? AudioFormat.PCM_16000;
-        const targetRate = formatMap[rate] ? rate : 16000;
-        const needsDownsample = !formatMap[rate];
-
-        const connection = Scribe.connect({
-          token,
-          modelId: "scribe_v2_realtime",
-          audioFormat,
-          sampleRate: targetRate,
-          commitStrategy: CommitStrategy.VAD,
-        });
-
-        connection.on(
-          RealtimeEvents.COMMITTED_TRANSCRIPT,
-          (msg: { text: string }) => {
-            if (msg.text) {
-              transcriptRef.current = transcriptRef.current
-                ? transcriptRef.current + " " + msg.text
-                : msg.text;
-            }
-          },
-        );
-
-        connection.on(RealtimeEvents.ERROR, (err: unknown) => {
-          console.warn("[scribe] Streaming error:", err);
-        });
-
-        // Pipe PCM from our mic stream → Scribe via ScriptProcessorNode
-        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = (e) => {
-          const float32 = e.inputBuffer.getChannelData(0);
-          let pcm: Float32Array;
-          if (needsDownsample) {
-            const ratio = rate / targetRate;
-            const len = Math.floor(float32.length / ratio);
-            pcm = new Float32Array(len);
-            for (let i = 0; i < len; i++) {
-              pcm[i] = float32[Math.floor(i * ratio)];
-            }
-          } else {
-            pcm = float32;
-          }
-          // Float32 → Int16 PCM
-          const int16 = new Int16Array(pcm.length);
-          for (let i = 0; i < pcm.length; i++) {
-            const s = Math.max(-1, Math.min(1, pcm[i]));
-            int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-          }
-          // Base64 encode and send
-          const bytes = new Uint8Array(int16.buffer);
-          let bin = "";
-          for (let i = 0; i < bytes.length; i++) {
-            bin += String.fromCharCode(bytes[i]);
-          }
-          try {
-            connection.send({ audioBase64: btoa(bin) });
-          } catch {
-            // Connection closed
-          }
-        };
-
-        // Connect pipeline: source → processor → silent gain (no speaker output)
-        const silent = audioCtx.createGain();
-        silent.gain.value = 0;
-        source.connect(processor);
-        processor.connect(silent);
-        silent.connect(audioCtx.destination);
-
-        scribeRef.current = connection;
-      } catch (err) {
-        console.warn("[scribe] Failed to start streaming:", err);
-      }
-    }, []);
+      },
+      [language],
+    );
 
     /** Stop Scribe connection and audio pipeline */
     const stopScribe = useCallback(() => {
@@ -620,7 +636,11 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       // Generate pending file ID and notify parent
       const pendingId = crypto.randomUUID();
       pendingRecordingIdRef.current = pendingId;
-      const recordingName = "recording.wav";
+
+      // Get actual MIME type and extension for correct display name
+      const mimeType = getSupportedMimeType();
+      const ext = audioMimeToExt(mimeType);
+      const recordingName = `recording${ext}`;
       onRecordingStart?.(pendingId, recordingName);
 
       try {
@@ -632,7 +652,6 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         recordingStreamRef.current = stream;
         setRecordingStream(stream);
 
-        const mimeType = getSupportedMimeType();
         mimeTypeRef.current = mimeType;
         const recorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = recorder;

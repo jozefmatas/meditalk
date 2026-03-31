@@ -10,13 +10,15 @@ function elevenlabs() {
 /**
  * Batch-transcribe audio using ElevenLabs Scribe v2.
  *
- * @param file      Audio file (File or Buffer)
- * @param filename  Original filename (unused by Scribe, kept for signature compat)
- * @returns         Transcribed text
+ * @param file          Audio file (File or Buffer)
+ * @param filename      Original filename (unused by Scribe, kept for signature compat)
+ * @param languageCode  ISO 639-1 language code (e.g. 'sk', 'cs', 'en') for improved accuracy
+ * @returns             Transcribed text
  */
 export async function transcribeAudio(
   file: File | Buffer,
   filename: string,
+  languageCode?: string,
   ctx?: UsageContext,
 ): Promise<string> {
   // Create a File with proper MIME type so ElevenLabs can detect the format
@@ -40,6 +42,8 @@ export async function transcribeAudio(
   const result = await elevenlabs().speechToText.convert({
     file: audioFile,
     modelId: "scribe_v2",
+    // Specify language for better accuracy (especially for non-English)
+    languageCode: languageCode || undefined,
   });
 
   if (ctx) {

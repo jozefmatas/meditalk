@@ -93,7 +93,7 @@ export async function extractTextFromFile(
 
     if (mimeType.startsWith("audio/")) {
       if (!opts.buffer) return null;
-      return await extractFromAudio(opts.buffer, filename, ctx);
+      return await extractFromAudio(opts.buffer, filename, language, ctx);
     }
 
     return null;
@@ -122,9 +122,11 @@ async function extractFromPdf(
 async function extractFromAudio(
   buffer: Buffer,
   filename: string,
+  language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  const text = await transcribeAudio(buffer, filename, ctx);
+  // Pass language to ElevenLabs for improved transcription accuracy
+  const text = await transcribeAudio(buffer, filename, language, ctx);
   return text?.trim() || null;
 }
 

@@ -126,12 +126,6 @@ export async function POST(request: NextRequest) {
       lap("extraction-start");
       await Promise.all(
         unprocessed.map(async (file) => {
-          // For recording files: use Scribe pre-transcript if available (instant)
-          if (file.source === "recording" && transcriptText) {
-            file.extracted_text = transcriptText;
-            return;
-          }
-
           try {
             const isImage = file.type.startsWith("image/");
             const isPdf = file.type === "application/pdf";
@@ -183,7 +177,7 @@ export async function POST(request: NextRequest) {
               );
               file.extracted_text = text;
             } else if (isAudio) {
-              // Audio: download buffer (ElevenLabs requires File object)
+              // Audio: download, anonymize (if recording), then use transcript or transcribe
               const { data: fileData, error: dlError } = await supabase.storage
                 .from("encounter-files")
                 .download(file.path);
@@ -195,14 +189,248 @@ export async function POST(request: NextRequest) {
               }
 
               const buffer = Buffer.from(await fileData.arrayBuffer());
-              const text = await extractTextFromFile(
-                { buffer },
-                file.name,
-                file.type,
-                language,
-                { userId, visitId },
-              );
-              file.extracted_text = text;
+
+              // Check if anonymization is enabled and if this is a recording
+              const enableAnonymization =
+                process.env.ENABLE_AUDIO_ANONYMIZATION !== "false"; // Default: true
+              const isRecording = file.source === "recording";
+
+              // ALWAYS anonymize recordings (privacy first!), even if we have transcriptText
+              if (enableAnonymization && isRecording) {
+                // Server-side anonymization pipeline
+                const crypto = await import("crypto");
+                const fs = await import("fs/promises");
+                const {
+                  anonymizeAudio,
+                  cleanupTempFiles,
+                  checkFfmpegAvailable,
+                } = await import("@/lib/server/audio-anonymization");
+
+                // Check if ffmpeg is available
+                const ffmpegAvailable = await checkFfmpegAvailable();
+
+                if (!ffmpegAvailable) {
+                  console.warn(
+                    "[generate] ffmpeg not available - skipping anonymization",
+                  );
+
+                  // Check if we have real-time transcript first (fast!)
+                  if (transcriptText) {
+                    console.log(
+                      `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping transcription`,
+                    );
+                    file.extracted_text = transcriptText;
+                    return;
+                  }
+
+                  // Fallback: transcribe original if no real-time transcript
+                  console.log(
+                    "[generate] No real-time transcript, transcribing original audio",
+                  );
+                  const text = await extractTextFromFile(
+                    { buffer },
+                    file.name,
+                    file.type,
+                    language,
+                    { userId, visitId },
+                  );
+                  file.extracted_text = text;
+                  return;
+                }
+
+                const tempOriginal = `/tmp/${crypto.randomUUID()}.webm`;
+                const startTime = Date.now();
+
+                try {
+                  // Write original to temp file
+                  await fs.writeFile(tempOriginal, buffer);
+
+                  // Anonymize
+                  console.log(
+                    `[generate] Anonymizing ${file.name} (${buffer.length} bytes)`,
+                  );
+                  const tempAnonymized = await anonymizeAudio(
+                    tempOriginal,
+                    userId,
+                  );
+                  const anonymizedBuffer = await fs.readFile(tempAnonymized);
+
+                  // Delete original temp file IMMEDIATELY
+                  await fs.unlink(tempOriginal);
+
+                  logAudit({
+                    ...createAuditContext(authResult, request),
+                    action: "audio.original.deleted",
+                    resourceType: "encounter_file",
+                    resourceId: file.id,
+                    metadata: {
+                      path: tempOriginal,
+                      visitId,
+                      processingTimeMs: Date.now() - startTime,
+                    },
+                  });
+
+                  console.log(
+                    `[generate] Anonymization complete (${anonymizedBuffer.length} bytes)`,
+                  );
+
+                  // Use real-time transcript if available (fast!), otherwise transcribe
+                  let text: string | null = null;
+                  if (transcriptText) {
+                    console.log(
+                      `[generate] Using real-time transcript (${transcriptText.length} chars)`,
+                    );
+                    text = transcriptText;
+                  } else {
+                    console.log(
+                      "[generate] No real-time transcript, transcribing anonymized audio",
+                    );
+                    text = await extractTextFromFile(
+                      { buffer: anonymizedBuffer },
+                      file.name.replace(/\.[^.]+$/, ".opus"),
+                      "audio/opus",
+                      language,
+                      { userId, visitId },
+                    );
+                  }
+
+                  file.extracted_text = text;
+
+                  // Text extraction successful → delete anonymized temp file
+                  await fs.unlink(tempAnonymized);
+
+                  // Delete from storage too (don't keep ANY audio!)
+                  await supabase.storage
+                    .from("encounter-files")
+                    .remove([file.path]);
+
+                  file.path = ""; // Clear path since file is deleted
+
+                  logAudit({
+                    ...createAuditContext(authResult, request),
+                    action: "audio.anonymized.deleted",
+                    resourceType: "encounter_file",
+                    resourceId: file.id,
+                    metadata: {
+                      reason: transcriptText
+                        ? "realtime_transcript_used"
+                        : "transcription_successful",
+                      path: file.path,
+                      visitId,
+                      transcriptLength: text?.length || 0,
+                      usedRealtimeTranscript: !!transcriptText,
+                      processingTimeMs: Date.now() - startTime,
+                    },
+                  });
+
+                  logAudit({
+                    ...createAuditContext(authResult, request),
+                    action: "audio.anonymization.complete",
+                    resourceType: "encounter_file",
+                    resourceId: file.id,
+                    metadata: {
+                      originalSize: buffer.length,
+                      anonymizedSize: anonymizedBuffer.length,
+                      usedRealtimeTranscript: !!transcriptText,
+                      processingTimeMs: Date.now() - startTime,
+                      visitId,
+                    },
+                  });
+                } catch (error) {
+                  console.error(
+                    "[generate] Audio anonymization failed:",
+                    error,
+                  );
+
+                  // Cleanup temp files
+                  await cleanupTempFiles(tempOriginal);
+
+                  // On error: save anonymized to storage for retry (if it exists)
+                  const tempAnonymized = tempOriginal.replace(
+                    /\.[^.]+$/,
+                    ".anonymized.opus",
+                  );
+                  try {
+                    await fs.access(tempAnonymized);
+                    const anonymizedBuffer = await fs.readFile(tempAnonymized);
+
+                    await supabase.storage
+                      .from("encounter-files")
+                      .upload(file.path, anonymizedBuffer, { upsert: true });
+
+                    await fs.unlink(tempAnonymized);
+
+                    logAudit({
+                      ...createAuditContext(authResult, request),
+                      action: "audio.anonymized.saved_for_retry",
+                      resourceType: "encounter_file",
+                      resourceId: file.id,
+                      metadata: {
+                        reason: "transcription_failed",
+                        error:
+                          error instanceof Error
+                            ? error.message
+                            : "unknown error",
+                        visitId,
+                      },
+                    });
+                  } catch {
+                    // Anonymized file doesn't exist, continue with fallback
+                  }
+
+                  // Fallback: transcribe original if anonymization fails
+                  const fallbackEnabled =
+                    process.env.ANONYMIZATION_FALLBACK_ENABLED !== "false";
+                  if (fallbackEnabled) {
+                    console.warn("[generate] Using original audio as fallback");
+                    const text = await extractTextFromFile(
+                      { buffer },
+                      file.name,
+                      file.type,
+                      language,
+                      { userId, visitId },
+                    );
+                    file.extracted_text = text;
+
+                    logAudit({
+                      ...createAuditContext(authResult, request),
+                      action: "audio.anonymization.failed",
+                      resourceType: "encounter_file",
+                      resourceId: file.id,
+                      metadata: {
+                        error:
+                          error instanceof Error
+                            ? error.message
+                            : "unknown error",
+                        fallbackUsed: true,
+                        visitId,
+                      },
+                    });
+                  } else {
+                    // Re-throw error if fallback disabled
+                    throw error;
+                  }
+                }
+              } else {
+                // Anonymization disabled or not a recording
+                // Check if we have real-time transcript first (fast!)
+                if (transcriptText && isRecording) {
+                  console.log(
+                    `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping transcription`,
+                  );
+                  file.extracted_text = transcriptText;
+                } else {
+                  // Fallback: transcribe original
+                  const text = await extractTextFromFile(
+                    { buffer },
+                    file.name,
+                    file.type,
+                    language,
+                    { userId, visitId },
+                  );
+                  file.extracted_text = text;
+                }
+              }
             }
           } catch (err) {
             const msg =
@@ -381,7 +609,14 @@ export async function POST(request: NextRequest) {
       clinicalInputParts.unshift(...chunkContents);
     }
 
-    if (chunkContents.length === 0 && !doctorNotes?.trim() && !hasFileContent) {
+    // Use transcriptText if available (real-time streaming), otherwise use chunk contents
+    const transcriptChunks = transcriptText ? [transcriptText] : chunkContents;
+
+    if (
+      transcriptChunks.length === 0 &&
+      !doctorNotes?.trim() &&
+      !hasFileContent
+    ) {
       const error =
         extractionErrors.length > 0
           ? `File processing failed: ${extractionErrors.join("; ")}`
@@ -405,7 +640,7 @@ export async function POST(request: NextRequest) {
     }
 
     const userMessage = buildTemplateUserMessage(
-      chunkContents,
+      transcriptChunks,
       template,
       doctorNotes,
       fileTexts,

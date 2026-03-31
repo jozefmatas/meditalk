@@ -271,6 +271,7 @@ export function DraftView({
         <RecordingBar
           ref={recordingBarRef}
           visitId={visitId}
+          language={visit.language}
           metadata={visit.metadata}
           onRecordingStart={onRecordingStart}
           onRecordingComplete={onRecordingComplete}

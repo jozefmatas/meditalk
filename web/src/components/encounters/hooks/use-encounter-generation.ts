@@ -265,7 +265,7 @@ export function useEncounterGeneration({
           id: pendingId,
           name,
           size: 0, // Will be updated when upload completes
-          type: "audio/wav",
+          type: "audio/webm", // WebM/Opus (10x smaller than WAV)
           source: "recording",
           pending: true,
           isRecording: true, // Spinner will rotate
@@ -331,23 +331,10 @@ export function useEncounterGeneration({
 
       setAudioBlob(finalBlob);
 
-      // Convert to WAV for reliable ElevenLabs compatibility
-      let uploadBlob: Blob;
-      let uploadName: string;
-      try {
-        const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-        uploadBlob = await convertToWav(finalBlob);
-        uploadName = "recording.wav";
-      } catch (convErr) {
-        // WAV conversion failed — upload original blob so audio is never lost
-        console.warn(
-          "[recording] WAV conversion failed, uploading original blob:",
-          convErr,
-        );
-        uploadBlob = finalBlob;
-        const ext = mimeToExt(finalBlob.type);
-        uploadName = `recording${ext}`;
-      }
+      // Upload original WebM/Opus directly (10x smaller than WAV, instant upload)
+      const uploadBlob = finalBlob;
+      const ext = mimeToExt(finalBlob.type);
+      const uploadName = `recording${ext}`;
 
       // Upload with IndexedDB persistence and retry
       const { uploadWithPersistence } =
@@ -482,25 +469,11 @@ export function useEncounterGeneration({
           !audioStoragePathRef.current &&
           !streamingTranscript
         ) {
-          // Convert to WAV for reliable ElevenLabs compatibility
-          let uploadBlob: Blob;
-          let uploadName: string;
-          let uploadType: string;
-          try {
-            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-            uploadBlob = await convertToWav(blobToProcess);
-            uploadName = "recording.wav";
-            uploadType = "audio/wav";
-          } catch {
-            // WAV conversion failed — upload original so audio is never lost
-            console.warn(
-              "[generate] WAV conversion failed, uploading original blob",
-            );
-            uploadBlob = blobToProcess;
-            const ext = mimeToExt(blobToProcess.type);
-            uploadName = `recording${ext}`;
-            uploadType = blobToProcess.type || "audio/webm";
-          }
+          // Upload original WebM/Opus directly (10x smaller than WAV)
+          const uploadBlob = blobToProcess;
+          const ext = mimeToExt(blobToProcess.type);
+          const uploadName = `recording${ext}`;
+          const uploadType = blobToProcess.type || "audio/webm";
 
           const result = await uploadToStorage(uploadBlob, uploadName, {
             encounterId: visitId,
@@ -792,24 +765,11 @@ export function useEncounterGeneration({
       try {
         // Upload adjust recording if exists
         if (blobToProcess && !streamingTranscript) {
-          let uploadBlob: Blob;
-          let uploadName: string;
-          let uploadType: string;
-          try {
-            const { convertToWav } = await import("@/lib/audio/convert-to-wav");
-            uploadBlob = await convertToWav(blobToProcess);
-            uploadName = "recording.wav";
-            uploadType = "audio/wav";
-          } catch {
-            // WAV conversion failed — upload original so audio is never lost
-            console.warn(
-              "[adjust] WAV conversion failed, uploading original blob",
-            );
-            uploadBlob = blobToProcess;
-            const ext = mimeToExt(blobToProcess.type);
-            uploadName = `recording${ext}`;
-            uploadType = blobToProcess.type || "audio/webm";
-          }
+          // Upload original WebM/Opus directly (10x smaller than WAV)
+          const uploadBlob = blobToProcess;
+          const ext = mimeToExt(blobToProcess.type);
+          const uploadName = `recording${ext}`;
+          const uploadType = blobToProcess.type || "audio/webm";
 
           const result = await uploadToStorage(uploadBlob, uploadName, {
             encounterId: visitId,

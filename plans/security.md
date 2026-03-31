@@ -52,8 +52,9 @@
 - [x] Log email sends
 - [x] Log generation/regeneration events
 - [x] Log authentication events (login/logout) — via DB trigger on `auth.audit_log_entries`
+- [x] Log voice anonymization events (start, complete, failure, original deletion, anonymized deletion)
 
-**Files:** `web/supabase/migrations/013_audit_logs.sql`, `014_auth_audit_trigger.sql`, `web/src/lib/audit.ts`, all API routes
+**Files:** `web/supabase/migrations/013_audit_logs.sql`, `014_auth_audit_trigger.sql`, `web/src/lib/audit.ts`, all API routes, `web/src/app/api/generate/route.ts`
 
 ### 1.4 Fix Data Deletion
 
@@ -67,14 +68,14 @@
 
 ### 1.5 Consent Flows
 
-- [ ] Create privacy policy page
-- [ ] Create terms of service page
-- [ ] Add cookie consent banner (block Vercel Analytics until accepted)
-- [ ] Add patient recording consent dialog before first recording
-- [ ] Add data processing notice during onboarding (PHI goes to AI services)
-- [ ] Track consent per user in database
+- [x] Create privacy policy page
+- [x] Create terms of service page
+- [x] Add cookie consent banner (block Vercel Analytics until accepted)
+- [x] Add patient recording consent dialog before first recording
+- [x] Add data processing notice during onboarding (PHI goes to AI services)
+- [x] Track consent per user in database (via `use-recording-consent.ts`, `use-data-processing-notice.ts`, `use-cookie-consent.ts`)
 
-**Files:** Create `web/src/app/[locale]/(marketing)/privacy/page.tsx`, `terms/page.tsx`, `web/src/components/consent/cookie-banner.tsx`, `web/src/components/encounters/recording-consent-dialog.tsx`
+**Files:** `web/src/app/[locale]/(marketing)/privacy-policy/page.tsx`, `terms-of-service/page.tsx`, `web/src/components/shared/cookie-consent/`, `web/src/components/encounters/recording-consent-dialog.tsx`, `web/src/hooks/use-recording-consent.ts`, `web/src/hooks/use-data-processing-notice.ts`, `web/src/hooks/use-cookie-consent.ts`
 
 ### 1.6 IndexedDB Encryption
 
@@ -87,10 +88,27 @@
 
 ### 1.7 Remove Unvetted Analytics
 
-- [ ] Disable Vercel Analytics until GDPR consent flow is in place
+- [x] Disable Vercel Analytics until GDPR consent flow is in place — blocked by cookie consent banner
 - [ ] Or switch to privacy-respecting analytics (Plausible, Fathom)
 
-**Files:** `web/src/app/[locale]/layout.tsx`
+**Files:** `web/src/app/[locale]/layout.tsx`, `web/src/components/shared/cookie-consent/`
+
+### 1.8 Voice Anonymization
+
+- [x] Implement server-side audio anonymization with pitch shifting (±3 semitones)
+- [x] Apply pitch shift with formant preservation to prevent voice biometric identification
+- [x] Audio enhancement pipeline (noise reduction, normalization, dynamic range compression)
+- [x] Delete original audio immediately after anonymization (audited)
+- [x] Delete anonymized audio after successful transcription (audited)
+- [x] Feature flag for gradual rollout (`ENABLE_AUDIO_ANONYMIZATION`)
+- [x] Fallback to original if anonymization fails (`ANONYMIZATION_FALLBACK_ENABLED`)
+- [x] Full audit trail (anonymization start, complete, failure, deletion)
+- [x] Use real-time transcript when available (skip re-transcription for speed)
+- [x] Language parameter for improved transcription accuracy (Slovak, Czech, English)
+
+**Privacy improvement:** Voice recordings are anonymized to prevent patient identification via voice biometrics while maintaining speech intelligibility for transcription. Original audio never persists; only text transcripts are stored long-term.
+
+**Files:** `web/src/lib/server/audio-anonymization.ts`, `web/src/app/api/generate/route.ts`, `web/src/lib/elevenlabs.ts`, `web/src/lib/file-extraction.ts`, `web/.env.local`
 
 ---
 
@@ -226,36 +244,44 @@ PHI is sent to 4 external services without documented agreements:
 
 ## PHI Data Map
 
-| Table/Location                       | PHI Fields                               | Risk     |
-| ------------------------------------ | ---------------------------------------- | -------- |
-| `visits.patient_name`                | Direct patient identifier                | High     |
-| `visits.patient_id`                  | Direct patient identifier                | High     |
-| `visits.encounter_note`              | Clinical notes, diagnoses                | High     |
-| `visits.patient_letter`              | Medical correspondence                   | High     |
-| `visits.raw_text`                    | Full consultation transcript             | High     |
-| `visits.audio_path`                  | Reference to audio recording             | High     |
-| `visits.metadata`                    | Flexible JSONB (may contain PHI)         | Medium   |
-| `transcript_chunks.content`          | Segments of medical conversation         | High     |
-| `transcript_chunks.embedding`        | Vector of PHI (lossy but derived)        | Medium   |
-| `encounter-files` bucket             | Audio, PDFs, images of medical documents | High     |
-| `audio` bucket                       | Audio recordings                         | High     |
-| IndexedDB `meditalk-pending-uploads` | Raw file blobs (unencrypted)             | Critical |
-| Resend emails                        | Full encounter notes in transit          | High     |
+| Table/Location                       | PHI Fields                               | Risk   | Mitigation                                                        |
+| ------------------------------------ | ---------------------------------------- | ------ | ----------------------------------------------------------------- |
+| `visits.patient_name`                | Direct patient identifier                | High   | RLS + auth                                                        |
+| `visits.patient_id`                  | Direct patient identifier                | High   | RLS + auth                                                        |
+| `visits.encounter_note`              | Clinical notes, diagnoses                | High   | RLS + auth                                                        |
+| `visits.patient_letter`              | Medical correspondence                   | High   | RLS + auth                                                        |
+| `visits.raw_text`                    | Full consultation transcript             | High   | RLS + auth                                                        |
+| `visits.audio_path`                  | Reference to audio recording             | Low    | **Audio deleted after transcription (only transcript stored)**    |
+| `visits.metadata`                    | Flexible JSONB (may contain PHI)         | Medium | RLS + auth                                                        |
+| `transcript_chunks.content`          | Segments of medical conversation         | High   | RLS + auth                                                        |
+| `transcript_chunks.embedding`        | Vector of PHI (lossy but derived)        | Medium | RLS + auth                                                        |
+| `encounter-files` bucket             | Audio, PDFs, images of medical documents | Medium | **Voice anonymized (pitch shifted), deleted after transcription** |
+| `audio` bucket                       | Audio recordings (legacy)                | Low    | Deprecated, will be removed                                       |
+| IndexedDB `meditalk-pending-uploads` | Raw file blobs (encrypted)               | Medium | **AES-GCM 256-bit encryption, 24-hour retention**                 |
+| Resend emails                        | Full encounter notes in transit          | High   | HTTPS + TLS                                                       |
 
 ---
 
 ## Third-Party Data Flow
 
 ```
-Patient Audio ──▶ Browser ──▶ ElevenLabs Scribe (transcription)
-                           ──▶ Supabase Storage (file storage)
-                           ──▶ IndexedDB (temporary, UNENCRYPTED)
+Patient Audio ──▶ Browser ──▶ IndexedDB (temporary, AES-GCM encrypted, 24h retention)
+                          ──▶ Supabase Storage (temporary)
+                          ──▶ ElevenLabs Scribe (real-time transcription)
 
-Transcript ──▶ Anthropic Claude (note generation)
+Server-side Processing:
+  Supabase Storage ──▶ Download original audio
+                   ──▶ Anonymize with ffmpeg (pitch shift ±3 semitones)
+                   ──▶ Delete original immediately
+                   ──▶ Use real-time transcript (or transcribe anonymized)
+                   ──▶ Delete anonymized audio after successful transcription
+                   ──▶ RESULT: No audio stored long-term, only text transcript
+
+Transcript ──▶ Anthropic Claude (note generation, with language parameter)
            ──▶ OpenAI (embeddings for search)
 
 Generated Note ──▶ Supabase DB (storage)
-               ──▶ Resend (email delivery)
+               ──▶ Resend (email delivery, HTTPS/TLS)
 ```
 
 ---

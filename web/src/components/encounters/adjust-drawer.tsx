@@ -194,6 +194,7 @@ export function AdjustDrawer({
                       <RecordingBar
                         ref={adjustRecordingBarRef}
                         visitId={visitId}
+                        language={generationLanguage}
                         metadata={metadata}
                         onRecordingStart={handleRecordingStart}
                         onRecordingComplete={handleRecordingComplete}
