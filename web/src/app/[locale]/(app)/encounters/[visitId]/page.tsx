@@ -350,7 +350,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 formattedDate={formattedDate}
                 error={data.error}
                 recordingBarRef={generation.recordingBarRef}
-                onRecordingStart={generation.handleRecordingStart}
                 onRecordingComplete={() => {}}
                 onRecordingStateChange={generation.handleRecordingStateChange}
                 selectedTemplateId={generation.selectedTemplateId}

@@ -10,17 +10,7 @@ import {
   getPreferredTemplateId,
   setPreferredTemplateId,
 } from "@/lib/templates";
-import { uploadToStorage } from "@/lib/supabase/upload";
 import { useGenerationTimer } from "@/hooks/use-generation-timer";
-
-/** Map MIME type to file extension for fallback uploads. */
-function mimeToExt(mime: string): string {
-  if (mime.includes("webm")) return ".webm";
-  if (mime.includes("ogg")) return ".ogg";
-  if (mime.includes("mp4") || mime.includes("m4a")) return ".m4a";
-  if (mime.includes("mpeg")) return ".mp3";
-  return ".webm";
-}
 
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
@@ -80,10 +70,6 @@ export function useEncounterGeneration({
 
   // Audio recording — blob kept in memory for canGenerate check
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  // Storage path of the uploaded audio (set by handleRecordingComplete or FilesPanel).
-  // Ref instead of state so handleGenerate can read the latest value immediately
-  // after finalize() triggers handleRecordingComplete (avoids React state batching delay).
-  const audioStoragePathRef = useRef<string | null>(null);
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
@@ -152,241 +138,16 @@ export function useEncounterGeneration({
     return () => clearTimeout(timeout);
   }, [doctorNotes, visit, visitId]);
 
-  // Resume pending uploads from IndexedDB on mount
-  useEffect(() => {
-    (async () => {
-      const {
-        getPendingUploadsForVisit,
-        deletePendingUpload,
-        clearOldPendingUploads,
-      } = await import("@/lib/indexeddb/pending-uploads");
-      const { resumePendingUpload } =
-        await import("@/lib/upload/upload-with-persistence");
-
-      // Clean up old failed uploads (>24h) first
-      const deletedCount = await clearOldPendingUploads();
-      if (deletedCount > 0) {
-        console.log(
-          `[upload] Cleaned up ${deletedCount} old pending upload(s)`,
-        );
-      }
-
-      const pending = await getPendingUploadsForVisit(visitId);
-      if (pending.length === 0) return;
-
-      console.log(
-        `[upload] Found ${pending.length} pending upload(s) in IndexedDB`,
-      );
-
-      // Filter out files that are already uploaded (deduplication)
-      // This prevents duplicates when page is refreshed after upload succeeded
-      // but before IndexedDB cleanup completed
-      setFiles((prev: EncounterFile[]) => {
-        // Check by name+source since IDs change after upload (uploadId != fileId)
-        const existingKeys = new Set(
-          prev.map((f) => `${f.name}:${f.source || "manual"}`),
-        );
-        const newPending = pending
-          .filter((p) => !existingKeys.has(`${p.name}:${p.source || "manual"}`))
-          .map((p) => ({
-            id: p.id,
-            name: p.name,
-            size: p.size,
-            type: p.type,
-            source: p.source,
-            pending: true,
-          }));
-
-        return newPending.length > 0 ? [...prev, ...newPending] : prev;
-      });
-
-      // Get current files to check for duplicates (by name+source)
-      let currentFileKeys: Set<string> = new Set();
-      setFiles((prev: EncounterFile[]) => {
-        currentFileKeys = new Set(
-          prev.map((f) => `${f.name}:${f.source || "manual"}`),
-        );
-        return prev;
-      });
-
-      // Delete from IndexedDB if already uploaded
-      pending.forEach((p) => {
-        const key = `${p.name}:${p.source || "manual"}`;
-        if (currentFileKeys.has(key)) {
-          deletePendingUpload(p.id).catch(() => {});
-        }
-      });
-
-      // Only resume uploads for files that aren't already uploaded
-      const toResume = pending.filter(
-        (p) => !currentFileKeys.has(`${p.name}:${p.source || "manual"}`),
-      );
-
-      if (toResume.length === 0) return;
-
-      // Resume uploads silently in parallel
-      await Promise.allSettled(
-        toResume.map(async (p) => {
-          try {
-            const result = await resumePendingUpload(p);
-
-            // Register with API
-            const res = await fetch(`/api/encounters/${visitId}/files`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ files: [result] }),
-            });
-
-            if (!res.ok) {
-              throw new Error(`Metadata registration failed: ${res.status}`);
-            }
-
-            const data = await res.json();
-
-            // Replace pending file with uploaded file
-            setFiles((prev: EncounterFile[]) => {
-              const withoutPending = prev.filter((f) => f.id !== p.id);
-              return [...withoutPending, ...(data.files as EncounterFile[])];
-            });
-          } catch (err) {
-            console.error(`[upload] Failed to resume ${p.name}:`, err);
-          }
-        }),
-      );
-    })();
-  }, [visitId, setFiles]);
-
-  const handleRecordingStart = useCallback(
-    (pendingId: string, name: string) => {
-      // Add pending file to UI immediately when recording starts
-      setFiles((prev: EncounterFile[]) => [
-        ...prev,
-        {
-          id: pendingId,
-          name,
-          size: 0, // Will be updated when upload completes
-          type: "audio/webm", // WebM/Opus (10x smaller than WAV)
-          source: "recording",
-          pending: true,
-          isRecording: true, // Spinner will rotate
-        },
-      ]);
-    },
-    [setFiles],
-  );
-
-  const handleRecordingComplete = useCallback(
-    async (
-      blob: Blob | null,
-      pendingId: string | null,
-      segmentIds: string[],
-    ) => {
-      console.log(
-        `[recording] handleRecordingComplete called — pendingId: ${pendingId}, segmentIds: ${segmentIds.length}, blob size: ${blob?.size || 0}`,
-      );
-      // If no blob and no segments, nothing to upload
-      if (!blob && segmentIds.length === 0) {
-        console.warn("[recording] No blob or segments to upload");
-        return;
-      }
-
-      // Load segments from IndexedDB if any exist
-      let finalBlob = blob;
-      if (segmentIds.length > 0) {
-        try {
-          const { getPendingUploadsForVisit, deletePendingUpload } =
-            await import("@/lib/indexeddb/pending-uploads");
-
-          const allPending = await getPendingUploadsForVisit(visitId);
-          const segments = allPending
-            .filter((p) => p.source === "recording-segment")
-            .sort((a, b) => a.timestamp - b.timestamp);
-
-          if (segments.length > 0) {
-            console.log(
-              `[recording] Merging ${segments.length} segments from IndexedDB`,
-            );
-
-            // Merge all segments into one blob
-            const mergedBlob = new Blob(
-              segments.map((s) => s.blob),
-              { type: segments[0]?.type || "audio/webm" },
-            );
-
-            finalBlob = mergedBlob;
-
-            // Cleanup segments from IndexedDB
-            await Promise.all(segments.map((s) => deletePendingUpload(s.id)));
-          }
-        } catch (err) {
-          console.error(
-            "[recording] Failed to load/merge segments from IndexedDB:",
-            err,
-          );
-          // Continue with in-memory blob if available
-        }
-      }
-
-      if (!finalBlob) {
-        console.warn("[recording] No blob available after segment loading");
-        return;
-      }
-
-      setAudioBlob(finalBlob);
-
-      // Upload original WebM/Opus directly (10x smaller than WAV, instant upload)
-      const uploadBlob = finalBlob;
-      const ext = mimeToExt(finalBlob.type);
-      const uploadName = `recording${ext}`;
-
-      // Upload with IndexedDB persistence and retry
-      const { uploadWithPersistence } =
-        await import("@/lib/upload/upload-with-persistence");
-
-      try {
-        const result = await uploadWithPersistence(
-          uploadBlob,
-          uploadName,
-          visitId,
-          {
-            source: "recording",
-          },
-        );
-
-        audioStoragePathRef.current = result.path;
-
-        // Register file metadata with the API
-        const res = await fetch(`/api/encounters/${visitId}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: [result] }),
-        });
-
-        if (!res.ok) {
-          throw new Error(`Metadata registration failed: ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Replace pending file with uploaded file
-        if (pendingId) {
-          setFiles((prev: EncounterFile[]) => {
-            const withoutPending = prev.filter((f) => f.id !== pendingId);
-            return [...withoutPending, ...(data.files as EncounterFile[])];
-          });
-        } else {
-          // No pending ID (old flow or recovery), just add the files
-          setFiles((prev: EncounterFile[]) => [
-            ...prev,
-            ...(data.files as EncounterFile[]),
-          ]);
-        }
-      } catch (err) {
-        console.error("[recording] Upload failed after all retries:", err);
-      }
-    },
-    [visitId, setFiles],
-  );
+  const handleRecordingComplete = useCallback((blob: Blob | null) => {
+    console.log(
+      `[recording] handleRecordingComplete — blob size: ${blob?.size || 0}`,
+    );
+    // Keep blob in memory for canGenerate check.
+    // Transcript comes from finalize() and is passed directly to /api/generate.
+    if (blob) {
+      setAudioBlob(blob);
+    }
+  }, []);
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
@@ -453,58 +214,14 @@ export function useEncounterGeneration({
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
-      const pendingId = finalized?.pendingId ?? null;
-      const segmentIds = finalized?.segmentIds ?? [];
 
       console.log(
-        `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes, pendingId: ${pendingId}`,
+        `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
       );
 
       try {
-        // If there's a recorded audio that hasn't been uploaded yet, upload it now
-        if (
-          (blobToProcess || segmentIds.length > 0) &&
-          !audioStoragePathRef.current
-        ) {
-          // Upload via handleRecordingComplete (handles segment merging)
-          await handleRecordingComplete(blobToProcess, pendingId, segmentIds);
-        }
-
-        // Legacy fallback: If still no audio path and no transcript, try direct upload
-        if (
-          blobToProcess &&
-          !audioStoragePathRef.current &&
-          !streamingTranscript
-        ) {
-          // Upload original WebM/Opus directly (10x smaller than WAV)
-          const uploadBlob = blobToProcess;
-          const ext = mimeToExt(blobToProcess.type);
-          const uploadName = `recording${ext}`;
-          const uploadType = blobToProcess.type || "audio/webm";
-
-          const result = await uploadToStorage(uploadBlob, uploadName, {
-            encounterId: visitId,
-          });
-          await fetch(`/api/encounters/${visitId}/files`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              files: [
-                {
-                  id: crypto.randomUUID(),
-                  name: uploadName,
-                  size: uploadBlob.size,
-                  type: uploadType,
-                  path: result.path,
-                  source: "recording",
-                },
-              ],
-            }),
-          });
-        }
-
+        // Recording is now handled via real-time transcript - no upload needed
         setAudioBlob(null);
-        audioStoragePathRef.current = null;
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
         let completedEvent: Record<string, unknown> | null = null;
@@ -716,15 +433,7 @@ export function useEncounterGeneration({
         );
       }
     },
-    [
-      visitId,
-      selectedTemplateId,
-      doctorNotes,
-      audioBlob,
-      setVisit,
-      setError,
-      handleRecordingComplete,
-    ],
+    [visitId, selectedTemplateId, doctorNotes, audioBlob, setVisit, setError],
   );
 
   /* ------------------------------------------------------------------ */
@@ -766,39 +475,10 @@ export function useEncounterGeneration({
 
       // Finalize any recording in the adjust drawer
       const finalized = await opts.adjustRecordingBarRef.current?.finalize();
-      const blobToProcess = finalized?.blob ?? null;
       const streamingTranscript = finalized?.transcript ?? null;
 
       try {
-        // Upload adjust recording if exists
-        if (blobToProcess && !streamingTranscript) {
-          // Upload original WebM/Opus directly (10x smaller than WAV)
-          const uploadBlob = blobToProcess;
-          const ext = mimeToExt(blobToProcess.type);
-          const uploadName = `recording${ext}`;
-          const uploadType = blobToProcess.type || "audio/webm";
-
-          const result = await uploadToStorage(uploadBlob, uploadName, {
-            encounterId: visitId,
-          });
-          await fetch(`/api/encounters/${visitId}/files`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              files: [
-                {
-                  id: crypto.randomUUID(),
-                  name: uploadName,
-                  size: uploadBlob.size,
-                  type: uploadType,
-                  path: result.path,
-                  source: "recording",
-                },
-              ],
-            }),
-          });
-        }
-
+        // Recording is now handled via real-time transcript - no upload needed
         // Clear template cache — new context invalidates previous outputs
         templateCacheRef.current.clear();
 
@@ -1342,7 +1022,6 @@ export function useEncounterGeneration({
     recordingBarRef,
     syncTitle,
     initFromVisit,
-    handleRecordingStart,
     handleRecordingComplete,
     handleRecordingStateChange,
     handleGenerate,

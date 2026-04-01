@@ -1,21 +1,33 @@
 import { useState, useEffect, useMemo } from "react";
 
-/** Configuration for generation time estimation */
+/** Configuration for generation time estimation
+ * Token-based estimation from production logs (5,175 tokens):
+ * - Clinical analysis (Haiku): 9s = 1.7ms/token (concept extraction)
+ * - Generation (Opus): 56.7s = 11ms/token (single-pass)
+ * - Token ratio: 13,459 chars → 5,175 tokens = 2.6 chars/token
+ * - File extraction: ~48s per image, ~15s per audio (runs in parallel)
+ */
 const CONFIG = {
-  BASE_SECONDS_PER_SECTION: 3,
-  CONTENT_SIZE_THRESHOLDS: {
-    small: 500,
-    medium: 2000,
-    large: 5000,
+  // Single-pass Opus generation (milliseconds per input token)
+  OPUS_MS_PER_TOKEN: 11,
+
+  // Estimate input tokens from character count (real ratio from logs: 2.6 chars per token)
+  CHARS_PER_TOKEN: 2.6,
+
+  // Clinical analysis (Haiku): 9s for 5175 tokens = 1.7ms/token
+  // Faster than generation - structured extraction vs prose generation
+  CLINICAL_ANALYSIS_MS_PER_TOKEN: 1.7,
+
+  // File extraction overhead (seconds)
+  FILE_EXTRACTION_OVERHEAD: {
+    perImage: 48, // OCR is very slow
+    perAudio: 15, // Transcription
+    perPdf: 30, // PDF OCR
   },
-  MULTIPLIERS: {
-    small: 0.8,
-    medium: 1.0,
-    large: 1.3,
-    veryLarge: 1.6,
-    perImage: 0.2,
-    perPdf: 0.1,
-  },
+
+  // Base overhead for setup/embeddings/etc
+  BASE_OVERHEAD_SECONDS: 5,
+
   REFINEMENT_TRUST_THRESHOLD: 3,
   UPDATE_INTERVAL_MS: 1000,
   ROUND_UP_TO_SECONDS: 5,
@@ -42,31 +54,29 @@ export interface GenerationTimerState {
 }
 
 /**
- * Calculate content size multiplier based on text length and file types
+ * Estimate GENERATION-ONLY time (excludes file extraction)
+ * This is what should be shown in the countdown AFTER extraction is complete.
  */
-function calculateContentMultiplier(metrics: ContentMetrics): number {
+function estimateGenerationTime(metrics: ContentMetrics): number {
   const totalTextLength = metrics.transcriptLength + metrics.doctorNotesLength;
 
-  // Base multiplier on text size
-  let multiplier: number;
-  if (totalTextLength < CONFIG.CONTENT_SIZE_THRESHOLDS.small) {
-    multiplier = CONFIG.MULTIPLIERS.small;
-  } else if (totalTextLength < CONFIG.CONTENT_SIZE_THRESHOLDS.medium) {
-    multiplier = CONFIG.MULTIPLIERS.medium;
-  } else if (totalTextLength < CONFIG.CONTENT_SIZE_THRESHOLDS.large) {
-    multiplier = CONFIG.MULTIPLIERS.large;
-  } else {
-    multiplier = CONFIG.MULTIPLIERS.veryLarge;
-  }
+  // 1. Estimate input tokens
+  const estimatedTokens = Math.ceil(totalTextLength / CONFIG.CHARS_PER_TOKEN);
 
-  // Add overhead for images and PDFs
-  multiplier += metrics.imageCount * CONFIG.MULTIPLIERS.perImage;
+  // 2. Clinical analysis time (runs in parallel with extraction, but we show this in countdown)
+  const clinicalMs = estimatedTokens * CONFIG.CLINICAL_ANALYSIS_MS_PER_TOKEN;
+  const clinicalSeconds = clinicalMs / 1000;
 
-  // Approximate PDF count (if fileCount > imageCount, assume rest might be PDFs)
-  const estimatedPdfCount = Math.max(0, metrics.fileCount - metrics.imageCount);
-  multiplier += estimatedPdfCount * CONFIG.MULTIPLIERS.perPdf;
+  // 3. Single-pass Opus generation time (sequential after clinical/extraction)
+  const generationMs = estimatedTokens * CONFIG.OPUS_MS_PER_TOKEN;
+  const generationSeconds = generationMs / 1000;
 
-  return multiplier;
+  // 4. Base overhead for setup/embeddings/etc
+  const overheadSeconds = CONFIG.BASE_OVERHEAD_SECONDS;
+
+  // GENERATION-ONLY TIME (shown in countdown after extraction)
+  // Clinical + Opus + overhead
+  return clinicalSeconds + generationSeconds + overheadSeconds;
 }
 
 /**
@@ -127,14 +137,12 @@ export function useGenerationTimer({
   const timerState = useMemo((): GenerationTimerState | null => {
     if (!isGenerating || totalSections === 0) return null;
 
-    // Calculate initial estimate based on content size
-    const contentMultiplier = calculateContentMultiplier(contentMetrics);
-    const initialETA =
-      totalSections * CONFIG.BASE_SECONDS_PER_SECTION * contentMultiplier;
+    // Calculate initial estimate based on content size and file count
+    const initialETA = estimateGenerationTime(contentMetrics);
 
     let estimatedSeconds: number;
 
-    if (completedSections > 0) {
+    if (completedSections > 0 && totalSections > 0) {
       // Refine estimate based on actual progress
       const avgSecondsPerSection = elapsedSeconds / completedSections;
       const remainingSections = totalSections - completedSections;
@@ -148,7 +156,7 @@ export function useGenerationTimer({
       estimatedSeconds = initialETA * (1 - weight) + refinedETA * weight;
     } else {
       // No sections completed yet, use initial estimate
-      estimatedSeconds = initialETA - elapsedSeconds;
+      estimatedSeconds = Math.max(0, initialETA - elapsedSeconds);
     }
 
     // Ensure estimate is positive and round up

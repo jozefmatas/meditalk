@@ -113,24 +113,6 @@ export function AdjustDrawer({
     onFilesChange,
   ]);
 
-  const handleRecordingStart = useCallback(
-    (pendingId: string, name: string) => {
-      setNewFiles((prev) => [
-        ...prev,
-        {
-          id: pendingId,
-          name,
-          size: 0,
-          type: "audio/wav",
-          source: "recording",
-          pending: true,
-          isRecording: true,
-        },
-      ]);
-    },
-    [],
-  );
-
   const handleRecordingComplete = useCallback(() => {
     // Recording blob is handled via finalize() in handleAdjustGenerate
   }, []);
@@ -196,7 +178,6 @@ export function AdjustDrawer({
                         visitId={visitId}
                         language={generationLanguage}
                         metadata={metadata}
-                        onRecordingStart={handleRecordingStart}
                         onRecordingComplete={handleRecordingComplete}
                         onRecordingStateChange={setRecordingState}
                       />

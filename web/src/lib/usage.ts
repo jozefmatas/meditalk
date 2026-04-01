@@ -12,6 +12,8 @@ const SCRIBE_PER_HOUR = 0.4;
 type Provider = "anthropic" | "openai" | "elevenlabs";
 type Operation =
   | "generate_template"
+  | "generate_template_draft"
+  | "generate_template_refine"
   | "reformat_template"
   | "clinical_analysis"
   | "embed"

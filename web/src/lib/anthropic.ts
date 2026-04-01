@@ -218,10 +218,10 @@ export function buildTemplateUserMessage(
  * try the next one in the list before giving up.
  */
 export const GENERATION_MODELS = [
-  "claude-opus-4-6",           // Primary
-  "claude-sonnet-4-6",         // Fallback 1
+  "claude-opus-4-6", // Primary
+  "claude-sonnet-4-6", // Fallback 1
   "claude-sonnet-4-5-20250929", // Fallback 2
-  "claude-sonnet-4-20250514",   // Fallback 3
+  "claude-sonnet-4-20250514", // Fallback 3
 ] as const;
 
 export const GENERATION_MODEL = GENERATION_MODELS[0];
@@ -231,6 +231,8 @@ export const MODEL_FALLBACK_DELAY = 2000;
 
 /**
  * Generate a medical document from a template, transcript chunks, and optional doctor notes.
+ *
+ * Uses single-pass Opus generation with fallback chain for reliability.
  */
 
 export async function generateFromTemplate(
@@ -268,11 +270,13 @@ export async function generateFromTemplate(
   }
 
   console.log(
-    `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+    `[generate] Single-pass generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
   );
 
+  const startTime = Date.now();
+
   const response = await anthropic().messages.create({
-    model: GENERATION_MODEL,
+    model: GENERATION_MODEL, // Uses fallback chain: opus-4-6 → sonnet-4-6 → sonnet-4-5
     max_tokens: 4096,
     system: systemPrompt,
     messages: [
@@ -283,8 +287,9 @@ export async function generateFromTemplate(
     ],
   });
 
+  const elapsed = Date.now() - startTime;
   console.log(
-    `[generate] Anthropic usage — input: ${response.usage.input_tokens}, output: ${response.usage.output_tokens}, stop: ${response.stop_reason}`,
+    `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
   );
 
   if (ctx) {

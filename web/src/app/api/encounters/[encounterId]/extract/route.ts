@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
-import { extractTextFromFile } from "@/lib/file-extraction";
-import type { SupportedLanguage } from "@/lib/types";
+import { extractFileText } from "@/lib/extraction/extract-file";
+import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -57,15 +57,7 @@ export async function POST(
 
     const language = (visit.language as SupportedLanguage) || "en";
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const uploadedFiles = (visitMeta.files ?? []) as {
-      id: string;
-      name: string;
-      type: string;
-      path: string;
-      source?: string;
-      extracted_text?: string | null;
-      extraction_status?: "extracting" | "completed" | "failed" | null;
-    }[];
+    const uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
 
     // Find the file to extract
     const file = uploadedFiles.find((f) => f.id === fileId);
@@ -101,123 +93,60 @@ export async function POST(
       );
     }
 
+    const filePath = file.path;
     const startTime = Date.now();
     console.log(`[extract] Extracting text from ${file.name} (${file.type})`);
 
-    // Mark extraction as in progress
-    // Re-read metadata to avoid overwriting parallel extractions
-    const { data: freshVisit1 } = await supabase
-      .from("visits")
-      .select("metadata")
-      .eq("id", visitId)
-      .single();
-    const freshMeta1 = (freshVisit1?.metadata ?? {}) as Record<string, unknown>;
-    const freshFiles1 = (freshMeta1.files ?? []) as typeof uploadedFiles;
-    const freshFile1 = freshFiles1.find((f) => f.id === fileId);
-    if (freshFile1) {
-      freshFile1.extraction_status = "extracting";
-      await supabase
-        .from("visits")
-        .update({
-          metadata: { ...freshMeta1, files: freshFiles1 },
-        })
-        .eq("id", visitId);
+    // Mark extraction as in progress using atomic update
+    const { error: extractingError } = await supabase.rpc(
+      "update_file_extraction_status",
+      {
+        p_visit_id: visitId,
+        p_file_id: fileId,
+        p_status: "extracting",
+      },
+    );
+
+    if (extractingError) {
+      console.error(
+        `[extract] Failed to set status="extracting" for ${file.name}:`,
+        extractingError,
+      );
     }
 
-    const isImage = file.type.startsWith("image/");
-    const isPdf = file.type === "application/pdf";
-    const isAudio = file.type.startsWith("audio/");
-
-    let extractedText: string | null = null;
-
-    if (isImage) {
-      // Download image for EXIF rotation
-      const { data: fileData, error: dlError } = await supabase.storage
-        .from("encounter-files")
-        .download(file.path);
-
-      if (dlError || !fileData) {
-        console.error(`Failed to download ${file.name}:`, dlError);
-        return NextResponse.json(
-          { error: "File download failed" },
-          { status: 500 },
-        );
-      }
-
-      const buffer = Buffer.from(await fileData.arrayBuffer());
-      extractedText = await extractTextFromFile(
-        { imageBuffer: buffer },
-        file.name,
-        file.type,
+    // Extract text using shared extraction service
+    let extractedText: string;
+    try {
+      const result = await extractFileText({
+        file: { ...file, path: filePath },
+        supabase,
+        userId,
+        visitId,
         language,
-        { userId, visitId },
+      });
+      extractedText = result.text;
+      console.log(`[extract] Extraction took ${result.elapsedMs}ms`);
+    } catch (extractError) {
+      const errorMsg =
+        extractError instanceof Error
+          ? extractError.message
+          : "Unknown extraction error";
+      console.error(
+        `[extract] Extraction failed for ${file.name}:`,
+        extractError,
       );
-    } else if (isPdf) {
-      // PDFs: use signed URL
-      const { data: urlData, error: urlError } = await supabase.storage
-        .from("encounter-files")
-        .createSignedUrl(file.path, 300); // 5 min expiry
 
-      if (urlError || !urlData?.signedUrl) {
-        console.error(
-          `Failed to create signed URL for ${file.name}:`,
-          urlError,
-        );
-        return NextResponse.json(
-          { error: "Signed URL creation failed" },
-          { status: 500 },
-        );
-      }
+      // Mark as failed so it doesn't stay "extracting" forever
+      await supabase.rpc("update_file_extraction_status", {
+        p_visit_id: visitId,
+        p_file_id: fileId,
+        p_status: "failed",
+      });
 
-      extractedText = await extractTextFromFile(
-        { pdfUrl: urlData.signedUrl },
-        file.name,
-        file.type,
-        language,
-        { userId, visitId },
-      );
-    } else if (isAudio) {
-      // Audio files: transcribe via ElevenLabs
-      // Note: Real-time transcript from recording bar will override this during generation
-      const { data: fileData, error: dlError } = await supabase.storage
-        .from("encounter-files")
-        .download(file.path);
-
-      if (dlError || !fileData) {
-        console.error(`Failed to download ${file.name}:`, dlError);
-        return NextResponse.json(
-          { error: "File download failed" },
-          { status: 500 },
-        );
-      }
-
-      const buffer = Buffer.from(await fileData.arrayBuffer());
-      extractedText = await extractTextFromFile(
-        { buffer },
-        file.name,
-        file.type,
-        language,
-        { userId, visitId },
-      );
-    } else {
       return NextResponse.json(
-        { error: "Unsupported file type" },
-        { status: 400 },
+        { error: `Extraction failed: ${errorMsg}` },
+        { status: 500 },
       );
-    }
-
-    // Save extracted text back to metadata
-    // Re-read metadata to avoid overwriting parallel extractions
-    const { data: freshVisit2 } = await supabase
-      .from("visits")
-      .select("metadata")
-      .eq("id", visitId)
-      .single();
-    const freshMeta2 = (freshVisit2?.metadata ?? {}) as Record<string, unknown>;
-    const freshFiles2 = (freshMeta2.files ?? []) as typeof uploadedFiles;
-    const freshFile2 = freshFiles2.find((f) => f.id === fileId);
-    if (!freshFile2) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
     }
 
     // Check if extraction actually succeeded (non-empty text)
@@ -225,49 +154,34 @@ export async function POST(
       console.warn(
         `[extract] Extraction returned empty text for ${file.name}, marking as failed`,
       );
-      freshFile2.extraction_status = "failed";
-      await supabase
-        .from("visits")
-        .update({
-          metadata: { ...freshMeta2, files: freshFiles2 },
-        })
-        .eq("id", visitId);
+      // Use atomic update to mark as failed
+      await supabase.rpc("update_file_extraction_status", {
+        p_visit_id: visitId,
+        p_file_id: fileId,
+        p_status: "failed",
+      });
       return NextResponse.json(
         { error: "Extraction returned empty text", extracted: false },
         { status: 500 },
       );
     }
 
-    freshFile2.extracted_text = extractedText;
-    freshFile2.extraction_status = "completed";
-    const { error: saveError } = await supabase
-      .from("visits")
-      .update({
-        metadata: { ...freshMeta2, files: freshFiles2 },
-      })
-      .eq("id", visitId);
+    // Atomic update: set status=completed + extracted_text in one RPC call
+    const { error: rpcError } = await supabase.rpc(
+      "update_file_extraction_status",
+      {
+        p_visit_id: visitId,
+        p_file_id: fileId,
+        p_status: "completed",
+        p_extracted_text: extractedText,
+      },
+    );
 
-    if (saveError) {
-      console.error("Failed to save extracted text:", saveError);
-      // Mark as failed on save error - re-read to avoid overwriting
-      const { data: failVisit } = await supabase
-        .from("visits")
-        .select("metadata")
-        .eq("id", visitId)
-        .single();
-      if (failVisit) {
-        const failMeta = (failVisit.metadata ?? {}) as Record<string, unknown>;
-        const failFiles = (failMeta.files ?? []) as typeof uploadedFiles;
-        const failFile = failFiles.find((f) => f.id === fileId);
-        if (failFile) {
-          failFile.extraction_status = "failed";
-          // Silent fail on second attempt - don't check for errors
-          await supabase
-            .from("visits")
-            .update({ metadata: { ...failMeta, files: failFiles } })
-            .eq("id", visitId);
-        }
-      }
+    if (rpcError) {
+      console.error(
+        `[extract] Atomic update failed for ${file.name}:`,
+        rpcError,
+      );
       return NextResponse.json(
         { error: "Failed to save extracted text" },
         { status: 500 },
@@ -276,7 +190,7 @@ export async function POST(
 
     const elapsedMs = Date.now() - startTime;
     console.log(
-      `[extract] Extracted ${extractedText?.length || 0} chars from ${file.name} in ${elapsedMs}ms`,
+      `[extract] ${file.name}: ${extractedText.length} chars in ${elapsedMs}ms`,
     );
 
     return NextResponse.json({
@@ -291,33 +205,12 @@ export async function POST(
     // Mark extraction as failed (only if we have fileId)
     if (fileId) {
       try {
-        const { data: visit } = await supabase
-          .from("visits")
-          .select("metadata")
-          .eq("id", visitId)
-          .single();
-
-        if (visit) {
-          const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-          const files = (meta.files ?? []) as {
-            id: string;
-            name: string;
-            type: string;
-            path: string;
-            source?: string;
-            extracted_text?: string | null;
-            extraction_status?: "extracting" | "completed" | "failed" | null;
-          }[];
-          const failedFile = files.find((f) => f.id === fileId);
-          if (failedFile) {
-            failedFile.extraction_status = "failed";
-            // Silent fail on cleanup - don't check for errors
-            await supabase
-              .from("visits")
-              .update({ metadata: { ...meta, files } })
-              .eq("id", visitId);
-          }
-        }
+        // Use atomic update to mark as failed
+        await supabase.rpc("update_file_extraction_status", {
+          p_visit_id: visitId,
+          p_file_id: fileId,
+          p_status: "failed",
+        });
       } catch {
         // Silent fail on cleanup
       }

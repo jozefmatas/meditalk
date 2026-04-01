@@ -41,7 +41,6 @@ interface DraftViewProps {
   error: string | null;
   // Recording
   recordingBarRef: React.RefObject<RecordingBarRef | null>;
-  onRecordingStart: (pendingId: string, name: string) => void;
   onRecordingComplete: (blob: Blob) => void;
   onRecordingStateChange: (state: "idle" | "recording" | "paused") => void;
   // Template
@@ -71,7 +70,6 @@ export function DraftView({
   formattedDate,
   error,
   recordingBarRef,
-  onRecordingStart,
   onRecordingComplete,
   onRecordingStateChange,
   selectedTemplateId,
@@ -273,7 +271,6 @@ export function DraftView({
           visitId={visitId}
           language={visit.language}
           metadata={visit.metadata}
-          onRecordingStart={onRecordingStart}
           onRecordingComplete={onRecordingComplete}
           onRecordingStateChange={onRecordingStateChange}
           templateId={selectedTemplateId}

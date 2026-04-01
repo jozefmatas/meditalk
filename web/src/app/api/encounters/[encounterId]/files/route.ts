@@ -107,6 +107,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         size: f.size,
         type: f.type,
         path: f.path,
+        extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
         ...(f.source ? { source: f.source } : {}),
       }));
     } else {
@@ -146,6 +147,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           size: file.size,
           type: file.type,
           path: storagePath,
+          extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
         });
       }
     }

@@ -121,6 +121,25 @@ export interface EncounterListResponse {
 // Utility types
 export type SupportedLanguage = "en" | "sk" | "cs";
 
+// File metadata (stored in visits.metadata.files[] JSONB)
+export type ExtractionStatus =
+  | "pending"
+  | "extracting"
+  | "completed"
+  | "failed";
+
+export interface FileMetadata {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  path?: string;
+  source?: string;
+  extracted_text?: string | null;
+  extraction_status?: ExtractionStatus | null;
+  extracted_at?: string | null;
+}
+
 // Encounter list query params
 export interface EncounterListParams {
   page?: number;

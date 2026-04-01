@@ -2,29 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
 import {
-  anthropic,
-  GENERATION_MODELS,
-  MODEL_FALLBACK_DELAY,
-  buildTemplateSystemPrompt,
-  buildTemplateUserMessage,
+  generateFromTemplate,
+  InsufficientContextError,
 } from "@/lib/anthropic";
-import { extractTextFromFile } from "@/lib/file-extraction";
+import { extractFileText } from "@/lib/extraction/extract-file";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
   buildSectionContextsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
-import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
+import { flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
-import { buildEnrichedSystemPrompt, extractJson } from "@/lib/clinical";
-import { logUsage } from "@/lib/usage";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { sendNoteEmail } from "@/lib/email/send-note-email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -99,421 +94,130 @@ export async function POST(request: NextRequest) {
 
     // Process uploaded files — extract text from any that haven't been processed yet
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
-    let uploadedFiles = (visitMeta.files ?? []) as {
-      id: string;
-      name: string;
-      type: string;
-      path: string;
-      source?: string;
-      extracted_text?: string | null;
-      extraction_status?: "extracting" | "completed" | "failed" | null;
-    }[];
+    let uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
 
-    // Wait for any in-progress extractions (with timeout)
-    const extractingFiles = uploadedFiles.filter(
-      (f) => f.extraction_status === "extracting",
+    // Wait for any in-progress or pending extractions (with timeout)
+    // Wait for any in-progress or pending extractions (poll until resolved)
+    const pendingIds = new Set(
+      uploadedFiles
+        .filter(
+          (f) =>
+            f.extraction_status === "extracting" ||
+            f.extraction_status === "pending",
+        )
+        .map((f) => f.id),
     );
-    if (extractingFiles.length > 0) {
-      console.log(
-        `[generate] Waiting for ${extractingFiles.length} in-progress extraction(s)`,
-      );
-      const POLL_INTERVAL = 500; // 500ms
-      const MAX_WAIT = 30000; // 30 seconds timeout
+
+    if (pendingIds.size > 0) {
+      console.log(`[generate] Waiting for ${pendingIds.size} extraction(s)...`);
       const pollStart = Date.now();
+      const MAX_WAIT = 60000;
 
-      while (
-        extractingFiles.some((f) => f.extraction_status === "extracting") &&
-        Date.now() - pollStart < MAX_WAIT
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-
-        // Re-fetch metadata to check extraction status
-        const { data: refreshedVisit } = await supabase
+      while (Date.now() - pollStart < MAX_WAIT) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const { data: refreshed } = await supabase
           .from("visits")
           .select("metadata")
           .eq("id", visitId)
           .single();
+        if (!refreshed) break;
 
-        if (refreshedVisit) {
-          const refreshedMeta = (refreshedVisit.metadata ?? {}) as Record<
-            string,
-            unknown
-          >;
-          uploadedFiles = (refreshedMeta.files ?? []) as typeof uploadedFiles;
+        const meta = (refreshed.metadata ?? {}) as Record<string, unknown>;
+        uploadedFiles = (meta.files ?? []) as FileMetadata[];
 
-          // Update extractingFiles array
-          extractingFiles.forEach((ef, idx) => {
-            const updated = uploadedFiles.find((f) => f.id === ef.id);
-            if (updated) {
-              extractingFiles[idx] = updated;
-            }
-          });
-        }
+        const stillPending = uploadedFiles.filter(
+          (f) =>
+            pendingIds.has(f.id) &&
+            (f.extraction_status === "extracting" ||
+              f.extraction_status === "pending"),
+        );
+        if (stillPending.length === 0) break;
       }
 
-      const elapsed = Date.now() - pollStart;
-      const completed = extractingFiles.filter(
-        (f) => f.extraction_status === "completed",
-      );
-      const stillExtracting = extractingFiles.filter(
-        (f) => f.extraction_status === "extracting",
-      );
-
+      const completed = uploadedFiles.filter(
+        (f) => pendingIds.has(f.id) && f.extraction_status === "completed",
+      ).length;
       console.log(
-        `[generate] Waited ${elapsed}ms for extractions: ${completed.length} completed, ${stillExtracting.length} still in progress (will extract during generation)`,
+        `[generate] Extraction wait done (${Date.now() - pollStart}ms): ${completed}/${pendingIds.size} completed`,
       );
     }
 
     // Extract text from all unprocessed files — in parallel for speed
     const unprocessed = uploadedFiles.filter(
       (f) =>
-        !f.extracted_text && f.path && f.extraction_status !== "extracting", // Don't re-extract if still in progress
+        !f.extracted_text &&
+        f.path &&
+        f.extraction_status !== "extracting" && // Don't re-extract if extraction in progress
+        f.extraction_status !== "pending", // Don't re-extract if pending background extraction
       // Note: Files marked "failed" or old "completed" with no text will be retried
     );
     const extractionErrors: string[] = [];
-    console.log(
-      `[generate] files: ${uploadedFiles.length} total, ${unprocessed.length} unprocessed`,
-      uploadedFiles.map((f) => ({
-        name: f.name,
-        source: f.source,
-        hasText: !!f.extracted_text,
-        status: f.extraction_status,
-      })),
-    );
 
     if (unprocessed.length > 0) {
+      const failed = unprocessed.filter(
+        (f) => f.extraction_status === "failed",
+      );
+      const legacy = unprocessed.filter((f) => !f.extraction_status);
+      console.log(
+        `[generate] ${unprocessed.length} unprocessed file(s): ${failed.length} failed, ${legacy.length} legacy (no status)`,
+      );
       lap("extraction-start");
       await Promise.all(
         unprocessed.map(async (file) => {
+          const filePath = file.path!; // guaranteed by filter above
           try {
-            const isImage = file.type.startsWith("image/");
-            const isPdf = file.type === "application/pdf";
             const isAudio = file.type.startsWith("audio/");
 
-            if (isImage) {
-              // Download image so we can auto-rotate EXIF orientation with sharp
-              // before sending to Claude Vision (phone photos are often rotated)
-              const { data: fileData, error: dlError } = await supabase.storage
-                .from("encounter-files")
-                .download(file.path);
-
-              if (dlError || !fileData) {
-                console.error(`Failed to download ${file.name}:`, dlError);
-                extractionErrors.push(`${file.name}: download failed`);
-                return;
-              }
-
-              const buffer = Buffer.from(await fileData.arrayBuffer());
-              const text = await extractTextFromFile(
-                { imageBuffer: buffer },
-                file.name,
-                file.type,
-                language,
-                { userId, visitId },
-              );
-              file.extracted_text = text;
-            } else if (isPdf) {
-              // PDFs: use signed URL so Claude fetches directly (no rotation issue)
-              const { data: urlData, error: urlError } = await supabase.storage
-                .from("encounter-files")
-                .createSignedUrl(file.path, 300); // 5 min expiry
-
-              if (urlError || !urlData?.signedUrl) {
-                console.error(
-                  `Failed to create signed URL for ${file.name}:`,
-                  urlError,
-                );
-                extractionErrors.push(`${file.name}: signed URL failed`);
-                return;
-              }
-
-              const text = await extractTextFromFile(
-                { pdfUrl: urlData.signedUrl },
-                file.name,
-                file.type,
-                language,
-                { userId, visitId },
-              );
-              file.extracted_text = text;
-            } else if (isAudio) {
-              // Audio: use real-time transcript if available, otherwise transcribe
-              // "recording" = from recording bar, "recording-upload" = manual upload during recording
-              const isRecording =
-                file.source === "recording" ||
-                file.source === "recording-upload";
-
-              // Priority 1: Use real-time transcript if available (fastest!)
-              if (isRecording && transcriptText) {
-                console.log(
-                  `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping file download`,
-                );
-                file.extracted_text = transcriptText;
-
-                logAudit({
-                  ...createAuditContext(authResult, request),
-                  action: "file.extraction.skipped",
-                  resourceType: "encounter_file",
-                  resourceId: file.id,
-                  metadata: {
-                    reason: "realtime_transcript_available",
-                    fileName: file.name,
-                    visitId,
-                  },
+            if (!isAudio) {
+              // Images and PDFs: use shared extraction service
+              try {
+                const result = await extractFileText({
+                  file: { ...file, path: filePath },
+                  supabase,
+                  userId,
+                  visitId,
+                  language,
                 });
-                return;
+                file.extracted_text = result.text;
+                console.log(
+                  `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
+                );
+              } catch (extractError) {
+                const msg =
+                  extractError instanceof Error
+                    ? extractError.message
+                    : "Unknown extraction error";
+                console.error(
+                  `[generate] Extraction failed for ${file.name}:`,
+                  extractError,
+                );
+                extractionErrors.push(`${file.name}: ${msg}`);
               }
-
-              // Priority 2: Download audio and decide whether to anonymize
-              const { data: fileData, error: dlError } = await supabase.storage
-                .from("encounter-files")
-                .download(file.path);
-
-              if (dlError || !fileData) {
-                console.error(`Failed to download ${file.name}:`, dlError);
-                extractionErrors.push(`${file.name}: download failed`);
-                return;
-              }
-
-              const buffer = Buffer.from(await fileData.arrayBuffer());
-
-              // Check if anonymization is enabled
-              const enableAnonymization =
-                process.env.ENABLE_AUDIO_ANONYMIZATION === "true"; // Default: false
-
-              // ONLY anonymize if explicitly enabled AND this is a recording
-              if (enableAnonymization && isRecording) {
-                // Server-side anonymization pipeline
-                const crypto = await import("crypto");
-                const fs = await import("fs/promises");
-                const {
-                  anonymizeAudio,
-                  cleanupTempFiles,
-                  checkFfmpegAvailable,
-                } = await import("@/lib/server/audio-anonymization");
-
-                // Check if ffmpeg is available
-                const ffmpegAvailable = await checkFfmpegAvailable();
-
-                if (!ffmpegAvailable) {
-                  console.warn(
-                    "[generate] ffmpeg not available - skipping anonymization, transcribing original",
-                  );
-                  const text = await extractTextFromFile(
-                    { buffer },
-                    file.name,
-                    file.type,
-                    language,
-                    { userId, visitId },
-                  );
-                  file.extracted_text = text;
-                  return;
-                }
-
-                const tempOriginal = `/tmp/${crypto.randomUUID()}.webm`;
-                const startTime = Date.now();
-
-                try {
-                  // Write original to temp file
-                  await fs.writeFile(tempOriginal, buffer);
-
-                  // Anonymize
-                  console.log(
-                    `[generate] Anonymizing ${file.name} (${buffer.length} bytes)`,
-                  );
-                  const tempAnonymized = await anonymizeAudio(
-                    tempOriginal,
-                    userId,
-                  );
-                  const anonymizedBuffer = await fs.readFile(tempAnonymized);
-
-                  // Delete original temp file IMMEDIATELY
-                  await fs.unlink(tempOriginal);
-
-                  logAudit({
-                    ...createAuditContext(authResult, request),
-                    action: "audio.original.deleted",
-                    resourceType: "encounter_file",
-                    resourceId: file.id,
-                    metadata: {
-                      path: tempOriginal,
-                      visitId,
-                      processingTimeMs: Date.now() - startTime,
-                    },
-                  });
-
-                  console.log(
-                    `[generate] Anonymization complete (${anonymizedBuffer.length} bytes)`,
-                  );
-
-                  // Use real-time transcript if available (fast!), otherwise transcribe
-                  let text: string | null = null;
-                  if (transcriptText) {
-                    console.log(
-                      `[generate] Using real-time transcript (${transcriptText.length} chars)`,
-                    );
-                    text = transcriptText;
-                  } else {
-                    console.log(
-                      "[generate] No real-time transcript, transcribing anonymized audio",
-                    );
-                    text = await extractTextFromFile(
-                      { buffer: anonymizedBuffer },
-                      file.name.replace(/\.[^.]+$/, ".opus"),
-                      "audio/opus",
-                      language,
-                      { userId, visitId },
-                    );
-                  }
-
-                  file.extracted_text = text;
-
-                  // Text extraction successful → delete anonymized temp file
-                  await fs.unlink(tempAnonymized);
-
-                  // Delete from storage too (don't keep ANY audio!)
-                  await supabase.storage
-                    .from("encounter-files")
-                    .remove([file.path]);
-
-                  file.path = ""; // Clear path since file is deleted
-
-                  logAudit({
-                    ...createAuditContext(authResult, request),
-                    action: "audio.anonymized.deleted",
-                    resourceType: "encounter_file",
-                    resourceId: file.id,
-                    metadata: {
-                      reason: transcriptText
-                        ? "realtime_transcript_used"
-                        : "transcription_successful",
-                      path: file.path,
-                      visitId,
-                      transcriptLength: text?.length || 0,
-                      usedRealtimeTranscript: !!transcriptText,
-                      processingTimeMs: Date.now() - startTime,
-                    },
-                  });
-
-                  logAudit({
-                    ...createAuditContext(authResult, request),
-                    action: "audio.anonymization.complete",
-                    resourceType: "encounter_file",
-                    resourceId: file.id,
-                    metadata: {
-                      originalSize: buffer.length,
-                      anonymizedSize: anonymizedBuffer.length,
-                      usedRealtimeTranscript: !!transcriptText,
-                      processingTimeMs: Date.now() - startTime,
-                      visitId,
-                    },
-                  });
-                } catch (error) {
-                  console.error(
-                    "[generate] Audio anonymization failed:",
-                    error,
-                  );
-
-                  // Cleanup temp files
-                  await cleanupTempFiles(tempOriginal);
-
-                  // On error: save anonymized to storage for retry (if it exists)
-                  const tempAnonymized = tempOriginal.replace(
-                    /\.[^.]+$/,
-                    ".anonymized.opus",
-                  );
-                  try {
-                    await fs.access(tempAnonymized);
-                    const anonymizedBuffer = await fs.readFile(tempAnonymized);
-
-                    await supabase.storage
-                      .from("encounter-files")
-                      .upload(file.path, anonymizedBuffer, { upsert: true });
-
-                    await fs.unlink(tempAnonymized);
-
-                    logAudit({
-                      ...createAuditContext(authResult, request),
-                      action: "audio.anonymized.saved_for_retry",
-                      resourceType: "encounter_file",
-                      resourceId: file.id,
-                      metadata: {
-                        reason: "transcription_failed",
-                        error:
-                          error instanceof Error
-                            ? error.message
-                            : "unknown error",
-                        visitId,
-                      },
-                    });
-                  } catch {
-                    // Anonymized file doesn't exist, continue with fallback
-                  }
-
-                  // Fallback: transcribe original if anonymization fails
-                  const fallbackEnabled =
-                    process.env.ANONYMIZATION_FALLBACK_ENABLED !== "false";
-                  if (fallbackEnabled) {
-                    console.warn("[generate] Using original audio as fallback");
-                    const text = await extractTextFromFile(
-                      { buffer },
-                      file.name,
-                      file.type,
-                      language,
-                      { userId, visitId },
-                    );
-                    file.extracted_text = text;
-
-                    logAudit({
-                      ...createAuditContext(authResult, request),
-                      action: "audio.anonymization.failed",
-                      resourceType: "encounter_file",
-                      resourceId: file.id,
-                      metadata: {
-                        error:
-                          error instanceof Error
-                            ? error.message
-                            : "unknown error",
-                        fallbackUsed: true,
-                        visitId,
-                      },
-                    });
-                  } else {
-                    // Re-throw error if fallback disabled
-                    throw error;
-                  }
-                }
-              } else {
-                // Anonymization disabled or not a recording
-                // Check if we have real-time transcript first (fast!)
-                if (isRecording && transcriptText) {
-                  console.log(
-                    `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping transcription`,
-                  );
-                  file.extracted_text = transcriptText;
-
-                  logAudit({
-                    ...createAuditContext(authResult, request),
-                    action: "file.extraction.skipped",
-                    resourceType: "encounter_file",
-                    resourceId: file.id,
-                    metadata: {
-                      reason: "realtime_transcript_available",
-                      fileName: file.name,
-                      source: file.source,
-                      visitId,
-                    },
-                  });
-                } else {
-                  // Fallback: transcribe original
-                  const text = await extractTextFromFile(
-                    { buffer },
-                    file.name,
-                    file.type,
-                    language,
-                    { userId, visitId },
-                  );
-                  file.extracted_text = text;
-                }
+            } else {
+              // Audio: use shared extraction service (handles real-time transcript priority)
+              try {
+                const result = await extractFileText({
+                  file: { ...file, path: filePath },
+                  supabase,
+                  userId,
+                  visitId,
+                  language,
+                  transcriptText,
+                });
+                file.extracted_text = result.text;
+                console.log(
+                  `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
+                );
+              } catch (extractError) {
+                const msg =
+                  extractError instanceof Error
+                    ? extractError.message
+                    : "Unknown extraction error";
+                console.error(
+                  `[generate] Audio extraction failed for ${file.name}:`,
+                  extractError,
+                );
+                extractionErrors.push(`${file.name}: ${msg}`);
               }
             }
           } catch (err) {
@@ -527,37 +231,17 @@ export async function POST(request: NextRequest) {
 
       lap("extraction-done");
 
-      // Cleanup: delete all processed files from storage (text already extracted)
-      const pathsToDelete = uploadedFiles
-        .filter((f) => f.extracted_text && f.path)
-        .map((f) => f.path);
-      if (pathsToDelete.length > 0) {
-        await supabase.storage
-          .from("encounter-files")
-          .remove(pathsToDelete)
-          .catch(() => {});
-        for (const f of uploadedFiles) {
-          if (f.extracted_text) f.path = "";
-        }
-      }
-
       // Set raw_text on visit from recording transcript (for ResourcesPanel)
+      // NOTE: Do NOT update metadata.files here - the extract route already saved
+      // extracted_text and extraction_status atomically. Writing the files array
+      // here would overwrite those atomic updates with stale data.
       const recordingText = uploadedFiles.find(
         (f) => f.source === "recording" && f.extracted_text,
       )?.extracted_text;
       if (recordingText) {
         await supabase
           .from("visits")
-          .update({
-            raw_text: recordingText,
-            metadata: { ...visitMeta, files: uploadedFiles },
-          })
-          .eq("id", visitId);
-      } else {
-        // Persist extracted text + cleared paths back to metadata
-        await supabase
-          .from("visits")
-          .update({ metadata: { ...visitMeta, files: uploadedFiles } })
+          .update({ raw_text: recordingText })
           .eq("id", visitId);
       }
     }
@@ -711,49 +395,29 @@ export async function POST(request: NextRequest) {
       !doctorNotes?.trim() &&
       !hasFileContent
     ) {
-      const error =
-        extractionErrors.length > 0
-          ? `File processing failed: ${extractionErrors.join("; ")}`
-          : "No transcript, doctor notes, or file content available for generation";
-      return NextResponse.json({ error }, { status: 422 });
-    }
-
-    // Build prompts for streaming generation
-    let systemPrompt = buildTemplateSystemPrompt(
-      template,
-      language,
-      sectionLabels,
-      sectionContexts,
-    );
-    if (clinicalAnalysis) {
-      systemPrompt = buildEnrichedSystemPrompt(
-        systemPrompt,
-        clinicalAnalysis,
-        language,
+      if (extractionErrors.length > 0) {
+        console.error(
+          `[generate] File processing failed: ${extractionErrors.join("; ")}`,
+        );
+      }
+      return NextResponse.json(
+        { error: "insufficient_context" },
+        { status: 422 },
       );
     }
 
-    const userMessage = buildTemplateUserMessage(
-      transcriptChunks,
-      template,
-      doctorNotes,
-      fileTexts,
-    );
-
+    // Use two-pass generation (Haiku draft → Opus refinement)
     console.log(
-      `[generate] prompt sizes — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+      `[generate] Starting two-pass generation (${transcriptChunks.length} chunks, ${fileTexts.length} files)`,
     );
 
-    // Stream Anthropic response as SSE (with model fallback on overloaded errors)
+    // Use two-pass generation via generateFromTemplate
     lap("generation-start");
 
     const encoder = new TextEncoder();
-    const sectionIdSet = new Set(allIds);
 
     const readable = new ReadableStream({
       async start(controller) {
-        let inputTokens = 0;
-        let outputTokens = 0;
         let clientDisconnected = false;
 
         function sendEvent(data: Record<string, unknown>) {
@@ -785,169 +449,29 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        /**
-         * Try to extract completed "key": "value" pairs from the accumulated JSON.
-         * Emits SSE events for each newly completed template section.
-         */
-        function tryExtractSections(
-          accumulated: string,
-          emittedSections: Set<string>,
-        ) {
-          for (const id of sectionIdSet) {
-            if (emittedSections.has(id)) continue;
-
-            const keyPattern = `"${id}"\\s*:\\s*"`;
-            const keyMatch = accumulated.match(new RegExp(keyPattern));
-            if (!keyMatch) continue;
-
-            const valueStart = keyMatch.index! + keyMatch[0].length;
-            let pos = valueStart;
-            let found = false;
-            while (pos < accumulated.length) {
-              if (accumulated[pos] === "\\") {
-                pos += 2;
-                continue;
-              }
-              if (accumulated[pos] === '"') {
-                found = true;
-                break;
-              }
-              pos++;
-            }
-
-            if (!found) continue;
-
-            const rawValue = accumulated.slice(valueStart, pos);
-            let value: string;
-            try {
-              value = JSON.parse(`"${rawValue}"`);
-            } catch {
-              value = rawValue;
-            }
-
-            emittedSections.add(id);
-            sendEvent({
-              type: "section",
-              id,
-              title: sectionLabels[id] || id,
-              content: value,
-            });
-          }
-        }
-
-        let finalMessage: Awaited<
-          ReturnType<
-            ReturnType<typeof anthropic>["messages"]["stream"]
-          >["finalMessage"]
-        >;
-        let usedModel: string = GENERATION_MODELS[0];
-
-        // Try each model in the fallback chain; on overload, move to the next model
-        for (let mi = 0; mi < GENERATION_MODELS.length; mi++) {
-          const model = GENERATION_MODELS[mi];
-
-          // Send streaming_start on each attempt so client resets streamed sections
-          sendEvent({
-            type: "streaming_start",
-            sectionIds: allIds,
-            sectionLabels,
-          });
-
-          let accumulated = "";
-          const emittedSections = new Set<string>();
-
-          try {
-            const stream = anthropic().messages.stream({
-              model,
-              max_tokens: 8192,
-              system: systemPrompt,
-              messages: [{ role: "user", content: userMessage }],
-            });
-
-            stream.on("text", (delta) => {
-              accumulated += delta;
-              tryExtractSections(accumulated, emittedSections);
-            });
-
-            finalMessage = await stream.finalMessage();
-            usedModel = model;
-            break; // Success
-          } catch (err) {
-            const isOverloaded =
-              err instanceof Error &&
-              err.message.toLowerCase().includes("overloaded");
-            if (isOverloaded && mi < GENERATION_MODELS.length - 1) {
-              console.warn(
-                `[generate] ${model} overloaded, falling back to ${GENERATION_MODELS[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
-              );
-              await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
-              continue;
-            }
-            throw err;
-          }
-        }
+        // Notify client that generation is starting
+        sendEvent({
+          type: "streaming_start",
+          sectionIds: allIds,
+          sectionLabels,
+        });
 
         try {
-          inputTokens = finalMessage!.usage.input_tokens;
-          outputTokens = finalMessage!.usage.output_tokens;
+          // Call generateFromTemplate (handles two-pass internally)
+          const { generatedNote, letter, suggestedTitle } =
+            await generateFromTemplate(
+              transcriptChunks,
+              template,
+              language,
+              sectionLabels,
+              doctorNotes,
+              fileTexts,
+              { userId, visitId },
+              clinicalAnalysis ?? undefined,
+              sectionContexts,
+            );
 
           lap("generation-done");
-          console.log(
-            `[generate] Anthropic usage — input: ${inputTokens}, output: ${outputTokens}, stop: ${finalMessage!.stop_reason}`,
-          );
-
-          // Parse the full JSON for the final result
-          const fullText =
-            finalMessage!.content[0].type === "text"
-              ? finalMessage!.content[0].text
-              : "";
-
-          // Check for insufficient context
-          if (fullText.includes('"insufficient_context"')) {
-            try {
-              const rawParsed = extractJson<Record<string, unknown>>(fullText);
-              if (rawParsed.insufficient_context === true) {
-                sendEvent({ type: "error", error: "insufficient_context" });
-                safeClose();
-                return;
-              }
-            } catch {
-              // Continue with normal parsing
-            }
-          }
-
-          let parsed: Record<string, string>;
-          try {
-            parsed = extractJson<Record<string, string>>(fullText);
-          } catch {
-            sendEvent({ type: "error", error: "Failed to parse response" });
-            safeClose();
-            return;
-          }
-
-          // Extract letter and title
-          const letter =
-            typeof parsed.letter === "string"
-              ? parsed.letter
-              : JSON.stringify(parsed.letter || "");
-          delete parsed.letter;
-
-          const suggestedTitle =
-            typeof parsed.title === "string" ? parsed.title : "";
-          delete parsed.title;
-
-          // Fill section contents (empty string for missing keys)
-          const sectionContents: Record<string, string> = {};
-          for (const id of allIds) {
-            const value = parsed[id];
-            sectionContents[id] = typeof value === "string" ? value : "";
-          }
-
-          const generatedNote = buildTemplateHtml(
-            template,
-            sectionContents,
-            sectionLabels,
-          );
 
           // Save to DB (must complete before sending complete event,
           // so the email API can read the latest encounter_note)
@@ -988,16 +512,7 @@ export async function POST(request: NextRequest) {
             return;
           }
 
-          // Log usage
-          logUsage({
-            userId,
-            visitId,
-            provider: "anthropic",
-            model: usedModel,
-            operation: "generate_template",
-            inputTokens,
-            outputTokens,
-          });
+          // Note: Usage logging is handled inside generateFromTemplate for two-pass generation
 
           // Send final complete event and close stream so client gets response immediately
           sendEvent({
@@ -1067,6 +582,14 @@ export async function POST(request: NextRequest) {
           safeClose();
         } catch (err) {
           console.error("Generate stream error:", err);
+
+          // Handle insufficient context error specially
+          if (err instanceof InsufficientContextError) {
+            sendEvent({ type: "error", error: "insufficient_context" });
+            safeClose();
+            return;
+          }
+
           sendEvent({
             type: "error",
             error: err instanceof Error ? err.message : "Generation failed",

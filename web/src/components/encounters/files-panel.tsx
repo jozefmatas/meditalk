@@ -18,16 +18,9 @@ import {
   TableCell,
 } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
+import type { FileMetadata } from "@/lib/types";
 
-export interface EncounterFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  extracted_text?: string | null;
-  source?: string;
-  /** Extraction status for background extraction */
-  extraction_status?: "extracting" | "completed" | "failed" | null;
+export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
   pending?: boolean;
   /** True if recording is actively in progress (stops spinner when paused) */
@@ -67,7 +60,7 @@ export function FilesContent({
       if (allFiles.length === 0) return;
 
       setIsUploading(true);
-      const { uploadWithPersistence } =
+      const { uploadWithRetry } =
         await import("@/lib/upload/upload-with-persistence");
 
       // Add pending files to list immediately (before upload)
@@ -86,10 +79,7 @@ export function FilesContent({
       onFilesChange([...files, ...pendingFiles]);
 
       try {
-        // Upload all files with IndexedDB persistence and retry
-        // Note: uploadWithPersistence handles IndexedDB save/delete internally.
-        // Do NOT manually call savePendingUpload here — it creates a second entry
-        // that never gets cleaned up, causing duplicates on page refresh.
+        // Upload all files with retry
         const results = await Promise.allSettled(
           allFiles.map(async (file) => {
             // Tag audio files uploaded during recording so they can use real-time transcript
@@ -97,7 +87,7 @@ export function FilesContent({
               hasActiveRecording && file.type.startsWith("audio/")
                 ? "recording-upload"
                 : undefined;
-            return uploadWithPersistence(file, file.name, visitId, {
+            return uploadWithRetry(file, file.name, visitId, {
               source,
             });
           }),
@@ -109,7 +99,7 @@ export function FilesContent({
             (r) =>
               (
                 r as PromiseFulfilledResult<
-                  Awaited<ReturnType<typeof uploadWithPersistence>>
+                  Awaited<ReturnType<typeof uploadWithRetry>>
                 >
               ).value,
           );
