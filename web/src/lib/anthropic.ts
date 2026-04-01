@@ -245,8 +245,10 @@ export async function generateFromTemplate(
   ctx?: UsageContext,
   clinicalAnalysis?: ClinicalAnalysis,
   sectionContexts?: Record<string, string>,
+  onSection?: (id: string, title: string, content: string) => void,
 ): Promise<{ generatedNote: string; letter: string; suggestedTitle: string }> {
   const allIds = flattenSectionIds(template);
+  const sectionIdSet = new Set(allIds);
   const userMessage = buildTemplateUserMessage(
     chunks,
     template,
@@ -270,26 +272,75 @@ export async function generateFromTemplate(
   }
 
   console.log(
-    `[generate] Single-pass generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+    `[generate] Streaming generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
   );
 
   const startTime = Date.now();
 
-  const response = await anthropic().messages.create({
-    model: GENERATION_MODEL, // Uses fallback chain: opus-4-6 → sonnet-4-6 → sonnet-4-5
-    max_tokens: 4096,
+  // Stream response so we can emit sections as they complete
+  let accumulated = "";
+  const emittedSections = new Set<string>();
+
+  /**
+   * Try to extract completed "key": "value" pairs from accumulated JSON.
+   * Emits onSection callback for each newly completed template section.
+   */
+  function tryExtractSections() {
+    if (!onSection) return;
+    for (const id of sectionIdSet) {
+      if (emittedSections.has(id)) continue;
+
+      const keyPattern = `"${id}"\\s*:\\s*"`;
+      const keyMatch = accumulated.match(new RegExp(keyPattern));
+      if (!keyMatch) continue;
+
+      const valueStart = keyMatch.index! + keyMatch[0].length;
+      let pos = valueStart;
+      let found = false;
+      while (pos < accumulated.length) {
+        if (accumulated[pos] === "\\") {
+          pos += 2;
+          continue;
+        }
+        if (accumulated[pos] === '"') {
+          found = true;
+          break;
+        }
+        pos++;
+      }
+
+      if (!found) continue;
+
+      const rawValue = accumulated.slice(valueStart, pos);
+      let value: string;
+      try {
+        value = JSON.parse(`"${rawValue}"`);
+      } catch {
+        value = rawValue;
+      }
+
+      emittedSections.add(id);
+      onSection(id, sectionLabels[id] || id, value);
+    }
+  }
+
+  const stream = anthropic().messages.stream({
+    model: GENERATION_MODEL,
+    max_tokens: 8192,
     system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: userMessage,
-      },
-    ],
+    messages: [{ role: "user", content: userMessage }],
   });
+
+  stream.on("text", (delta) => {
+    accumulated += delta;
+    tryExtractSections();
+  });
+
+  const finalMessage = await stream.finalMessage();
 
   const elapsed = Date.now() - startTime;
   console.log(
-    `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
+    `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${finalMessage.usage.input_tokens} in / ${finalMessage.usage.output_tokens} out`,
   );
 
   if (ctx) {
@@ -299,13 +350,15 @@ export async function generateFromTemplate(
       provider: "anthropic",
       model: GENERATION_MODEL,
       operation: "generate_template",
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+      inputTokens: finalMessage.usage.input_tokens,
+      outputTokens: finalMessage.usage.output_tokens,
     });
   }
 
   const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+    finalMessage.content[0].type === "text"
+      ? finalMessage.content[0].text
+      : "";
 
   const parsed = extractJson<Record<string, string | boolean>>(text);
 

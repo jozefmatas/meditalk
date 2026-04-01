@@ -6,6 +6,7 @@ import { REGIONAL_TERMS } from "./regional-terms";
 import { CLINICAL_CONCEPTS } from "./clinical-concepts";
 import { getSpecialtyPromptPack } from "./specialty-prompts";
 import { buildIcdReferenceForConcepts } from "./icd-index";
+import { searchMedications } from "./medication-index";
 import { buildPass1SystemPrompt, buildPass1UserMessage } from "./prompts";
 import { extractJson } from "./json-repair";
 
@@ -99,6 +100,8 @@ export async function runClinicalAnalysis(
       (parsed.problemClusters as ClinicalAnalysis["problemClusters"]) || [],
     candidateIcdCodes:
       (parsed.candidateIcdCodes as ClinicalAnalysis["candidateIcdCodes"]) || [],
+    mentionedMedications:
+      (parsed.mentionedMedications as string[]) || [],
     usage: {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -130,16 +133,27 @@ export function buildEnrichedSystemPrompt(
     }
   }
 
-  // Add medication validation instructions
-  parts.push(`\nMEDICATION VALIDATION (locale: ${locale}):
-CRITICAL: When documenting any medication in the clinical note, you MUST use ONLY exact medication names from the official approved medication list for this locale.
-- NEVER invent, approximate, or hallucinate medication names
-- NEVER use generic descriptions like "analgesic" or "antihypertensive" without specifying the exact approved medication name
-- If you identify a medication mentioned in the transcript, verify it matches an entry from the approved list
-- Use the exact spelling and capitalization from the approved list (case-insensitive matching is acceptable)
-- If a medication cannot be matched to the approved list, note it as "medication name to be verified" in square brackets [...]
-- Include both the brand name and active ingredient when documenting medications
-The medication database is available and should be consulted for any medication documentation.`);
+  // Resolve mentioned medications against the approved database
+  if (analysis.mentionedMedications.length > 0) {
+    const resolvedMeds: string[] = [];
+    for (const medName of analysis.mentionedMedications) {
+      const matches = searchMedications(medName, 3, locale);
+      if (matches.length > 0) {
+        resolvedMeds.push(
+          ...matches.map((m) => `  ${m.name} (${m.activeIngredient})`),
+        );
+      } else {
+        resolvedMeds.push(`  ${medName} [not found in approved list]`);
+      }
+    }
+
+    parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
+${resolvedMeds.join("\n")}
+RULES:
+- Use the EXACT medication names from the list above when documenting
+- Include both brand name and active ingredient
+- If a medication is marked [not found in approved list], write the name as mentioned and note it needs verification`);
+  }
 
   // Add ICD code candidates
   if (analysis.candidateIcdCodes.length > 0) {

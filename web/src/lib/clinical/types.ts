@@ -67,6 +67,8 @@ export interface ClinicalAnalysis {
   problemClusters: ProblemCluster[];
   /** Candidate ICD-10 codes */
   candidateIcdCodes: CandidateIcdCode[];
+  /** Medication names mentioned in the transcript (exact as spoken/written) */
+  mentionedMedications: string[];
   /** Pass 1 token usage */
   usage: { inputTokens: number; outputTokens: number };
 }

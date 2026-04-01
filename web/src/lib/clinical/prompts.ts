@@ -39,6 +39,9 @@ Based on matched concepts and clinical context, suggest candidate ICD-10 codes f
 ${icdReference}
 Select the most specific applicable codes. Include confidence level.
 
+TASK 5 — EXTRACT MEDICATION NAMES:
+List ALL medication/drug names mentioned in the transcript, exactly as spoken or written. Include brand names, generic names, and any dosage forms mentioned. Do not normalize or translate — preserve the original form.
+
 OUTPUT: Return ONLY valid JSON, no markdown, no explanation. Keep all string values short and simple — no embedded newlines or special characters:
 {
   "matchedConcepts": [
@@ -51,7 +54,8 @@ OUTPUT: Return ONLY valid JSON, no markdown, no explanation. Keep all string val
   ],
   "candidateIcdCodes": [
     {"code": "I10", "description": "Essential hypertension", "confidence": "high", "sourceConceptIds": ["hypertension"]}
-  ]
+  ],
+  "mentionedMedications": ["Tamurox", "Co-Prenessa"]
 }`;
 }
 

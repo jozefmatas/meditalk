@@ -361,6 +361,8 @@ export async function POST(request: NextRequest) {
                 result.matchedConcepts.length,
                 "ICD codes:",
                 result.candidateIcdCodes.length,
+                "medications:",
+                result.mentionedMedications.length,
               );
               return result;
             })
@@ -457,7 +459,7 @@ export async function POST(request: NextRequest) {
         });
 
         try {
-          // Call generateFromTemplate (handles two-pass internally)
+          // Call generateFromTemplate with streaming section extraction
           const { generatedNote, letter, suggestedTitle } =
             await generateFromTemplate(
               transcriptChunks,
@@ -469,6 +471,9 @@ export async function POST(request: NextRequest) {
               { userId, visitId },
               clinicalAnalysis ?? undefined,
               sectionContexts,
+              (id, title, content) => {
+                sendEvent({ type: "section", id, title, content });
+              },
             );
 
           lap("generation-done");
@@ -499,6 +504,8 @@ export async function POST(request: NextRequest) {
                         matchedConcepts: clinicalAnalysis.matchedConcepts,
                         candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
                         problemClusters: clinicalAnalysis.problemClusters,
+                        mentionedMedications:
+                          clinicalAnalysis.mentionedMedications,
                       },
                     }
                   : {}),
@@ -530,6 +537,8 @@ export async function POST(request: NextRequest) {
                     candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
                     matchedConcepts: clinicalAnalysis.matchedConcepts,
                     problemClusters: clinicalAnalysis.problemClusters,
+                    mentionedMedications:
+                      clinicalAnalysis.mentionedMedications,
                   },
                 }
               : {}),
