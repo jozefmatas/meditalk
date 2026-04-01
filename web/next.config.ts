@@ -13,7 +13,7 @@ const csp = [
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://va.vercel-scripts.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://*.supabase.co",
-  "font-src 'self' https://fonts.gstatic.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
   `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://va.vercel-scripts.com wss://*.elevenlabs.io${isDev ? " ws://localhost:*" : ""}`,
   "media-src 'self' blob: https://*.supabase.co",
   "worker-src 'self' blob:",
