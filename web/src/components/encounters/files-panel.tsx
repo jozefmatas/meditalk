@@ -26,6 +26,8 @@ export interface EncounterFile {
   type: string;
   extracted_text?: string | null;
   source?: string;
+  /** Extraction status for background extraction */
+  extraction_status?: "extracting" | "completed" | "failed" | null;
   /** True if file is saved to IndexedDB but upload pending */
   pending?: boolean;
   /** True if recording is actively in progress (stops spinner when paused) */
@@ -38,6 +40,8 @@ interface FilesContentProps {
   onFilesChange: (
     files: EncounterFile[] | ((prev: EncounterFile[]) => EncounterFile[]),
   ) => void;
+  /** True if audio recording is currently active */
+  hasActiveRecording?: boolean;
 }
 
 type FilesPanelProps = FilesContentProps;
@@ -50,6 +54,7 @@ export function FilesContent({
   visitId,
   files,
   onFilesChange,
+  hasActiveRecording = false,
 }: FilesContentProps) {
   const t = useTranslations("encounters.detail");
   const [isUploading, setIsUploading] = useState(false);
@@ -72,6 +77,11 @@ export function FilesContent({
         size: file.size,
         type: file.type,
         pending: true,
+        // Tag audio files uploaded during recording so they can use real-time transcript
+        source:
+          hasActiveRecording && file.type.startsWith("audio/")
+            ? "recording-upload"
+            : undefined,
       }));
       onFilesChange([...files, ...pendingFiles]);
 
@@ -82,7 +92,14 @@ export function FilesContent({
         // that never gets cleaned up, causing duplicates on page refresh.
         const results = await Promise.allSettled(
           allFiles.map(async (file) => {
-            return uploadWithPersistence(file, file.name, visitId);
+            // Tag audio files uploaded during recording so they can use real-time transcript
+            const source =
+              hasActiveRecording && file.type.startsWith("audio/")
+                ? "recording-upload"
+                : undefined;
+            return uploadWithPersistence(file, file.name, visitId, {
+              source,
+            });
           }),
         );
 
@@ -122,13 +139,38 @@ export function FilesContent({
           );
           return [...withoutTheseUploads, ...(data.files as EncounterFile[])];
         });
+
+        // Trigger immediate extraction for each uploaded file (background, fire-and-forget)
+        // This saves 15-50s per file during generation by pre-caching extracted text
+        // NOTE: Always extract audio files even if recording is active — generate will
+        // prefer real-time transcript if available, but fall back to extracted text
+        const uploadedFiles = data.files as EncounterFile[];
+        uploadedFiles.forEach((file) => {
+          // Extract in background (don't await, don't block UI)
+          fetch(`/api/encounters/${visitId}/extract`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fileId: file.id }),
+          })
+            .then((extractRes) => {
+              if (extractRes.ok) {
+                console.log(`[extract] Started extraction for ${file.name}`);
+              }
+            })
+            .catch((extractErr) => {
+              console.warn(
+                `[extract] Failed to trigger extraction for ${file.name}:`,
+                extractErr,
+              );
+            });
+        });
       } catch (err) {
         console.error("File upload error:", err);
       } finally {
         setIsUploading(false);
       }
     },
-    [visitId, files, onFilesChange],
+    [visitId, files, onFilesChange, hasActiveRecording],
   );
 
   const handleDelete = useCallback(
@@ -263,7 +305,12 @@ export function FilesContent({
   );
 }
 
-export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
+export function FilesPanel({
+  visitId,
+  files,
+  onFilesChange,
+  hasActiveRecording = false,
+}: FilesPanelProps) {
   const t = useTranslations("encounters.detail");
 
   return (
@@ -278,6 +325,7 @@ export function FilesPanel({ visitId, files, onFilesChange }: FilesPanelProps) {
         visitId={visitId}
         files={files}
         onFilesChange={onFilesChange}
+        hasActiveRecording={hasActiveRecording}
       />
     </div>
   );

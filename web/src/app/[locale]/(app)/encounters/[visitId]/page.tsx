@@ -380,6 +380,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
             visitId={visitId}
             files={data.files}
             onFilesChange={data.setFiles}
+            hasActiveRecording={generation.hasActiveRecording}
           />
         </>
       ) : (

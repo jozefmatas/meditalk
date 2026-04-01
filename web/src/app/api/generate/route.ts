@@ -99,18 +99,76 @@ export async function POST(request: NextRequest) {
 
     // Process uploaded files — extract text from any that haven't been processed yet
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const uploadedFiles = (visitMeta.files ?? []) as {
+    let uploadedFiles = (visitMeta.files ?? []) as {
       id: string;
       name: string;
       type: string;
       path: string;
       source?: string;
       extracted_text?: string | null;
+      extraction_status?: "extracting" | "completed" | "failed" | null;
     }[];
+
+    // Wait for any in-progress extractions (with timeout)
+    const extractingFiles = uploadedFiles.filter(
+      (f) => f.extraction_status === "extracting",
+    );
+    if (extractingFiles.length > 0) {
+      console.log(
+        `[generate] Waiting for ${extractingFiles.length} in-progress extraction(s)`,
+      );
+      const POLL_INTERVAL = 500; // 500ms
+      const MAX_WAIT = 30000; // 30 seconds timeout
+      const pollStart = Date.now();
+
+      while (
+        extractingFiles.some((f) => f.extraction_status === "extracting") &&
+        Date.now() - pollStart < MAX_WAIT
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+
+        // Re-fetch metadata to check extraction status
+        const { data: refreshedVisit } = await supabase
+          .from("visits")
+          .select("metadata")
+          .eq("id", visitId)
+          .single();
+
+        if (refreshedVisit) {
+          const refreshedMeta = (refreshedVisit.metadata ?? {}) as Record<
+            string,
+            unknown
+          >;
+          uploadedFiles = (refreshedMeta.files ?? []) as typeof uploadedFiles;
+
+          // Update extractingFiles array
+          extractingFiles.forEach((ef, idx) => {
+            const updated = uploadedFiles.find((f) => f.id === ef.id);
+            if (updated) {
+              extractingFiles[idx] = updated;
+            }
+          });
+        }
+      }
+
+      const elapsed = Date.now() - pollStart;
+      const completed = extractingFiles.filter(
+        (f) => f.extraction_status === "completed",
+      );
+      const stillExtracting = extractingFiles.filter(
+        (f) => f.extraction_status === "extracting",
+      );
+
+      console.log(
+        `[generate] Waited ${elapsed}ms for extractions: ${completed.length} completed, ${stillExtracting.length} still in progress (will extract during generation)`,
+      );
+    }
 
     // Extract text from all unprocessed files — in parallel for speed
     const unprocessed = uploadedFiles.filter(
-      (f) => !f.extracted_text && f.path,
+      (f) =>
+        !f.extracted_text && f.path && f.extraction_status !== "extracting", // Don't re-extract if still in progress
+      // Note: Files marked "failed" or old "completed" with no text will be retried
     );
     const extractionErrors: string[] = [];
     console.log(
@@ -119,6 +177,7 @@ export async function POST(request: NextRequest) {
         name: f.name,
         source: f.source,
         hasText: !!f.extracted_text,
+        status: f.extraction_status,
       })),
     );
 
@@ -178,7 +237,10 @@ export async function POST(request: NextRequest) {
               file.extracted_text = text;
             } else if (isAudio) {
               // Audio: use real-time transcript if available, otherwise transcribe
-              const isRecording = file.source === "recording";
+              // "recording" = from recording bar, "recording-upload" = manual upload during recording
+              const isRecording =
+                file.source === "recording" ||
+                file.source === "recording-upload";
 
               // Priority 1: Use real-time transcript if available (fastest!)
               if (isRecording && transcriptText) {
@@ -186,6 +248,18 @@ export async function POST(request: NextRequest) {
                   `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping file download`,
                 );
                 file.extracted_text = transcriptText;
+
+                logAudit({
+                  ...createAuditContext(authResult, request),
+                  action: "file.extraction.skipped",
+                  resourceType: "encounter_file",
+                  resourceId: file.id,
+                  metadata: {
+                    reason: "realtime_transcript_available",
+                    fileName: file.name,
+                    visitId,
+                  },
+                });
                 return;
               }
 
@@ -411,11 +485,24 @@ export async function POST(request: NextRequest) {
               } else {
                 // Anonymization disabled or not a recording
                 // Check if we have real-time transcript first (fast!)
-                if (transcriptText && isRecording) {
+                if (isRecording && transcriptText) {
                   console.log(
                     `[generate] Using real-time transcript (${transcriptText.length} chars) - skipping transcription`,
                   );
                   file.extracted_text = transcriptText;
+
+                  logAudit({
+                    ...createAuditContext(authResult, request),
+                    action: "file.extraction.skipped",
+                    resourceType: "encounter_file",
+                    resourceId: file.id,
+                    metadata: {
+                      reason: "realtime_transcript_available",
+                      fileName: file.name,
+                      source: file.source,
+                      visitId,
+                    },
+                  });
                 } else {
                   // Fallback: transcribe original
                   const text = await extractTextFromFile(
@@ -494,6 +581,16 @@ export async function POST(request: NextRequest) {
         .update({ raw_text: transcriptText })
         .eq("id", visitId);
     }
+
+    // Re-read visit metadata after file extraction to include cached extracted_text
+    // (fixes bug where second metadata save would overwrite cached extractions)
+    const { data: refreshedVisit } = await supabase
+      .from("visits")
+      .select("metadata")
+      .eq("id", visitId)
+      .single();
+    const refreshedMetadata =
+      (refreshedVisit?.metadata as Record<string, unknown>) || visitMeta;
 
     // Look up the template (DB with static fallback)
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
@@ -854,8 +951,7 @@ export async function POST(request: NextRequest) {
 
           // Save to DB (must complete before sending complete event,
           // so the email API can read the latest encounter_note)
-          const existingMetadata =
-            (visit.metadata as Record<string, unknown>) || {};
+          // Use refreshedMetadata to preserve cached extracted_text from file processing
           // Auto-set title if the visit has none and AI suggested one
           const autoTitle =
             suggestedTitle && !visit.title ? suggestedTitle : undefined;
@@ -868,7 +964,7 @@ export async function POST(request: NextRequest) {
               status: "to_review",
               ...(autoTitle ? { title: autoTitle } : {}),
               metadata: {
-                ...existingMetadata,
+                ...refreshedMetadata,
                 template_id: template.id,
                 ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
                 ...(clinicalAnalysis
