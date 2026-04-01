@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from "react";
 import {
   Drawer,
   DrawerContent,
+  DrawerDescription,
   DrawerHeader,
   DrawerTitle,
   DrawerFooter,
@@ -150,6 +151,9 @@ export function AdjustDrawer({
               <DrawerTitle className="text-left text-lg font-medium">
                 {t("detail.adjustTitle")}
               </DrawerTitle>
+              <DrawerDescription className="sr-only">
+                {t("detail.adjustTitle")}
+              </DrawerDescription>
             </DrawerHeader>
 
             <div className="flex min-h-[50vh] flex-1 flex-col gap-4 overflow-y-auto px-4 pb-2">

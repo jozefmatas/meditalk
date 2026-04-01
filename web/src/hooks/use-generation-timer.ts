@@ -30,7 +30,6 @@ const CONFIG = {
 
   REFINEMENT_TRUST_THRESHOLD: 3,
   UPDATE_INTERVAL_MS: 1000,
-  ROUND_UP_TO_SECONDS: 5,
 } as const;
 
 interface ContentMetrics {
@@ -55,60 +54,38 @@ export interface GenerationTimerState {
 
 /**
  * Estimate GENERATION-ONLY time (excludes file extraction)
- * This is what should be shown in the countdown AFTER extraction is complete.
  */
 function estimateGenerationTime(metrics: ContentMetrics): number {
   const totalTextLength = metrics.transcriptLength + metrics.doctorNotesLength;
-
-  // 1. Estimate input tokens
   const estimatedTokens = Math.ceil(totalTextLength / CONFIG.CHARS_PER_TOKEN);
 
-  // 2. Clinical analysis time (runs in parallel with extraction, but we show this in countdown)
-  const clinicalMs = estimatedTokens * CONFIG.CLINICAL_ANALYSIS_MS_PER_TOKEN;
-  const clinicalSeconds = clinicalMs / 1000;
+  const clinicalSeconds =
+    (estimatedTokens * CONFIG.CLINICAL_ANALYSIS_MS_PER_TOKEN) / 1000;
+  const generationSeconds = (estimatedTokens * CONFIG.OPUS_MS_PER_TOKEN) / 1000;
 
-  // 3. Single-pass Opus generation time (sequential after clinical/extraction)
-  const generationMs = estimatedTokens * CONFIG.OPUS_MS_PER_TOKEN;
-  const generationSeconds = generationMs / 1000;
-
-  // 4. Base overhead for setup/embeddings/etc
-  const overheadSeconds = CONFIG.BASE_OVERHEAD_SECONDS;
-
-  // GENERATION-ONLY TIME (shown in countdown after extraction)
-  // Clinical + Opus + overhead
-  return clinicalSeconds + generationSeconds + overheadSeconds;
+  // Minimum 30s — even short content takes time for Opus generation
+  return Math.max(
+    30,
+    clinicalSeconds + generationSeconds + CONFIG.BASE_OVERHEAD_SECONDS,
+  );
 }
 
 /**
- * Format seconds into human-readable time string
+ * Format seconds into MM:SS countdown string (e.g. "02:11", "00:45")
  */
 function formatTime(seconds: number): string {
-  if (seconds < 60) {
-    return "lessThanMinute"; // Translation key
-  }
-
-  const minutes = Math.ceil(seconds / 60);
-  if (minutes === 1) {
-    return "1";
-  }
-  return minutes.toString();
+  const totalSeconds = Math.max(0, Math.ceil(seconds));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 /**
- * Round up seconds to nearest interval (default 5s)
- */
-function roundUpSeconds(seconds: number, interval: number = 5): number {
-  return Math.ceil(seconds / interval) * interval;
-}
-
-/**
- * Hook for tracking and estimating generation completion time
+ * Hook for tracking and estimating generation completion time.
  *
- * Provides:
- * - Initial ETA based on content size and section count
- * - Dynamic refinement as sections complete
- * - Formatted time strings for display
- * - Progress percentage
+ * Uses elapsed seconds + section progress to compute remaining time.
+ * Resets elapsed via the "adjust state during render" pattern
+ * (React-recommended alternative to setState in effects).
  */
 export function useGenerationTimer({
   isGenerating,
@@ -116,10 +93,19 @@ export function useGenerationTimer({
   completedSections,
   contentMetrics,
 }: UseGenerationTimerProps): GenerationTimerState | null {
-  // Track elapsed seconds directly in state (no refs needed)
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [wasGenerating, setWasGenerating] = useState(false);
 
-  // Update elapsed time every second while generating
+  // Reset elapsed when generation starts — "adjust state during render" pattern
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  if (isGenerating && !wasGenerating) {
+    setWasGenerating(true);
+    setElapsedSeconds(0);
+  } else if (!isGenerating && wasGenerating) {
+    setWasGenerating(false);
+  }
+
+  // Tick elapsed seconds while generating
   useEffect(() => {
     if (!isGenerating) return;
 
@@ -127,51 +113,39 @@ export function useGenerationTimer({
       setElapsedSeconds((prev) => prev + 1);
     }, CONFIG.UPDATE_INTERVAL_MS);
 
-    return () => {
-      clearInterval(interval);
-      setElapsedSeconds(0); // Reset on cleanup
-    };
+    return () => clearInterval(interval);
   }, [isGenerating]);
 
-  // Calculate ETA
+  // Compute timer state from elapsed + section progress
   const timerState = useMemo((): GenerationTimerState | null => {
     if (!isGenerating || totalSections === 0) return null;
 
-    // Calculate initial estimate based on content size and file count
     const initialETA = estimateGenerationTime(contentMetrics);
-
-    let estimatedSeconds: number;
+    let remaining: number;
 
     if (completedSections > 0 && totalSections > 0) {
-      // Refine estimate based on actual progress
-      const avgSecondsPerSection = elapsedSeconds / completedSections;
+      const avgPerSection = elapsedSeconds / completedSections;
       const remainingSections = totalSections - completedSections;
-      const refinedETA = remainingSections * avgSecondsPerSection;
+      const refined = remainingSections * avgPerSection;
 
-      // Weighted average: trust refined estimate more after 3+ sections
+      // Weighted average: trust refined more after threshold sections
       const weight = Math.min(
         completedSections / CONFIG.REFINEMENT_TRUST_THRESHOLD,
         1,
       );
-      estimatedSeconds = initialETA * (1 - weight) + refinedETA * weight;
+      const naive = Math.max(0, initialETA - elapsedSeconds);
+      remaining = naive * (1 - weight) + refined * weight;
     } else {
-      // No sections completed yet, use initial estimate
-      estimatedSeconds = Math.max(0, initialETA - elapsedSeconds);
+      remaining = Math.max(0, initialETA - elapsedSeconds);
     }
 
-    // Ensure estimate is positive and round up
-    estimatedSeconds = Math.max(0, estimatedSeconds);
-    const roundedSeconds = roundUpSeconds(
-      estimatedSeconds,
-      CONFIG.ROUND_UP_TO_SECONDS,
-    );
+    remaining = Math.max(0, remaining);
 
-    // Calculate progress
     const progress = totalSections > 0 ? completedSections / totalSections : 0;
 
     return {
-      estimatedSecondsRemaining: roundedSeconds,
-      formattedTime: formatTime(roundedSeconds),
+      estimatedSecondsRemaining: remaining,
+      formattedTime: formatTime(remaining),
       progress,
     };
   }, [

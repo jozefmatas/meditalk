@@ -187,6 +187,7 @@ export function useEncounterGeneration({
       if (!visitId || activeGenerations.has(visitId)) return;
       activeGenerations.add(visitId);
       setIsStreaming(false);
+
       setStreamedSections([]);
       setStreamingSectionIds([]);
       setStreamingSectionLabels({});
@@ -428,6 +429,7 @@ export function useEncounterGeneration({
         activeGenerations.delete(visitId);
 
         setIsStreaming(false);
+
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
         );
@@ -448,6 +450,7 @@ export function useEncounterGeneration({
       if (!visitId || activeGenerations.has(visitId)) return;
       activeGenerations.add(visitId);
       setIsStreaming(false);
+
       setStreamedSections([]);
       setStreamingSectionIds([]);
       setStreamingSectionLabels({});
@@ -624,6 +627,7 @@ export function useEncounterGeneration({
       } finally {
         activeGenerations.delete(visitId);
         setIsStreaming(false);
+
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
         );
@@ -996,10 +1000,10 @@ export function useEncounterGeneration({
     [visit?.raw_text, doctorNotes],
   );
 
-  // Generation timer for countdown display
-  // Use actual section count from SSE, or fallback to 8 sections (typical template)
+  // Generation timer for countdown display — only starts when streaming begins,
+  // not during the processing overlay phase (extraction/clinical analysis).
   const timerState = useGenerationTimer({
-    isGenerating: isStreaming || visit?.status === "processing",
+    isGenerating: isStreaming,
     totalSections: streamingSectionIds.length || 8,
     completedSections: streamedSections.length,
     contentMetrics,

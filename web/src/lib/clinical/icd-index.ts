@@ -230,6 +230,35 @@ export function resolveIcdCodes(
 }
 
 /**
+ * Post-process generated text to replace LLM-written ICD descriptions
+ * with canonical descriptions from the ICD-10 CSV.
+ *
+ * Only replaces descriptions when:
+ * 1. The code appears at the start of a line or bullet point (standard output format)
+ * 2. The code exists in our ICD-10 database
+ *
+ * This prevents hallucinated, paraphrased, or combined ICD descriptions.
+ */
+export function validateIcdDescriptions(text: string, locale = "en"): string {
+  if (!text) return text;
+
+  // Match ICD codes in bullet/list format as instructed by our prompt:
+  //   "- I21.0 Description text"
+  //   "I10 Description text" (at start of line)
+  // The code must be followed by at least one space and description text.
+  return text.replace(
+    /^(\s*[-•*]?\s*)([A-Z]\d{2}(?:\.\d{1,4})?)\s+([^\n]+)/gm,
+    (match, bullet: string, code: string) => {
+      const results = resolveIcdCodes([code], locale);
+      if (results.length > 0 && results[0].found) {
+        return `${bullet}${results[0].code} ${results[0].description}`;
+      }
+      return match;
+    },
+  );
+}
+
+/**
  * Build a compact ICD reference string for the LLM prompt.
  * Only includes categories from the given hints, limited per category.
  */

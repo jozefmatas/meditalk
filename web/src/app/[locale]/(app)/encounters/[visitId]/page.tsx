@@ -334,9 +334,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         </div>
       ) : data.visit.status === "processing" ? (
         /* Processing overlay — server generating, SSE not connected */
-        <ProcessingOverlay
-          estimatedSeconds={generation.timerState?.estimatedSecondsRemaining}
-        />
+        <ProcessingOverlay />
       ) : isDraft ? (
         /* Draft mode — recording + editor */
         <>

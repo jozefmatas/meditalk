@@ -100,8 +100,7 @@ export async function runClinicalAnalysis(
       (parsed.problemClusters as ClinicalAnalysis["problemClusters"]) || [],
     candidateIcdCodes:
       (parsed.candidateIcdCodes as ClinicalAnalysis["candidateIcdCodes"]) || [],
-    mentionedMedications:
-      (parsed.mentionedMedications as string[]) || [],
+    mentionedMedications: (parsed.mentionedMedications as string[]) || [],
     usage: {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -161,7 +160,7 @@ RULES:
       .map((c) => `  ${c.code}: ${c.description} (confidence: ${c.confidence})`)
       .join("\n");
     parts.push(
-      `\nCANDIDATE ICD-10 CODES (include relevant codes in the Assessment section):\n${icdList}`,
+      `\nCANDIDATE ICD-10 CODES — use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions:\n${icdList}`,
     );
   }
 

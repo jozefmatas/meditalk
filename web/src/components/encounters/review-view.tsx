@@ -212,6 +212,18 @@ export function ReviewView({
         setMobileHeaderHidden(true);
         anchorY.current = currentY;
       } else if (isHidden.current && (delta < -30 || currentY < 40)) {
+        // Ignore overscroll bounce at the bottom — on iOS the scroll position
+        // briefly decreases when content rubber-bands, which looks like a
+        // scroll-up but isn't intentional user input.
+        if (delta < -30 && currentY > 40) {
+          const el = scrollParent || document.documentElement;
+          const atBottom = el.scrollHeight - el.clientHeight - currentY < 30;
+          if (atBottom) {
+            anchorY.current = currentY;
+            return;
+          }
+        }
+
         isHidden.current = false;
         transitioning.current = true;
         setMobileHeaderHidden(false);
@@ -623,12 +635,16 @@ export function ReviewView({
                   />
                   {isActivelyStreaming ? (
                     <TextShimmer
-                      className="py-2 text-center text-sm"
+                      className="py-2 text-center text-sm tabular-nums"
                       duration={3}
                     >
-                      {isStreamingGeneration
-                        ? t("detail.generatingEncounter")
-                        : t("detail.regenerating")}
+                      {timerState
+                        ? tDetail("generatingReadyIn", {
+                            time: timerState.formattedTime,
+                          })
+                        : isStreamingGeneration
+                          ? t("detail.generatingEncounter")
+                          : t("detail.regenerating")}
                     </TextShimmer>
                   ) : (
                     <div className="flex gap-2">
@@ -839,30 +855,14 @@ export function ReviewView({
               >
                 <h2 className="text-lg font-medium">{t("detail.note")}</h2>
                 {isActivelyStreaming ? (
-                  <TextShimmer
-                    className="flex items-center gap-2 text-sm"
-                    duration={3}
-                  >
+                  <TextShimmer className="text-sm tabular-nums" duration={3}>
                     {timerState
                       ? tDetail("generatingReadyIn", {
-                          time:
-                            timerState.estimatedSecondsRemaining < 60
-                              ? tDetail("lessThanMinute")
-                              : tDetail("minutesRemaining", {
-                                  minutes: Math.ceil(
-                                    timerState.estimatedSecondsRemaining / 60,
-                                  ).toString(),
-                                }),
+                          time: timerState.formattedTime,
                         })
                       : isStreamingGeneration
                         ? t("detail.generatingEncounter")
                         : t("detail.regenerating")}
-                    {streamingSectionLabels && (
-                      <span className="text-xs">
-                        ({streamedSections.length}/
-                        {Object.keys(streamingSectionLabels).length})
-                      </span>
-                    )}
                   </TextShimmer>
                 ) : (
                   <div className="flex gap-2">

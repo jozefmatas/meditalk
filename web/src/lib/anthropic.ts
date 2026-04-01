@@ -5,6 +5,7 @@ import { buildTemplateHtml, flattenSectionIds } from "./templates/html";
 import { logUsage, type UsageContext } from "./usage";
 import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
 import { extractJson } from "./clinical/json-repair";
+import { validateIcdDescriptions } from "./clinical/icd-index";
 import type { ClinicalAnalysis } from "./clinical/types";
 
 export class InsufficientContextError extends Error {
@@ -356,9 +357,7 @@ export async function generateFromTemplate(
   }
 
   const text =
-    finalMessage.content[0].type === "text"
-      ? finalMessage.content[0].text
-      : "";
+    finalMessage.content[0].type === "text" ? finalMessage.content[0].text : "";
 
   const parsed = extractJson<Record<string, string | boolean>>(text);
 
@@ -382,6 +381,17 @@ export async function generateFromTemplate(
   for (const id of allIds) {
     const value = parsed[id];
     sectionContents[id] = typeof value === "string" ? value : "";
+  }
+
+  // Validate ICD descriptions against canonical CSV data
+  // Replaces any hallucinated/paraphrased descriptions with exact CSV text
+  for (const id of allIds) {
+    if (sectionContents[id]) {
+      sectionContents[id] = validateIcdDescriptions(
+        sectionContents[id],
+        language,
+      );
+    }
   }
 
   const generatedNote = buildTemplateHtml(
