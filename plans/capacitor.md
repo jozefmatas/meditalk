@@ -1,6 +1,6 @@
 # MediTalk — Capacitor Native App Migration Plan
 
-> **Status:** Planning
+> **Status:** Phase 1 complete, Phase 2 planned
 > **Created:** 2026-03-31
 > **Goal:** Convert Next.js PWA to native iOS/Android apps for persistent microphone access during screen lock
 > **Complexity Estimate:** Medium-High (3-4 weeks development + 2-4 weeks testing/deployment)
@@ -271,196 +271,291 @@ npx cap open android # Opens Android Studio
 
 ---
 
-## Phase 2 — Replace Web APIs with Capacitor Plugins (Week 2: 5-7 days)
+## Phase 2 — Background-Safe Recording for Native (Week 2: 5-7 days)
 
-### 2.1 Install Required Plugins
+> **Key architectural decision:** Do NOT replace `MediaRecorder` or `getUserMedia`.
+> The Scribe AudioWorklet needs a `MediaStream` from `getUserMedia` for real-time transcription.
+> A native audio recorder plugin records to a file — it cannot provide a `MediaStream`.
+> Since `getUserMedia` works fine in Capacitor WebView (both platforms), **only the guard
+> mechanisms need native equivalents — the recording pipeline stays identical.**
+
+### 2.1 Strategy Overview
+
+| Platform | How mic survives screen lock | Plugin |
+|----------|------------------------------|--------|
+| **iOS** | `UIBackgroundModes: audio` in Info.plist — tells iOS to keep the WKWebView audio session alive when the app backgrounds. Confirmed working on iOS 17.5+. | None needed |
+| **Android** | Foreground service with `serviceType: microphone` — keeps WebView process alive + shows persistent notification in the system tray. Required on Android 9+ for background mic access. | `@capawesome-team/capacitor-android-foreground-service` (MIT, Cap 8) |
+| **Web** | Existing Wake Lock API + Web Notification hacks stay as fallback for mobile browsers | No changes |
+
+> **KeepAwake not needed.** Doctors lock their phones during consultations — that's expected behavior.
+> The mic must survive screen lock, not prevent it. iOS background audio mode and Android
+> foreground service handle this at the OS level.
+
+### 2.2 Install Required Plugins
 
 ```bash
-pnpm add @capacitor-community/audio-recorder
-pnpm add @capacitor-community/keep-awake
-pnpm add @capacitor/local-notifications
-pnpm add @capacitor/device
-pnpm add @capacitor/app
-pnpm add @capacitor/filesystem
+cd web
+npm install @capawesome-team/capacitor-android-foreground-service@^8.0.0
+npx cap sync
 ```
 
 **Plugin summary:**
 
-- **audio-recorder** — Replaces MediaRecorder API
-- **keep-awake** — Replaces Wake Lock API
-- **local-notifications** — Replaces Web Notifications
-- **device** — Device info and permissions
-- **app** — App lifecycle events
-- **filesystem** — Save audio files before upload
+- **`@capawesome-team/capacitor-android-foreground-service`** — Starts a real Android foreground service with `FOREGROUND_SERVICE_TYPE_MICROPHONE`. Shows a persistent "Recording in progress" notification. Keeps the WebView process alive when screen is locked. Free MIT license, supports Capacitor 8.
 
-### 2.2 Replace MediaRecorder with Capacitor Audio Recorder
+**NOT needed:** `@capacitor-community/keep-awake` (doctors lock their phones — that's fine), `@capacitor-community/audio-recorder` (would break Scribe), `@capacitor/local-notifications` (foreground service already shows a notification on Android), `@capacitor/filesystem`, `@capacitor/device`
 
-**File:** [web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx)
+### 2.3 iOS Permissions & Background Mode
 
-**Current code (lines 141-300):**
+**File:** `web/ios/App/App/Info.plist`
 
-```typescript
-// Web API
-const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
-mediaRecorderRef.current.ondataavailable = (e) =>
-  chunksRef.current.push(e.data);
-mediaRecorderRef.current.start(timeslice);
-```
-
-**New code (Capacitor):**
-
-```typescript
-import { AudioRecorder } from "@capacitor-community/audio-recorder";
-import { Capacitor } from "@capacitor/core";
-
-// Request microphone permission (iOS/Android)
-const hasPermission = await AudioRecorder.requestPermission();
-if (!hasPermission.value) {
-  setMicError(true);
-  return;
-}
-
-// Start recording
-await AudioRecorder.startRecording();
-
-// Stop and get file
-const result = await AudioRecorder.stopRecording();
-// result.value.path → file:// URL to recorded audio
-// Convert to Blob for upload
-const fileBlob = await fetch(result.value.path).then((r) => r.blob());
-```
-
-**Key differences:**
-
-- ❌ No `timeslice` support (no chunked recording) — recording saved as single file on stop
-- ❌ No `mimeType` control — iOS uses M4A (AAC), Android uses M4A or WebM depending on device
-- ✅ Survives screen lock (native audio session)
-- ✅ Simpler API (no MediaStream, no dataavailable events)
-
-**Migration impact:**
-
-- Remove `chunksRef` logic (single file now)
-- Remove `segmentsRef` logic (no pause/resume chunking)
-- Simplify upload flow (one file instead of concatenated chunks)
-- Update file type detection (M4A on iOS, WebM on Android)
-
-### 2.3 Replace Wake Lock with Keep Awake + Background Mode
-
-**File:** [web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx)
-
-**Current code (lines 164-179):**
-
-```typescript
-// Web API
-wakeLockRef.current = await navigator.wakeLock.request("screen");
-```
-
-**New code (Capacitor):**
-
-```typescript
-import { KeepAwake } from "@capacitor-community/keep-awake";
-
-// Keep screen on during recording
-await KeepAwake.keepAwake();
-
-// On stop
-await KeepAwake.allowSleep();
-```
-
-**Background Mode configuration (iOS):**
-
-**File:** `ios/App/App/Info.plist`
-
-Add background mode for audio:
-
-```xml
-<key>UIBackgroundModes</key>
-<array>
-  <string>audio</string>
-</array>
-```
-
-**File:** `ios/App/Podfile`
-
-Add microphone permission description:
-
-```ruby
-target 'App' do
-  # Add permission descriptions
-  post_install do |installer|
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['INFOPLIST_FILE'] = 'Pods/Target Support Files/#{target.name}/#{target.name}-Info.plist'
-      end
-    end
-  end
-end
-```
-
-**File:** `ios/App/App/Info.plist`
-
-Add microphone permission description:
+Add inside root `<dict>`:
 
 ```xml
 <key>NSMicrophoneUsageDescription</key>
-<string>MediTalk needs microphone access to record medical consultations</string>
+<string>MediTalk needs microphone access to record medical consultations for transcription.</string>
+
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+</array>
 ```
 
-**Background Mode configuration (Android):**
+**Why:**
+- `NSMicrophoneUsageDescription` — Required by Apple for any app accessing the microphone via `getUserMedia`. Without it, the app crashes on mic permission request.
+- `UIBackgroundModes: audio` — Tells iOS to keep the app process (and WKWebView's audio session) alive when the app goes to background. On iOS 17.5+, WKWebView's `getUserMedia` + `AudioContext` continue in background with this key set. Without it, `microphoneCaptureState` becomes muted within seconds of backgrounding.
 
-**File:** `android/app/src/main/AndroidManifest.xml`
+**App Store review note:** Apple requires this key only for apps that genuinely record/play audio in background. A medical dictation app (15-30 min consultations) clearly qualifies. Include review notes explaining the use case.
 
-Add permissions:
+### 2.4 Android Permissions & Foreground Service
+
+**File:** `web/android/app/src/main/AndroidManifest.xml`
+
+Add permissions after the existing `INTERNET` permission:
 
 ```xml
 <uses-permission android:name="android.permission.RECORD_AUDIO" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
-### 2.4 Replace Web Notifications with Local Notifications
+**Why each permission:**
+- `RECORD_AUDIO` — Runtime permission for native microphone access. User must grant before recording starts.
+- `FOREGROUND_SERVICE` — Required for any foreground service (Android 9+).
+- `FOREGROUND_SERVICE_MICROPHONE` — Required for microphone-type foreground services (Android 14+). Without it, the service is rejected.
+- `POST_NOTIFICATIONS` — Runtime permission for the foreground service notification (Android 13+).
 
-**File:** [web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx)
+The foreground service plugin's `<service>` declaration is auto-added by `npx cap sync`.
 
-**Current code (lines 194-204):**
+### 2.5 Create Native Guard Utilities
+
+**File:** `web/src/lib/native-guards.ts` (NEW)
+
+Encapsulates all Capacitor plugin interactions behind async functions with **dynamic imports** (tree-shaking: web bundle never loads native plugin JS).
 
 ```typescript
-// Web API
-notificationRef.current = new Notification(title, { body, icon });
+import { isNative, isAndroid } from "@/lib/platform";
+import { logger } from "@/lib/logger";
+
+// ── Android Foreground Service ─────────────────────────────
+
+export async function nativeStartRecordingService(
+  title: string,
+  body: string,
+): Promise<void> {
+  if (!isNative || !isAndroid) return;
+  try {
+    const { ForegroundService } = await import(
+      "@capawesome-team/capacitor-android-foreground-service"
+    );
+    await ForegroundService.startForegroundService({
+      id: 9001,
+      title,
+      body,
+      smallIcon: "ic_stat_recording",
+      serviceType: "microphone",
+    });
+  } catch (err) {
+    logger.warn("[native-guards] ForegroundService start failed:", err);
+  }
+}
+
+export async function nativeStopRecordingService(): Promise<void> {
+  if (!isNative || !isAndroid) return;
+  try {
+    const { ForegroundService } = await import(
+      "@capawesome-team/capacitor-android-foreground-service"
+    );
+    await ForegroundService.stopForegroundService();
+  } catch (err) {
+    logger.warn("[native-guards] ForegroundService stop failed:", err);
+  }
+}
 ```
 
-**New code (Capacitor):**
+**Design decisions:**
+- **Dynamic imports** (`await import(...)`) — Web bundle never loads native plugin JS. Tree-shaking eliminates dead code.
+- **`isNative` + `isAndroid` guard first** — Avoids importing plugins on web or iOS entirely.
+- **Graceful failure** — Every function catches errors and logs them. Recording must never fail because a guard fails.
+- **Fixed notification ID (9001)** — Calling `startForegroundService()` again replaces the existing notification.
+- **No KeepAwake** — Doctors lock their phones during consultations. Background audio mode (iOS) and foreground service (Android) keep the mic alive without preventing screen lock.
+
+### 2.6 Refactor Recording Guards Hook
+
+**File:** `web/src/components/encounters/hooks/use-recording-guards.ts`
+
+**Changes from current code:**
+1. Import `isNative` from `@/lib/platform` + native-guards functions
+2. Rename local `isAndroid()` UA-sniff → `isAndroidBrowser()` (still needed for web notification path — platform.ts `isAndroid` only returns `true` inside native Capacitor, not in Android Chrome)
+3. Add `if (isNative)` branches in wake lock + notification functions
+4. Simplify `visibilitychange` handler (skip on native — foreground service persists)
+
+**Guard function mapping:**
+
+| Function | Native (new) | Web (unchanged) |
+|----------|-------------|-----------------|
+| `acquireWakeLock()` | `nativeStartRecordingService(title, body)` on Android; no-op on iOS (UIBackgroundModes handles it) | `navigator.wakeLock.request("screen")` |
+| `releaseWakeLock()` | `nativeStopRecordingService()` on Android; no-op on iOS | `wakeLockRef.current?.release()` |
+| `showRecordingNotification()` | **no-op** — Android foreground service already shows notification; iOS needs no notification | Web Notification API (Android browser only) |
+| `closeRecordingNotification()` | **no-op** | `notificationRef.current?.close()` |
+
+**Refactored `acquireWakeLock()`:**
 
 ```typescript
-import { LocalNotifications } from "@capacitor/local-notifications";
+import { isNative } from "@/lib/platform";
+import {
+  nativeStartRecordingService,
+  nativeStopRecordingService,
+} from "@/lib/native-guards";
 
-// Request permission
-await LocalNotifications.requestPermissions();
+const acquireWakeLock = useCallback(async () => {
+  if (isNative) {
+    // Android: start foreground service (keeps WebView + mic alive on lock)
+    // iOS: no-op here — UIBackgroundModes:audio handles it at OS level
+    await nativeStartRecordingService(
+      t("recordingNotificationTitle"),
+      t("recordingNotificationBody"),
+    );
+    return;
+  }
 
-// Show notification
-await LocalNotifications.schedule({
-  notifications: [
-    {
-      id: 1,
-      title: t("recordingNotificationTitle"),
-      body: t("recordingNotificationBody"),
-      ongoing: true, // Persistent notification (Android)
-      sound: null,
-      attachments: null,
-      actionTypeId: "",
-      extra: null,
-    },
-  ],
-});
-
-// Cancel notification
-await LocalNotifications.cancel({ notifications: [{ id: 1 }] });
+  // Web: existing Wake Lock API
+  if (!("wakeLock" in navigator)) return;
+  try {
+    wakeLockRef.current = await navigator.wakeLock.request("screen");
+    wakeLockRef.current.addEventListener("release", () => {
+      wakeLockRef.current = null;
+    });
+  } catch {
+    // Failed (e.g. low battery, page not visible)
+  }
+}, [t]);
 ```
 
-### 2.5 Detect Capacitor Environment
+**Refactored `releaseWakeLock()`:**
 
-**File:** `web/src/lib/platform.ts` (NEW)
+```typescript
+const releaseWakeLock = useCallback(() => {
+  if (isNative) {
+    // Android: stop foreground service
+    // iOS: no-op
+    nativeStopRecordingService();
+    return;
+  }
+
+  // Web: existing release
+  wakeLockRef.current?.release();
+  wakeLockRef.current = null;
+}, []);
+```
+
+**Refactored `showRecordingNotification()`:**
+
+```typescript
+/** Detect Android browser (NOT native) for web notification guard */
+function isAndroidBrowser(): boolean {
+  return !isNative && /Android/i.test(navigator.userAgent);
+}
+
+const showRecordingNotification = useCallback(async () => {
+  // Native: no-op — Android foreground service already shows notification
+  if (isNative) return;
+
+  // Web: existing Web Notification API (Android browser only)
+  if (!isAndroidBrowser() || !("Notification" in window)) return;
+
+  try {
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission === "granted") {
+      notificationRef.current = new Notification(
+        t("recordingNotificationTitle"),
+        {
+          body: t("recordingNotificationBody"),
+          requireInteraction: true,
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag: "meditalk-recording",
+        },
+      );
+    }
+  } catch (err) {
+    logger.warn("[notification] Failed to show notification:", err);
+  }
+}, [t]);
+```
+
+**Refactored `visibilitychange` handler:**
+
+```typescript
+// Web: re-acquire wake lock (OS releases it on tab hide)
+// Native: UIBackgroundModes (iOS) + foreground service (Android) persist — no re-acquisition needed
+useEffect(() => {
+  if (isNative) return;
+
+  const handleVisibility = () => {
+    if (
+      document.visibilityState === "visible" &&
+      isRecording &&
+      !wakeLockRef.current
+    ) {
+      acquireWakeLock();
+    }
+  };
+  document.addEventListener("visibilitychange", handleVisibility);
+  return () =>
+    document.removeEventListener("visibilitychange", handleVisibility);
+}, [isRecording, acquireWakeLock]);
+```
+
+### 2.7 Android Notification Icon (Optional)
+
+**File:** `web/android/app/src/main/res/drawable/ic_stat_recording.xml` (NEW)
+
+Small microphone vector drawable for the foreground service notification bar:
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+  <path
+      android:fillColor="#FFFFFF"
+      android:pathData="M12,14c1.66,0 3,-1.34 3,-3V5c0,-1.66 -1.34,-3 -3,-3S9,3.34 9,5v6c0,1.66 1.34,3 3,3z"/>
+  <path
+      android:fillColor="#FFFFFF"
+      android:pathData="M17,11c0,2.76 -2.24,5 -5,5s-5,-2.24 -5,-5H5c0,3.53 2.61,6.43 6,6.92V21h2v-3.08c3.39,-0.49 6,-3.39 6,-6.92H17z"/>
+</vector>
+```
+
+If not created, Android falls back to the app icon (works but looks oversized in the notification bar).
+
+### 2.8 Existing Platform Detection (No Changes)
+
+**File:** `web/src/lib/platform.ts` (already exists from Phase 1)
 
 ```typescript
 import { Capacitor } from "@capacitor/core";
@@ -471,27 +566,177 @@ export const isAndroid = Capacitor.getPlatform() === "android";
 export const isWeb = Capacitor.getPlatform() === "web";
 ```
 
-**Usage in recording-bar.tsx:**
+This file needs no changes. The `isNative` and `isAndroid` exports are used by `native-guards.ts` and `use-recording-guards.ts`.
+
+### 2.9 Write Tests
+
+**File:** `web/src/lib/native-guards.test.ts` (NEW)
+
+Verify all functions are no-ops when `isNative=false` or `isAndroid=false`:
 
 ```typescript
-import { isNative, isIOS } from "@/lib/platform";
+vi.mock("@/lib/platform", () => ({ isNative: false, isAndroid: false }));
 
-// Use Capacitor API if native, otherwise fallback to web
-if (isNative) {
-  await AudioRecorder.startRecording();
-} else {
-  // Existing MediaRecorder code (for web PWA)
-  mediaRecorderRef.current = new MediaRecorder(stream);
+describe("native-guards (web)", () => {
+  it("nativeStartRecordingService is a no-op on web", async () => {
+    const { nativeStartRecordingService } = await import("./native-guards");
+    await expect(nativeStartRecordingService("t", "b")).resolves.toBeUndefined();
+  });
+  // ... same for nativeStopRecordingService
+});
+```
+
+**File:** `web/src/components/encounters/hooks/use-recording-guards.test.ts` (update)
+
+Mock `@/lib/platform` and `@/lib/native-guards`, add native branch test cases.
+
+### 2.10 Handle Phone Call Interruption
+
+**Problem:** When a phone call comes in during recording, iOS/Android interrupt the audio session. Without handling this:
+- `AudioContext` gets suspended → Scribe AudioWorklet stops processing
+- `MediaRecorder` may error out or silently stop capturing
+- After the call, recording appears active but is producing silence
+
+**Solution:** Listen for audio session interruptions, auto-pause the recording, and auto-resume after the call ends.
+
+**File:** `web/src/components/encounters/hooks/use-recording-guards.ts` (add to existing hook)
+
+Add a new export + effect:
+
+```typescript
+export interface UseRecordingGuardsReturn {
+  // ... existing
+  // Audio interruption
+  audioInterrupted: boolean;
 }
 ```
 
-**Why keep web fallback?**
+```typescript
+const [audioInterrupted, setAudioInterrupted] = useState(false);
+const audioContextRef = useRef<AudioContext | null>(null);
 
-- Continue supporting PWA for desktop users (no screen lock issues on desktop)
-- Easier development (no need to build native every time)
-- Gradual migration (can ship web first, native later)
+/**
+ * Track the AudioContext used by Scribe so we can detect interruptions.
+ * Called from recording-bar.tsx after Scribe starts.
+ */
+const setAudioContext = useCallback((ctx: AudioContext | null) => {
+  audioContextRef.current = ctx;
+}, []);
+```
 
-**Note:** After native app is stable and most mobile users have migrated, you can remove Wake Lock + Android notification code from web PWA (see Phase 3.2 for deprecation strategy)
+**Audio interruption effect:**
+
+```typescript
+// Detect phone call interruptions via AudioContext state changes.
+// iOS: AudioContext transitions to "interrupted" → "running" after call.
+// Android: AudioContext transitions to "suspended" → "running".
+useEffect(() => {
+  const ctx = audioContextRef.current;
+  if (!ctx || !isRecording) return;
+
+  const handleStateChange = () => {
+    if (ctx.state === "interrupted" || ctx.state === "suspended") {
+      setAudioInterrupted(true);
+      logger.info("[recording-guards] Audio interrupted (phone call?)");
+    } else if (ctx.state === "running" && audioInterrupted) {
+      setAudioInterrupted(false);
+      logger.info("[recording-guards] Audio resumed after interruption");
+    }
+  };
+
+  ctx.addEventListener("statechange", handleStateChange);
+  return () => ctx.removeEventListener("statechange", handleStateChange);
+}, [isRecording, audioInterrupted]);
+```
+
+**File:** `web/src/components/encounters/recording-bar.tsx`
+
+When `audioInterrupted` is true:
+- Auto-pause the recording (save current segment via `useAudioRecorder.pause()`)
+- Show a banner: "Recording paused — phone call in progress"
+
+When `audioInterrupted` returns to false:
+- Auto-resume recording via `useAudioRecorder.resume()`
+- The AudioContext for Scribe needs `.resume()` — call `scribe.resumeContext()` or restart Scribe
+- Show a brief toast: "Recording resumed"
+
+```typescript
+const { audioInterrupted } = guards;
+
+// Auto-pause/resume on phone call interruption
+useEffect(() => {
+  if (audioInterrupted && recorder.state === "recording") {
+    recorder.pause();
+    // Don't release wake lock or stop foreground service — call will end
+  } else if (!audioInterrupted && recorder.state === "paused") {
+    recorder.resume();
+    // Scribe AudioContext may need resume
+    scribe.resumeIfNeeded();
+  }
+}, [audioInterrupted, recorder, scribe]);
+```
+
+**What happens step by step:**
+
+1. Doctor is recording → phone call comes in
+2. iOS/Android interrupts audio session → `AudioContext.state` → `"interrupted"` / `"suspended"`
+3. `handleStateChange` fires → `setAudioInterrupted(true)`
+4. RecordingBar effect → auto-pauses MediaRecorder (saves current segment)
+5. UI shows "Recording paused — phone call in progress"
+6. Doctor finishes/declines call → audio session resumes → `AudioContext.state` → `"running"`
+7. `handleStateChange` fires → `setAudioInterrupted(false)`
+8. RecordingBar effect → auto-resumes MediaRecorder + Scribe
+9. UI shows "Recording resumed" toast
+
+**Edge cases:**
+- Doctor declines the call immediately → interruption is brief (~1s), auto-pause/resume happens seamlessly
+- Doctor takes a long call (10+ min) → recording stays paused, background audio mode (iOS) / foreground service (Android) keep the app alive
+- Multiple rapid calls → each triggers pause/resume, segments are saved correctly
+
+### 2.11 Sync & Verify
+
+```bash
+npx cap sync
+npx cap run ios      # test: lock screen during recording → mic stays alive
+npx cap run android  # test: lock screen → foreground notification visible → mic stays alive
+npm run dev          # verify web recording still works unchanged in browser
+```
+
+**Test checklist:**
+- [ ] iOS: Mic permission prompt appears on first recording
+- [ ] iOS: Lock screen → wait 30s → unlock → Scribe transcript continued (UIBackgroundModes:audio)
+- [ ] Android: Foreground notification visible in system tray during recording
+- [ ] Android: Lock screen → wait 30s → unlock → transcript still updating (foreground service)
+- [ ] Both: Pause/resume works correctly
+- [ ] Both: Phone call during recording → auto-pauses → call ends → auto-resumes
+- [ ] Both: Declined call → brief pause → seamless resume
+- [ ] Web: Recording + wake lock + notification unchanged in desktop/mobile browsers
+
+### Files Changed in Phase 2
+
+| Action | File | Description |
+|--------|------|-------------|
+| Create | `web/src/lib/native-guards.ts` | Capacitor plugin wrappers with dynamic imports |
+| Create | `web/src/lib/native-guards.test.ts` | Unit tests (no-op verification on web) |
+| Create | `web/android/app/src/main/res/drawable/ic_stat_recording.xml` | Android notification icon (optional) |
+| Modify | `web/src/components/encounters/hooks/use-recording-guards.ts` | Add `isNative` branches for foreground service (Android) + call interruption detection |
+| Modify | `web/src/components/encounters/hooks/use-recording-guards.test.ts` | Add native branch + call interruption test cases |
+| Modify | `web/src/components/encounters/recording-bar.tsx` | Add auto-pause/resume on `audioInterrupted` state |
+| Modify | `web/ios/App/App/Info.plist` | Add `NSMicrophoneUsageDescription` + `UIBackgroundModes: audio` |
+| Modify | `web/android/app/src/main/AndroidManifest.xml` | Add RECORD_AUDIO, FOREGROUND_SERVICE, FOREGROUND_SERVICE_MICROPHONE, POST_NOTIFICATIONS |
+| **No change** | `use-audio-recorder.ts` | getUserMedia + MediaRecorder work fine in WebView |
+| **No change** | `use-scribe-streaming.ts` | AudioWorklet + Scribe WebSocket unaffected |
+| **No change** | `use-scribe-streaming.ts` | May need a `resumeIfNeeded()` method for post-call recovery |
+| **No change** | `platform.ts` | Already correct from Phase 1 |
+
+### Risks & Mitigation
+
+| Risk | Mitigation |
+|------|-----------|
+| iOS < 17.5 doesn't keep mic alive in background | Set minimum deployment target iOS 17.5, or accept degraded behavior on older devices |
+| Android OEMs (Samsung, Xiaomi) throttle WebView JS despite foreground service | Monitor in testing on real devices. Fallback: native audio recording plugin (future Phase) |
+| Apple App Store rejects UIBackgroundModes:audio | Medical dictation app is a legitimate use case. Include review notes explaining 15-30 min consultations |
+| Phone call doesn't trigger AudioContext statechange | Fallback: listen for Capacitor `@capacitor/app` `appStateChange` events as secondary signal |
 
 ---
 

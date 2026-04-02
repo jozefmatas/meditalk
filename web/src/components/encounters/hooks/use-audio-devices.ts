@@ -23,6 +23,8 @@ export function useAudioDevices(): UseAudioDevicesReturn {
   // Enumerate audio devices on mount
   // Note: Labels may be empty until microphone permission is granted
   useEffect(() => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+
     navigator.mediaDevices
       .enumerateDevices()
       .then((allDevices) => {
