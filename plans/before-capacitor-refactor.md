@@ -20,16 +20,11 @@
 
 ## Recommended Before Capacitor
 
-### 1. Extract shared generate/regenerate streaming logic
+### 1. ~~Extract shared generate/regenerate streaming logic~~ ✅
 
-> **Why:** These routes handle file extraction + SSE streaming. Capacitor may need different file handling. Clean shared code = easier to adapt.
-
-- [ ] Extract duplicated `tryExtractSections()` to `lib/api/streaming.ts`
-- [ ] Extract shared SSE encoding helpers
-- [ ] Extract `normalizeStatus()` (duplicated in 2 encounter routes)
-- [ ] Centralize error response helpers to `lib/api/responses.ts`
-
-**Files:** `app/api/generate/route.ts` (632 lines), `app/api/regenerate/route.ts` (516 lines)
+> Extracted `createSSEStream()`, `sseResponse()`, `extractSectionsFromStream()` → `lib/api/sse.ts`
+> Extracted `normalizeStatus()` → `lib/encounters/normalize-status.ts`
+> Standardized regenerate route error responses to `NextResponse.json()`
 
 ### 2. Split `use-encounter-generation.ts` (1,038 lines)
 

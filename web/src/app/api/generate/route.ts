@@ -16,6 +16,7 @@ import { flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
+import { createSSEStream, sseResponse } from "@/lib/api/sse";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 
@@ -414,186 +415,149 @@ export async function POST(request: NextRequest) {
     // Use two-pass generation via generateFromTemplate
     lap("generation-start");
 
-    const encoder = new TextEncoder();
-
-    const readable = new ReadableStream({
-      async start(controller) {
-        let clientDisconnected = false;
-
-        function sendEvent(data: Record<string, unknown>) {
-          if (clientDisconnected) return;
-          try {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
-            );
-          } catch {
-            clientDisconnected = true;
-          }
-        }
-
-        function safeClose() {
-          try {
-            controller.close();
-          } catch {
-            /* already closed or cancelled */
-          }
-        }
-
-        // Notify client that clinical analysis is complete
-        if (clinicalAnalysis) {
-          sendEvent({
-            type: "analysis_complete",
-            specialty: clinicalAnalysis.inferredSpecialty,
-            icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
-            conceptCount: clinicalAnalysis.matchedConcepts.length,
-          });
-        }
-
-        // Notify client that generation is starting
+    const readable = createSSEStream(async ({ sendEvent, safeClose }) => {
+      // Notify client that clinical analysis is complete
+      if (clinicalAnalysis) {
         sendEvent({
-          type: "streaming_start",
-          sectionIds: allIds,
-          sectionLabels,
+          type: "analysis_complete",
+          specialty: clinicalAnalysis.inferredSpecialty,
+          icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
+          conceptCount: clinicalAnalysis.matchedConcepts.length,
+        });
+      }
+
+      // Notify client that generation is starting
+      sendEvent({
+        type: "streaming_start",
+        sectionIds: allIds,
+        sectionLabels,
+      });
+
+      try {
+        // Call generateFromTemplate with streaming section extraction
+        const { generatedNote, letter, suggestedTitle } =
+          await generateFromTemplate(
+            transcriptChunks,
+            template,
+            language,
+            sectionLabels,
+            doctorNotes,
+            fileTexts,
+            { userId, visitId },
+            clinicalAnalysis ?? undefined,
+            sectionContexts,
+            (id, title, content) => {
+              sendEvent({ type: "section", id, title, content });
+            },
+          );
+
+        lap("generation-done");
+
+        // Save to DB (must complete before sending complete event,
+        // so the email API can read the latest encounter_note)
+        // Use refreshedMetadata to preserve cached extracted_text from file processing
+        // Auto-set title if the visit has none and AI suggested one
+        const autoTitle =
+          suggestedTitle && !visit.title ? suggestedTitle : undefined;
+
+        const { error: saveError } = await supabase
+          .from("visits")
+          .update({
+            encounter_note: generatedNote,
+            patient_letter: letter,
+            status: "to_review",
+            ...(autoTitle ? { title: autoTitle } : {}),
+            metadata: {
+              ...refreshedMetadata,
+              template_id: template.id,
+              ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+              ...(clinicalAnalysis
+                ? {
+                    clinical_analysis: {
+                      inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                      secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                      matchedConcepts: clinicalAnalysis.matchedConcepts,
+                      candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                      problemClusters: clinicalAnalysis.problemClusters,
+                      mentionedMedications:
+                        clinicalAnalysis.mentionedMedications,
+                    },
+                  }
+                : {}),
+            },
+          })
+          .eq("id", visitId);
+        if (saveError) {
+          console.error("Failed to save generated content:", saveError);
+          sendEvent({ type: "error", error: "save_failed" });
+          safeClose();
+          return;
+        }
+
+        // Note: Usage logging is handled inside generateFromTemplate for two-pass generation
+
+        // Send final complete event and close stream so client gets response immediately
+        sendEvent({
+          type: "complete",
+          generatedNote,
+          letter,
+          suggestedTitle,
+          usedChunks,
+          templateId: template.id,
+          ...(clinicalAnalysis
+            ? {
+                clinicalAnalysis: {
+                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                  matchedConcepts: clinicalAnalysis.matchedConcepts,
+                  problemClusters: clinicalAnalysis.problemClusters,
+                  mentionedMedications: clinicalAnalysis.mentionedMedications,
+                },
+              }
+            : {}),
         });
 
-        try {
-          // Call generateFromTemplate with streaming section extraction
-          const { generatedNote, letter, suggestedTitle } =
-            await generateFromTemplate(
-              transcriptChunks,
-              template,
+        // Send email BEFORE closing stream — client already has the
+        // "complete" event so there's no perceived delay. Sending after
+        // safeClose() risks the runtime killing the function before the
+        // email is dispatched.
+        if (sendAsEmail) {
+          try {
+            await dispatchNoteEmail({
+              userId,
+              visitId,
+              title: autoTitle || visit.title || "Untitled",
+              noteHtml: generatedNote,
               language,
-              sectionLabels,
-              doctorNotes,
-              fileTexts,
-              { userId, visitId },
-              clinicalAnalysis ?? undefined,
-              sectionContexts,
-              (id, title, content) => {
-                sendEvent({ type: "section", id, title, content });
-              },
-            );
-
-          lap("generation-done");
-
-          // Save to DB (must complete before sending complete event,
-          // so the email API can read the latest encounter_note)
-          // Use refreshedMetadata to preserve cached extracted_text from file processing
-          // Auto-set title if the visit has none and AI suggested one
-          const autoTitle =
-            suggestedTitle && !visit.title ? suggestedTitle : undefined;
-
-          const { error: saveError } = await supabase
-            .from("visits")
-            .update({
-              encounter_note: generatedNote,
-              patient_letter: letter,
-              status: "to_review",
-              ...(autoTitle ? { title: autoTitle } : {}),
-              metadata: {
-                ...refreshedMetadata,
-                template_id: template.id,
-                ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-                ...(clinicalAnalysis
-                  ? {
-                      clinical_analysis: {
-                        inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                        secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                        matchedConcepts: clinicalAnalysis.matchedConcepts,
-                        candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                        problemClusters: clinicalAnalysis.problemClusters,
-                        mentionedMedications:
-                          clinicalAnalysis.mentionedMedications,
-                      },
-                    }
-                  : {}),
-              },
-            })
-            .eq("id", visitId);
-          if (saveError) {
-            console.error("Failed to save generated content:", saveError);
-            sendEvent({ type: "error", error: "save_failed" });
-            safeClose();
-            return;
+            });
+            lap("email-sent");
+          } catch (err) {
+            console.error("[email] Failed to send note email:", err);
           }
-
-          // Note: Usage logging is handled inside generateFromTemplate for two-pass generation
-
-          // Send final complete event and close stream so client gets response immediately
-          sendEvent({
-            type: "complete",
-            generatedNote,
-            letter,
-            suggestedTitle,
-            usedChunks,
-            templateId: template.id,
-            ...(clinicalAnalysis
-              ? {
-                  clinicalAnalysis: {
-                    inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                    secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                    candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                    matchedConcepts: clinicalAnalysis.matchedConcepts,
-                    problemClusters: clinicalAnalysis.problemClusters,
-                    mentionedMedications: clinicalAnalysis.mentionedMedications,
-                  },
-                }
-              : {}),
-          });
-
-          // Send email BEFORE closing stream — client already has the
-          // "complete" event so there's no perceived delay. Sending after
-          // safeClose() risks the runtime killing the function before the
-          // email is dispatched.
-          if (sendAsEmail) {
-            try {
-              await dispatchNoteEmail({
-                userId,
-                visitId,
-                title: autoTitle || visit.title || "Untitled",
-                noteHtml: generatedNote,
-                language,
-              });
-              lap("email-sent");
-            } catch (err) {
-              console.error("[email] Failed to send note email:", err);
-            }
-          }
-
-          lap("total");
-          safeClose();
-        } catch (err) {
-          console.error("Generate stream error:", err);
-
-          // Handle insufficient context error specially
-          if (err instanceof InsufficientContextError) {
-            sendEvent({ type: "error", error: "insufficient_context" });
-            safeClose();
-            return;
-          }
-
-          sendEvent({
-            type: "error",
-            error: err instanceof Error ? err.message : "Generation failed",
-          });
-          safeClose();
         }
-      },
-      cancel() {
-        // Client disconnected — generation continues in start()
-        console.log(
-          "[generate] Client disconnected, generation continues server-side",
-        );
-      },
+
+        lap("total");
+        safeClose();
+      } catch (err) {
+        console.error("Generate stream error:", err);
+
+        // Handle insufficient context error specially
+        if (err instanceof InsufficientContextError) {
+          sendEvent({ type: "error", error: "insufficient_context" });
+          safeClose();
+          return;
+        }
+
+        sendEvent({
+          type: "error",
+          error: err instanceof Error ? err.message : "Generation failed",
+        });
+        safeClose();
+      }
     });
 
-    return new Response(readable, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
+    return sseResponse(readable);
   } catch (err) {
     if (err instanceof Response) return err;
     console.error("Generate route error:", err);

@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import {
   anthropic,
@@ -21,6 +21,11 @@ import {
   buildEnrichedSystemPrompt,
   extractJson,
 } from "@/lib/clinical";
+import {
+  createSSEStream,
+  sseResponse,
+  extractSectionsFromStream,
+} from "@/lib/api/sse";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
@@ -48,10 +53,7 @@ export async function POST(request: NextRequest) {
     supabase = authResult.supabase;
   } catch (err) {
     if (err instanceof Response) return err;
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -61,10 +63,7 @@ export async function POST(request: NextRequest) {
     const doctorNotes: string | undefined = body.doctorNotes;
 
     if (!visitId) {
-      return new Response(JSON.stringify({ error: "Missing visitId" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "Missing visitId" }, { status: 400 });
     }
 
     logAudit({
@@ -83,10 +82,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (visitError || !visit) {
-      return new Response(JSON.stringify({ error: "Visit not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
+      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
     const language =
@@ -118,11 +114,11 @@ export async function POST(request: NextRequest) {
       !doctorNotes?.trim() &&
       fileTexts.length === 0
     ) {
-      return new Response(
-        JSON.stringify({
+      return NextResponse.json(
+        {
           error: "No transcript, doctor notes, or file content available",
-        }),
-        { status: 404, headers: { "Content-Type": "application/json" } },
+        },
+        { status: 404 },
       );
     }
 
@@ -243,274 +239,216 @@ Rules:
 
     // Stream Anthropic response as SSE (with model fallback on overloaded errors)
 
-    const encoder = new TextEncoder();
     const sectionIdSet = new Set(allIds);
 
-    const readable = new ReadableStream({
-      async start(controller) {
-        let inputTokens = 0;
-        let outputTokens = 0;
+    const readable = createSSEStream(async ({ sendEvent, safeClose }) => {
+      let inputTokens = 0;
+      let outputTokens = 0;
 
-        function sendEvent(data: Record<string, unknown>) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
-          );
-        }
+      // Notify client that clinical analysis is complete
+      if (clinicalAnalysis) {
+        sendEvent({
+          type: "analysis_complete",
+          specialty: clinicalAnalysis.inferredSpecialty,
+          icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
+          conceptCount: clinicalAnalysis.matchedConcepts.length,
+        });
+      }
 
-        // Notify client that clinical analysis is complete
-        if (clinicalAnalysis) {
-          sendEvent({
-            type: "analysis_complete",
-            specialty: clinicalAnalysis.inferredSpecialty,
-            icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
-            conceptCount: clinicalAnalysis.matchedConcepts.length,
-          });
-        }
+      let finalMessage: Awaited<
+        ReturnType<
+          ReturnType<typeof anthropic>["messages"]["stream"]
+        >["finalMessage"]
+      >;
+      let usedModel = streamModels[0];
 
-        /**
-         * Try to extract completed "key": "value" pairs from the accumulated JSON.
-         * Emits SSE events for each newly completed template section.
-         */
-        function tryExtractSections(
-          accumulated: string,
-          emittedSections: Set<string>,
-        ) {
-          for (const id of sectionIdSet) {
-            if (emittedSections.has(id)) continue;
+      // Try each model in the fallback chain; on overload, move to the next model
+      for (let mi = 0; mi < streamModels.length; mi++) {
+        const model = streamModels[mi];
 
-            const keyPattern = `"${id}"\\s*:\\s*"`;
-            const keyMatch = accumulated.match(new RegExp(keyPattern));
-            if (!keyMatch) continue;
+        sendEvent({
+          type: "streaming_start",
+          sectionIds: allIds,
+          sectionLabels,
+        });
 
-            const valueStart = keyMatch.index! + keyMatch[0].length;
-            let pos = valueStart;
-            let found = false;
-            while (pos < accumulated.length) {
-              if (accumulated[pos] === "\\") {
-                pos += 2;
-                continue;
-              }
-              if (accumulated[pos] === '"') {
-                found = true;
-                break;
-              }
-              pos++;
-            }
-
-            if (!found) continue;
-
-            const rawValue = accumulated.slice(valueStart, pos);
-            let value: string;
-            try {
-              value = JSON.parse(`"${rawValue}"`);
-            } catch {
-              value = rawValue;
-            }
-
-            emittedSections.add(id);
-            sendEvent({
-              type: "section",
-              id,
-              title: sectionLabels[id] || id,
-              content: value,
-            });
-          }
-        }
-
-        let finalMessage: Awaited<
-          ReturnType<
-            ReturnType<typeof anthropic>["messages"]["stream"]
-          >["finalMessage"]
-        >;
-        let usedModel = streamModels[0];
-
-        // Try each model in the fallback chain; on overload, move to the next model
-        for (let mi = 0; mi < streamModels.length; mi++) {
-          const model = streamModels[mi];
-
-          sendEvent({
-            type: "streaming_start",
-            sectionIds: allIds,
-            sectionLabels,
-          });
-
-          let accumulated = "";
-          const emittedSections = new Set<string>();
-
-          try {
-            const stream = anthropic().messages.stream({
-              model,
-              max_tokens: 8192,
-              system: systemPrompt,
-              messages: [{ role: "user", content: userMessage }],
-            });
-
-            stream.on("text", (delta) => {
-              accumulated += delta;
-              tryExtractSections(accumulated, emittedSections);
-            });
-
-            finalMessage = await stream.finalMessage();
-            usedModel = model;
-            break; // Success
-          } catch (err) {
-            const isOverloaded =
-              err instanceof Error &&
-              err.message.toLowerCase().includes("overloaded");
-            if (isOverloaded && mi < streamModels.length - 1) {
-              console.warn(
-                `[regenerate] ${model} overloaded, falling back to ${streamModels[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
-              );
-              await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
-              continue;
-            }
-            throw err;
-          }
-        }
+        let accumulated = "";
+        const emittedSections = new Set<string>();
 
         try {
-          inputTokens = finalMessage!.usage.input_tokens;
-          outputTokens = finalMessage!.usage.output_tokens;
+          const stream = anthropic().messages.stream({
+            model,
+            max_tokens: 8192,
+            system: systemPrompt,
+            messages: [{ role: "user", content: userMessage }],
+          });
 
-          // Parse the full JSON for the final result
-          const fullText =
-            finalMessage!.content[0].type === "text"
-              ? finalMessage!.content[0].text
-              : "";
-
-          let parsed: Record<string, string>;
-          try {
-            parsed = extractJson<Record<string, string>>(fullText);
-          } catch {
-            sendEvent({ type: "error", error: "Failed to parse response" });
-            controller.close();
-            return;
-          }
-
-          let letter: string;
-          let suggestedTitle: string;
-
-          if (reuseLetterFromVisit) {
-            // Reformat path — keep existing letter and title
-            letter = (visit.patient_letter as string) || "";
-            suggestedTitle = "";
-            delete parsed.letter;
-            delete parsed.title;
-          } else {
-            letter =
-              typeof parsed.letter === "string"
-                ? parsed.letter
-                : JSON.stringify(parsed.letter || "");
-            delete parsed.letter;
-            suggestedTitle =
-              typeof parsed.title === "string" ? parsed.title : "";
-            delete parsed.title;
-          }
-
-          const sectionContents: Record<string, string> = {};
-          for (const id of allIds) {
-            const value = parsed[id];
-            sectionContents[id] = typeof value === "string" ? value : "";
-          }
-
-          const generatedNote = buildTemplateHtml(
-            template,
-            sectionContents,
-            sectionLabels,
-          );
-
-          // Save to DB (must complete before sending complete event,
-          // so the email API can read the latest encounter_note)
-          const existingMetadata =
-            (visit.metadata as Record<string, unknown>) || {};
-          const { error: saveError } = await supabase
-            .from("visits")
-            .update({
-              encounter_note: generatedNote,
-              patient_letter: letter,
-              metadata: {
-                ...existingMetadata,
-                template_id: template.id,
-                ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-                ...(clinicalAnalysis
-                  ? {
-                      clinical_analysis: {
-                        inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                        secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                        matchedConcepts: clinicalAnalysis.matchedConcepts,
-                        candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                        problemClusters: clinicalAnalysis.problemClusters,
-                      },
-                    }
-                  : {}),
+          stream.on("text", (delta) => {
+            accumulated += delta;
+            extractSectionsFromStream(
+              accumulated,
+              sectionIdSet,
+              emittedSections,
+              sectionLabels,
+              (id, title, content) => {
+                sendEvent({ type: "section", id, title, content });
               },
-            })
-            .eq("id", visitId);
-          if (saveError) {
-            console.error("Failed to save regenerated content:", saveError);
-            sendEvent({ type: "error", error: "save_failed" });
-            controller.close();
-            return;
-          }
-
-          // Log usage
-          logUsage({
-            userId,
-            visitId,
-            provider: "anthropic",
-            model: usedModel,
-            operation: reuseLetterFromVisit
-              ? "reformat_template"
-              : "generate_template",
-            inputTokens,
-            outputTokens,
+            );
           });
 
-          // Send final complete event
-          sendEvent({
-            type: "complete",
-            generatedNote,
-            letter,
-            suggestedTitle,
-            usedChunks: usedChunkIds,
-            templateId: template.id,
-            ...(clinicalAnalysis
-              ? {
-                  clinicalAnalysis: {
-                    inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                    secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                    candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                    matchedConcepts: clinicalAnalysis.matchedConcepts,
-                    problemClusters: clinicalAnalysis.problemClusters,
-                  },
-                }
-              : {}),
-          });
-
-          controller.close();
+          finalMessage = await stream.finalMessage();
+          usedModel = model;
+          break; // Success
         } catch (err) {
-          console.error("Regenerate stream error:", err);
-          sendEvent({
-            type: "error",
-            error: err instanceof Error ? err.message : "Generation failed",
-          });
-          controller.close();
+          const isOverloaded =
+            err instanceof Error &&
+            err.message.toLowerCase().includes("overloaded");
+          if (isOverloaded && mi < streamModels.length - 1) {
+            console.warn(
+              `[regenerate] ${model} overloaded, falling back to ${streamModels[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
+            );
+            await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
+            continue;
+          }
+          throw err;
         }
-      },
+      }
+
+      try {
+        inputTokens = finalMessage!.usage.input_tokens;
+        outputTokens = finalMessage!.usage.output_tokens;
+
+        // Parse the full JSON for the final result
+        const fullText =
+          finalMessage!.content[0].type === "text"
+            ? finalMessage!.content[0].text
+            : "";
+
+        let parsed: Record<string, string>;
+        try {
+          parsed = extractJson<Record<string, string>>(fullText);
+        } catch {
+          sendEvent({ type: "error", error: "Failed to parse response" });
+          safeClose();
+          return;
+        }
+
+        let letter: string;
+        let suggestedTitle: string;
+
+        if (reuseLetterFromVisit) {
+          // Reformat path — keep existing letter and title
+          letter = (visit.patient_letter as string) || "";
+          suggestedTitle = "";
+          delete parsed.letter;
+          delete parsed.title;
+        } else {
+          letter =
+            typeof parsed.letter === "string"
+              ? parsed.letter
+              : JSON.stringify(parsed.letter || "");
+          delete parsed.letter;
+          suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
+          delete parsed.title;
+        }
+
+        const sectionContents: Record<string, string> = {};
+        for (const id of allIds) {
+          const value = parsed[id];
+          sectionContents[id] = typeof value === "string" ? value : "";
+        }
+
+        const generatedNote = buildTemplateHtml(
+          template,
+          sectionContents,
+          sectionLabels,
+        );
+
+        // Save to DB (must complete before sending complete event,
+        // so the email API can read the latest encounter_note)
+        const existingMetadata =
+          (visit.metadata as Record<string, unknown>) || {};
+        const { error: saveError } = await supabase
+          .from("visits")
+          .update({
+            encounter_note: generatedNote,
+            patient_letter: letter,
+            metadata: {
+              ...existingMetadata,
+              template_id: template.id,
+              ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+              ...(clinicalAnalysis
+                ? {
+                    clinical_analysis: {
+                      inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                      secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                      matchedConcepts: clinicalAnalysis.matchedConcepts,
+                      candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                      problemClusters: clinicalAnalysis.problemClusters,
+                    },
+                  }
+                : {}),
+            },
+          })
+          .eq("id", visitId);
+        if (saveError) {
+          console.error("Failed to save regenerated content:", saveError);
+          sendEvent({ type: "error", error: "save_failed" });
+          safeClose();
+          return;
+        }
+
+        // Log usage
+        logUsage({
+          userId,
+          visitId,
+          provider: "anthropic",
+          model: usedModel,
+          operation: reuseLetterFromVisit
+            ? "reformat_template"
+            : "generate_template",
+          inputTokens,
+          outputTokens,
+        });
+
+        // Send final complete event
+        sendEvent({
+          type: "complete",
+          generatedNote,
+          letter,
+          suggestedTitle,
+          usedChunks: usedChunkIds,
+          templateId: template.id,
+          ...(clinicalAnalysis
+            ? {
+                clinicalAnalysis: {
+                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
+                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
+                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+                  matchedConcepts: clinicalAnalysis.matchedConcepts,
+                  problemClusters: clinicalAnalysis.problemClusters,
+                },
+              }
+            : {}),
+        });
+
+        safeClose();
+      } catch (err) {
+        console.error("Regenerate stream error:", err);
+        sendEvent({
+          type: "error",
+          error: err instanceof Error ? err.message : "Generation failed",
+        });
+        safeClose();
+      }
     });
 
-    return new Response(readable, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
+    return sseResponse(readable);
   } catch (err) {
     console.error("Regenerate route error:", err);
-    return new Response(JSON.stringify({ error: "Internal server error" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

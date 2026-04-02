@@ -7,14 +7,7 @@ import type {
   EncounterStatus,
   CreateEncounterRequest,
 } from "@/lib/types";
-
-/** Normalize legacy DB statuses to current values */
-function normalizeStatus(status: string): EncounterStatus {
-  if (status === "draft") return "started";
-  if (status === "review") return "to_review";
-  if (status === "closed" || status === "completed") return "completed";
-  return status as EncounterStatus;
-}
+import { normalizeStatus } from "@/lib/encounters/normalize-status";
 
 /**
  * GET /api/encounters

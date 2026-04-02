@@ -1,19 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
-import type {
-  Encounter,
-  EncounterStatus,
-  UpdateEncounterRequest,
-} from "@/lib/types";
-
-/** Normalize legacy DB statuses to current values */
-function normalizeStatus(status: string): EncounterStatus {
-  if (status === "draft") return "started";
-  if (status === "review") return "to_review";
-  if (status === "closed") return "completed";
-  return status as EncounterStatus;
-}
+import type { Encounter, UpdateEncounterRequest } from "@/lib/types";
+import { normalizeStatus } from "@/lib/encounters/normalize-status";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;

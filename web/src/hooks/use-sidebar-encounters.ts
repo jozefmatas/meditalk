@@ -6,16 +6,9 @@ import type {
   EncounterListResponse,
   EncounterStatus,
 } from "@/lib/types";
+import { normalizeStatus } from "@/lib/encounters/normalize-status";
 
 const SIDEBAR_LIMIT = 20;
-
-/** Normalize legacy DB statuses to current values */
-function normalizeStatus(status: string): EncounterStatus {
-  if (status === "draft") return "started";
-  if (status === "review") return "to_review";
-  if (status === "closed" || status === "completed") return "completed";
-  return status as EncounterStatus;
-}
 
 function normalizeEncounters(encounters: Encounter[]): Encounter[] {
   return encounters.map((v) => ({ ...v, status: normalizeStatus(v.status) }));

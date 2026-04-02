@@ -6,6 +6,7 @@ import { logUsage, type UsageContext } from "./usage";
 import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
 import { extractJson } from "./clinical/json-repair";
 import { validateIcdDescriptions } from "./clinical/icd-index";
+import { extractSectionsFromStream } from "./api/sse";
 import type { ClinicalAnalysis } from "./clinical/types";
 
 export class InsufficientContextError extends Error {
@@ -282,49 +283,6 @@ export async function generateFromTemplate(
   let accumulated = "";
   const emittedSections = new Set<string>();
 
-  /**
-   * Try to extract completed "key": "value" pairs from accumulated JSON.
-   * Emits onSection callback for each newly completed template section.
-   */
-  function tryExtractSections() {
-    if (!onSection) return;
-    for (const id of sectionIdSet) {
-      if (emittedSections.has(id)) continue;
-
-      const keyPattern = `"${id}"\\s*:\\s*"`;
-      const keyMatch = accumulated.match(new RegExp(keyPattern));
-      if (!keyMatch) continue;
-
-      const valueStart = keyMatch.index! + keyMatch[0].length;
-      let pos = valueStart;
-      let found = false;
-      while (pos < accumulated.length) {
-        if (accumulated[pos] === "\\") {
-          pos += 2;
-          continue;
-        }
-        if (accumulated[pos] === '"') {
-          found = true;
-          break;
-        }
-        pos++;
-      }
-
-      if (!found) continue;
-
-      const rawValue = accumulated.slice(valueStart, pos);
-      let value: string;
-      try {
-        value = JSON.parse(`"${rawValue}"`);
-      } catch {
-        value = rawValue;
-      }
-
-      emittedSections.add(id);
-      onSection(id, sectionLabels[id] || id, value);
-    }
-  }
-
   const stream = anthropic().messages.stream({
     model: GENERATION_MODEL,
     max_tokens: 8192,
@@ -334,7 +292,15 @@ export async function generateFromTemplate(
 
   stream.on("text", (delta) => {
     accumulated += delta;
-    tryExtractSections();
+    if (onSection) {
+      extractSectionsFromStream(
+        accumulated,
+        sectionIdSet,
+        emittedSections,
+        sectionLabels,
+        onSection,
+      );
+    }
   });
 
   const finalMessage = await stream.finalMessage();
