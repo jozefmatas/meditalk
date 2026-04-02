@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { clientEnv } from "@/lib/env/client";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -13,8 +14,8 @@ export async function GET(request: Request) {
   if (code) {
     const cookieStore = await cookies();
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      clientEnv.NEXT_PUBLIC_SUPABASE_URL,
+      clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
         cookies: {
           getAll() {
@@ -40,7 +41,7 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // Redirect to app domain if configured (handles marketing → app flow)
-      const redirectOrigin = process.env.NEXT_PUBLIC_APP_URL || origin;
+      const redirectOrigin = clientEnv.NEXT_PUBLIC_APP_URL || origin;
       return NextResponse.redirect(`${redirectOrigin}${next}`);
     }
   }

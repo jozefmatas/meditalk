@@ -4,6 +4,18 @@ vi.mock("resend", () => ({
   Resend: vi.fn(),
 }));
 
+vi.mock("@/lib/env/server", () => ({
+  serverEnv: { RESEND_API_KEY: "test-key", EMAIL_FROM: "Test <t@t.com>" },
+}));
+
+vi.mock("@/lib/env/client", () => ({
+  clientEnv: { NEXT_PUBLIC_APP_URL: "" },
+}));
+
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: vi.fn(),
+}));
+
 import { buildSubject } from "./send-note-email";
 
 describe("buildSubject", () => {

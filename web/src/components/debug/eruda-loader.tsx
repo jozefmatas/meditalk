@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { clientEnv } from "@/lib/env/client";
 
 export function ErudaLoader() {
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_ENABLE_ERUDA === "true") {
+    if (clientEnv.NEXT_PUBLIC_ENABLE_ERUDA) {
       // Dynamically import eruda
       import("eruda")
         .then((eruda) => {

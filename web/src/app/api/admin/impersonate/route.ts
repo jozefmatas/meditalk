@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, getClientIp } from "@/lib/audit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isAdminEmail, IMPERSONATE_COOKIE } from "@/lib/admin";
+import { serverEnv } from "@/lib/env/server";
 
 async function requireAdmin() {
   const auth = await requireAuth();
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
     const cookieStore = await cookies();
     cookieStore.set(IMPERSONATE_COOKIE, userId, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: serverEnv.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 4, // 4 hours
@@ -140,7 +141,7 @@ export async function DELETE(request: NextRequest) {
     const cookieStore = await cookies();
     cookieStore.set(IMPERSONATE_COOKIE, "", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: serverEnv.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 0,

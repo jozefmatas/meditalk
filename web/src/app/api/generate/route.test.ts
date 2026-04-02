@@ -2,6 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "./route";
 import { NextRequest } from "next/server";
 
+// Mock env modules (transitively imported by dependencies)
+vi.mock("@/lib/env/server", () => ({
+  serverEnv: { NODE_ENV: "test" },
+}));
+
+vi.mock("@/lib/env/client", () => ({
+  clientEnv: {
+    NEXT_PUBLIC_SUPABASE_URL: "http://localhost",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-key",
+    NEXT_PUBLIC_APP_URL: "",
+  },
+}));
+
 // Mock dependencies
 vi.mock("@/lib/supabase/auth", () => ({
   requireAuth: vi.fn(),

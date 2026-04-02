@@ -1,4 +1,5 @@
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { serverEnv } from "@/lib/env/server";
 import { logUsage, type UsageContext } from "./usage";
 
 let _client: ElevenLabsClient | null = null;
@@ -74,7 +75,7 @@ export async function generateScribeToken(): Promise<string> {
     {
       method: "POST",
       headers: {
-        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+        "xi-api-key": serverEnv.ELEVENLABS_API_KEY,
       },
     },
   );

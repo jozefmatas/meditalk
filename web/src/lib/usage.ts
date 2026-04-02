@@ -1,4 +1,6 @@
 import { createAdminClient } from "./supabase/admin";
+import { clientEnv } from "@/lib/env/client";
+import { serverEnv } from "@/lib/env/server";
 
 const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
@@ -94,8 +96,8 @@ export function logUsage(params: UsageParams): void {
         error: error.message,
         name: error.name,
         cause: error.cause,
-        supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-        hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+        supabaseUrl: clientEnv.NEXT_PUBLIC_SUPABASE_URL,
+        hasServiceKey: !!serverEnv.SUPABASE_SERVICE_ROLE_KEY,
       });
     });
 }

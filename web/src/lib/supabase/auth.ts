@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { clientEnv } from "@/lib/env/client";
 import { createAdminClient } from "./admin";
 import { isAdminEmail, IMPERSONATE_COOKIE } from "../admin";
 
@@ -14,8 +15,8 @@ export async function requireAuth() {
   const cookieStore = await cookies();
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    clientEnv.NEXT_PUBLIC_SUPABASE_URL,
+    clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {

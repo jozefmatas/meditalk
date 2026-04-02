@@ -1,8 +1,9 @@
 import { useTranslations } from "next-intl";
+import { clientEnv } from "@/lib/env/client";
 
 export default function LandingPage() {
   const t = useTranslations("marketing.hero");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const appUrl = clientEnv.NEXT_PUBLIC_APP_URL;
 
   return (
     <div className="flex flex-col items-center justify-center px-6 py-24 text-center">

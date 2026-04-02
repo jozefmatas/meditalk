@@ -1,4 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock serverEnv with a dynamic getter so vi.stubEnv("ADMIN_EMAILS") works
+vi.mock("@/lib/env/server", () => ({
+  serverEnv: {
+    get ADMIN_EMAILS() {
+      return process.env.ADMIN_EMAILS ?? "";
+    },
+  },
+}));
+
 import { isAdminEmail, IMPERSONATE_COOKIE } from "./admin";
 
 describe("isAdminEmail", () => {

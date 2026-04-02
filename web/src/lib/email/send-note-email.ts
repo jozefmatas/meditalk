@@ -1,8 +1,10 @@
 import { Resend } from "resend";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
+import { serverEnv } from "@/lib/env/server";
+import { clientEnv } from "@/lib/env/client";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(serverEnv.RESEND_API_KEY);
 
 const SUBJECT_PREFIX: Record<string, string> = {
   en: "MediTalk Note",
@@ -124,7 +126,7 @@ async function sendNoteEmail({
   viewUrl,
   language,
 }: SendNoteEmailOptions) {
-  const from = process.env.EMAIL_FROM || "MediTalk <noreply@meditalk.ai>";
+  const from = serverEnv.EMAIL_FROM;
   const subject = buildSubject(language, title);
   const html = buildEmailHtml({ noteHtml, viewUrl, language });
 
@@ -166,7 +168,7 @@ export async function dispatchNoteEmail({
   const userEmail = userData?.user?.email;
   if (!userEmail) throw new Error("User email not found");
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const appUrl = clientEnv.NEXT_PUBLIC_APP_URL;
   const encounterPath = `/${language}/encounters/${visitId}`;
   const redirectTo = `${appUrl}${encounterPath}`;
 

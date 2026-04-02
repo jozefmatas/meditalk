@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { clientEnv } from "@/lib/env/client";
 import { Button } from "@/components/shared/button";
 import { ErrorAlert } from "@/components/shared/error-alert";
 import { MeditalkLogo } from "@/components/nav/meditalk-logo";
@@ -41,7 +42,7 @@ function AuthConfirmContent() {
       return;
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+    const appUrl = clientEnv.NEXT_PUBLIC_APP_URL;
     router.push(appUrl || "/");
   }
 

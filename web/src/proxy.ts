@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "./i18n/routing";
+import { clientEnv } from "@/lib/env/client";
 
 // Create next-intl middleware handler
 const handleI18nRouting = createIntlMiddleware(routing);
@@ -80,7 +81,7 @@ export async function proxy(request: NextRequest) {
 
   // STEP 3: Marketing domain — redirect app routes to app subdomain
   if (isMarketingDomain && isAppRoute(pathname)) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
+    const appUrl = clientEnv.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
     return NextResponse.redirect(new URL(`${pathname}${url.search}`, appUrl));
   }
 
@@ -96,7 +97,7 @@ export async function proxy(request: NextRequest) {
           (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token"),
         );
       if (hasAuthCookie) {
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
+        const appUrl = clientEnv.NEXT_PUBLIC_APP_URL || `https://app.${host}`;
         return NextResponse.redirect(new URL("/", appUrl));
       }
 
@@ -130,8 +131,8 @@ export async function proxy(request: NextRequest) {
 
   try {
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      clientEnv.NEXT_PUBLIC_SUPABASE_URL,
+      clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
         cookies: {
           getAll() {

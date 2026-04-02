@@ -33,13 +33,12 @@
 > Extracted `useGenerationPolling` → `encounters/hooks/use-generation-polling.ts`
 > Removed dead code (`handleRecordingComplete`)
 
-### 3. Add env var validation
+### 3. ~~Add env var validation~~ ✅
 
-> **Why:** Capacitor adds `CAP_SERVER_URL`, native API endpoints, etc. Currently 18 files access `process.env` with no validation. One missing var = silent failure.
-
-- [ ] Create `src/env.ts` with Zod schema
-- [ ] Validate all required vars at startup
-- [ ] Type-safe access throughout (replace raw `process.env` usage)
+> Created `lib/env/server.ts` (Zod schema, fail-fast validation) + `lib/env/client.ts` (typed NEXT_PUBLIC_ constants)
+> Migrated all `process.env` call sites in both web/ (17 files) and admin/ (2 files)
+> Added `server-only` guard, 8 tests for validation logic
+> Global `vi.mock("server-only")` in test setup for vitest compatibility
 
 ---
 

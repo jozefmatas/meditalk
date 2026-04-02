@@ -1,14 +1,12 @@
 import { defineRouting } from "next-intl/routing";
+import { clientEnv } from "@/lib/env/client";
 
 export const routing = defineRouting({
   // Supported locales
   locales: ["sk", "cs", "en"],
 
   // Default locale - can be changed via environment variable
-  defaultLocale: (process.env.NEXT_PUBLIC_DEFAULT_LOCALE?.trim() || "sk") as
-    | "sk"
-    | "cs"
-    | "en",
+  defaultLocale: clientEnv.NEXT_PUBLIC_DEFAULT_LOCALE,
 
   // Only show locale prefix for non-default locales
   // e.g., / (Slovak default), /cs, /en

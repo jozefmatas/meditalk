@@ -1,10 +1,11 @@
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { CookieConsent } from "@/components/shared/cookie-consent";
+import { clientEnv } from "@/lib/env/client";
 
 function MarketingNav() {
   const t = useTranslations("marketing.nav");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const appUrl = clientEnv.NEXT_PUBLIC_APP_URL;
 
   return (
     <header className="border-b border-border bg-background">
