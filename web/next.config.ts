@@ -39,6 +39,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   headers: async () => [{ source: "/(.*)", headers: securityHeaders }],
+  // Allow Capacitor dev: the simulator/device connects via LAN IP
+  allowedDevOrigins: ["192.168.0.197"],
 };
 
 export default withNextIntl(nextConfig);

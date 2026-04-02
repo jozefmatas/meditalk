@@ -209,6 +209,7 @@ export default function LoginPage() {
                 placeholder={t("emailPlaceholder")}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
                 required
                 disabled={loading}
                 className="w-full"

@@ -5,7 +5,13 @@
   "scripts": {
     "dev": "next dev -p 8111",
     "build": "next build",
+    "cap:build": "npx cap sync",
     "start": "next start",
+    "cap:sync": "npx cap sync",
+    "cap:ios": "xattr -cr ios && npx cap run ios",
+    "cap:android": "npx cap run android",
+    "cap:open:ios": "npx cap open ios",
+    "cap:open:android": "npx cap open android",
     "lint": "eslint",
     "test": "vitest",
     "test:unit": "vitest --project unit",
@@ -19,6 +25,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
+    "@capacitor/ios": "^8.3.0",
     "@elevenlabs/client": "^0.15.1",
     "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@fontsource-variable/figtree": "^5.2.10",
@@ -53,6 +62,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "resend": "^6.9.4",
+    "semver": "^7.7.4",
     "server-only": "^0.0.1",
     "shadcn": "^3.8.4",
     "sharp": "^0.34.5",
@@ -63,6 +73,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.0",
     "@chromatic-com/storybook": "^5.0.1",
     "@storybook/addon-a11y": "^10.2.15",
     "@storybook/addon-docs": "^10.2.15",
@@ -83,6 +94,7 @@
     "eslint-config-next": "16.0.3",
     "eslint-plugin-storybook": "^10.2.15",
     "jsdom": "^28.1.0",
+    "native-run": "^2.0.3",
     "playwright": "^1.58.2",
     "storybook": "^10.2.15",
     "supabase": "^2.78.0",
