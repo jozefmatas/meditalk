@@ -1,0 +1,144 @@
+"use client";
+
+import { useEffect, useCallback, useRef } from "react";
+import type { Encounter } from "@/lib/types";
+import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
+
+const POLL_TIMEOUT_MS = 90_000;
+const POLL_INTERVAL_MS = 3_000;
+
+interface UseGenerationPollingOptions {
+  visitId: string;
+  visit: Encounter | null;
+  setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
+  isStreaming: boolean;
+  updateTitleRef: React.RefObject<(title: string) => void>;
+  setGeneratedNoteHtml: (html: string) => void;
+  setCachedTemplate: (
+    templateId: string,
+    data: { generatedNote: string; letter: string },
+  ) => void;
+}
+
+/**
+ * Reactive polling for server-side generation recovery.
+ *
+ * Auto-polls when visit.status="processing" and SSE isn't active (e.g. page
+ * loaded mid-generation, or connection dropped). Also listens for the
+ * "generation-done" event to re-fetch the encounter when background generation
+ * completes.
+ */
+export function useGenerationPolling({
+  visitId,
+  visit,
+  setVisit,
+  isStreaming,
+  updateTitleRef,
+  setGeneratedNoteHtml,
+  setCachedTemplate,
+}: UseGenerationPollingOptions): void {
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  // Clean up polling on unmount
+  useEffect(() => stopPolling, [stopPolling]);
+
+  // Re-fetch encounter when a background generation completes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { visitId: doneId } = (e as CustomEvent).detail;
+      if (doneId !== visitId) return;
+
+      (async () => {
+        try {
+          const res = await fetch(`/api/encounters/${visitId}`);
+          if (!res.ok) return;
+          const data: Encounter = await res.json();
+          setVisit(data);
+          if (data.title) updateTitleRef.current(data.title);
+          if (data.encounter_note) setGeneratedNoteHtml(data.encounter_note);
+        } catch {
+          /* silent */
+        }
+      })();
+    };
+    window.addEventListener("generation-done", handler);
+    return () => window.removeEventListener("generation-done", handler);
+  }, [visitId, setVisit, updateTitleRef, setGeneratedNoteHtml]);
+
+  // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
+  useEffect(() => {
+    if (visit?.status !== "processing" || isStreaming) {
+      stopPolling();
+      return;
+    }
+    const pollStart = Date.now();
+    pollingRef.current = setInterval(async () => {
+      // Timeout — server likely failed; reset to "started" so user can retry
+      if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
+        stopPolling();
+        setVisit((prev) =>
+          prev ? { ...prev, status: "started" as const } : prev,
+        );
+        fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "started" }),
+        }).catch(() => {});
+        window.dispatchEvent(
+          new CustomEvent("encounter-update", {
+            detail: { id: visitId, status: "started" },
+          }),
+        );
+        return;
+      }
+      try {
+        const res = await fetch(`/api/encounters/${visitId}`);
+        if (!res.ok) return;
+        const updated: Encounter = await res.json();
+        if (updated.encounter_note || updated.status !== "processing") {
+          stopPolling();
+          setVisit(updated);
+          if (updated.encounter_note) {
+            setGeneratedNoteHtml(updated.encounter_note);
+            const tid =
+              ((updated.metadata as Record<string, unknown>)
+                ?.template_id as string) || DEFAULT_TEMPLATE_ID;
+            setCachedTemplate(tid, {
+              generatedNote: updated.encounter_note,
+              letter: updated.patient_letter || "",
+            });
+          }
+          if (updated.title) updateTitleRef.current(updated.title);
+          window.dispatchEvent(
+            new CustomEvent("encounter-update", {
+              detail: {
+                id: visitId,
+                status: updated.status,
+                ...(updated.title ? { title: updated.title } : {}),
+              },
+            }),
+          );
+        }
+      } catch {
+        /* silent — retry next interval */
+      }
+    }, POLL_INTERVAL_MS);
+    return () => stopPolling();
+  }, [
+    visit?.status,
+    isStreaming,
+    visitId,
+    setVisit,
+    stopPolling,
+    setGeneratedNoteHtml,
+    setCachedTemplate,
+    updateTitleRef,
+  ]);
+}

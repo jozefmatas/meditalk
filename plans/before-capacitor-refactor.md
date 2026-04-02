@@ -26,13 +26,12 @@
 > Extracted `normalizeStatus()` → `lib/encounters/normalize-status.ts`
 > Standardized regenerate route error responses to `NextResponse.json()`
 
-### 2. Split `use-encounter-generation.ts` (1,038 lines)
+### 2. ~~Split `use-encounter-generation.ts` (1,038 → 864 lines)~~ ✅
 
-> **Why:** Generation lifecycle, caching, retry, streaming all in one hook. Capacitor adds app background/foreground state. Clean boundaries prevent spaghetti.
-
-- [ ] Extract `useGenerationLifecycle` — start/stop/retry orchestration
-- [ ] Extract `useGenerationStreaming` — SSE parsing, section accumulation
-- [ ] Extract `useGenerationCache` — cached results, revalidation
+> Extracted `parseSSEStream` → `lib/api/parse-sse-stream.ts` (client-side SSE parser, deduped 3× loop)
+> Extracted `useTemplateCache` → `encounters/hooks/use-template-cache.ts`
+> Extracted `useGenerationPolling` → `encounters/hooks/use-generation-polling.ts`
+> Removed dead code (`handleRecordingComplete`)
 
 ### 3. Add env var validation
 

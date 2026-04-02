@@ -11,6 +11,9 @@ import {
   setPreferredTemplateId,
 } from "@/lib/templates";
 import { useGenerationTimer } from "@/hooks/use-generation-timer";
+import { parseSSEStream } from "@/lib/api/parse-sse-stream";
+import { useTemplateCache } from "./use-template-cache";
+import { useGenerationPolling } from "./use-generation-polling";
 
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
@@ -76,10 +79,8 @@ export function useEncounterGeneration({
   const initialDoctorNotesRef = useRef("");
 
   // Client-side cache: templateId → { generatedNote, letter }
-  // Enables instant switching between previously generated templates
-  const templateCacheRef = useRef<
-    Map<string, { generatedNote: string; letter: string }>
-  >(new Map());
+  const { getCachedTemplate, setCachedTemplate, clearCache } =
+    useTemplateCache();
 
   // Stable refs for callbacks
   const updateTitleRef = useRef(updateTitle);
@@ -91,30 +92,6 @@ export function useEncounterGeneration({
   const syncTitle = useCallback((t: string) => {
     titleRef.current = t;
   }, []);
-
-  // Re-fetch encounter when a background generation completes
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const { visitId: doneId } = (e as CustomEvent).detail;
-      if (doneId !== visitId) return;
-
-      // Re-fetch encounter to pick up generated note + updated status
-      (async () => {
-        try {
-          const res = await fetch(`/api/encounters/${visitId}`);
-          if (!res.ok) return;
-          const data: Encounter = await res.json();
-          setVisit(data);
-          if (data.title) updateTitleRef.current(data.title);
-          if (data.encounter_note) setGeneratedNoteHtml(data.encounter_note);
-        } catch {
-          /* silent */
-        }
-      })();
-    };
-    window.addEventListener("generation-done", handler);
-    return () => window.removeEventListener("generation-done", handler);
-  }, [visitId, setVisit]);
 
   // Auto-save doctor notes (2s debounce)
   useEffect(() => {
@@ -137,17 +114,6 @@ export function useEncounterGeneration({
 
     return () => clearTimeout(timeout);
   }, [doctorNotes, visit, visitId]);
-
-  const handleRecordingComplete = useCallback((blob: Blob | null) => {
-    console.log(
-      `[recording] handleRecordingComplete — blob size: ${blob?.size || 0}`,
-    );
-    // Keep blob in memory for canGenerate check.
-    // Transcript comes from finalize() and is passed directly to /api/generate.
-    if (blob) {
-      setAudioBlob(blob);
-    }
-  }, []);
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
@@ -225,8 +191,11 @@ export function useEncounterGeneration({
         setAudioBlob(null);
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
-        let completedEvent: Record<string, unknown> | null = null;
-        let streamingStarted = false;
+        // Mutable container — TypeScript can't track assignments inside async callbacks
+        const ctx = {
+          completedEvent: null as Record<string, unknown> | null,
+          streamingStarted: false,
+        };
 
         for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
           if (attempt > 0) {
@@ -271,114 +240,80 @@ export function useEncounterGeneration({
             }
 
             // Read SSE stream
-            const reader = res.body?.getReader();
-            if (!reader) throw new Error("generation_failed");
+            if (!res.body) throw new Error("generation_failed");
 
-            const decoder = new TextDecoder();
-            let buffer = "";
+            await parseSSEStream(res.body, {
+              onStreamingStart: (e) => {
+                ctx.streamingStarted = true;
+                setIsStreaming(true);
+                setStreamedSections([]);
+                setStreamingSectionIds(e.sectionIds);
+                setStreamingSectionLabels(e.sectionLabels);
+              },
+              onSection: (e) => {
+                setStreamedSections((prev) => [
+                  ...prev,
+                  { id: e.id, title: e.title, content: e.content },
+                ]);
+              },
+              onComplete: (event) => {
+                ctx.completedEvent = event;
+                setCachedTemplate(capturedTemplateId, {
+                  generatedNote: event.generatedNote as string,
+                  letter: (event.letter as string) || "",
+                });
+                setGeneratedNoteHtml(event.generatedNote as string);
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
+                const autoTitle = !capturedTitle.trim()
+                  ? (event.suggestedTitle as string)
+                  : null;
 
-              buffer += decoder.decode(value, { stream: true });
+                setVisit((prev) => {
+                  if (!prev) return prev;
+                  const existingMeta = (prev.metadata ?? {}) as Record<
+                    string,
+                    unknown
+                  >;
+                  return {
+                    ...prev,
+                    encounter_note: event.generatedNote as string,
+                    patient_letter: event.letter as string,
+                    status: "to_review",
+                    ...(streamingTranscript
+                      ? { raw_text: streamingTranscript }
+                      : {}),
+                    ...(autoTitle ? { title: autoTitle } : {}),
+                    metadata: {
+                      ...existingMeta,
+                      ...(event.clinicalAnalysis
+                        ? { clinical_analysis: event.clinicalAnalysis }
+                        : {}),
+                    },
+                  };
+                });
 
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
+                if (autoTitle) updateTitleRef.current(autoTitle);
 
-              for (const line of lines) {
-                if (!line.startsWith("data: ")) continue;
-                const jsonStr = line.slice(6);
-                if (!jsonStr) continue;
-
-                try {
-                  const event = JSON.parse(jsonStr);
-
-                  if (event.type === "streaming_start") {
-                    streamingStarted = true;
-                    setIsStreaming(true);
-                    setStreamedSections([]);
-                    setStreamingSectionIds(event.sectionIds);
-                    setStreamingSectionLabels(event.sectionLabels);
-                  } else if (event.type === "section") {
-                    setStreamedSections((prev) => [
-                      ...prev,
-                      {
-                        id: event.id,
-                        title: event.title,
-                        content: event.content,
-                      },
-                    ]);
-                  } else if (event.type === "complete") {
-                    completedEvent = event;
-                    templateCacheRef.current.set(capturedTemplateId, {
-                      generatedNote: event.generatedNote,
-                      letter: event.letter || "",
-                    });
-                    setGeneratedNoteHtml(event.generatedNote);
-
-                    // Calculate auto-title immediately (needs capturedTitle from closure)
-                    const autoTitle = !capturedTitle.trim()
-                      ? (event.suggestedTitle as string)
-                      : null;
-
-                    // ATOMIC UPDATE: Set note content + status + title together
-                    setVisit((prev) => {
-                      if (!prev) return prev;
-                      const existingMeta = (prev.metadata ?? {}) as Record<
-                        string,
-                        unknown
-                      >;
-                      return {
-                        ...prev,
-                        encounter_note: event.generatedNote,
-                        patient_letter: event.letter,
-                        status: "to_review", // Set status atomically
-                        ...(streamingTranscript
-                          ? { raw_text: streamingTranscript }
-                          : {}),
-                        ...(autoTitle ? { title: autoTitle } : {}), // Set title atomically
-                        metadata: {
-                          ...existingMeta,
-                          ...(event.clinicalAnalysis
-                            ? { clinical_analysis: event.clinicalAnalysis }
-                            : {}),
-                        },
-                      };
-                    });
-
-                    // Update title callback if auto-title was generated
-                    if (autoTitle) updateTitleRef.current(autoTitle);
-
-                    // Dispatch event immediately for sidebar sync
-                    window.dispatchEvent(
-                      new CustomEvent("encounter-update", {
-                        detail: {
-                          id: visitId,
-                          status: "to_review",
-                          ...(autoTitle ? { title: autoTitle } : {}),
-                        },
-                      }),
-                    );
-                  } else if (event.type === "error") {
-                    throw new Error(event.error);
-                  }
-                } catch (parseErr) {
-                  if (
-                    parseErr instanceof Error &&
-                    parseErr.message !== "Unexpected end of JSON input"
-                  ) {
-                    throw parseErr;
-                  }
-                }
-              }
-            }
+                window.dispatchEvent(
+                  new CustomEvent("encounter-update", {
+                    detail: {
+                      id: visitId,
+                      status: "to_review",
+                      ...(autoTitle ? { title: autoTitle } : {}),
+                    },
+                  }),
+                );
+              },
+              onError: (error) => {
+                throw new Error(error);
+              },
+            });
 
             break; // Stream completed successfully
           } catch (err) {
             // Once streaming started, the server IS generating. Don't retry —
             // retrying would start a SECOND generation. Let polling recover instead.
-            if (streamingStarted) break;
+            if (ctx.streamingStarted) break;
             if (isTransientError(err) && attempt < CLIENT_MAX_RETRIES) {
               continue;
             }
@@ -387,9 +322,9 @@ export function useEncounterGeneration({
         }
 
         // Persist to database (fire-and-forget, UI already updated)
-        if (completedEvent) {
+        if (ctx.completedEvent) {
           const autoTitle = !capturedTitle.trim()
-            ? (completedEvent.suggestedTitle as string)
+            ? (ctx.completedEvent.suggestedTitle as string)
             : null;
           const patchBody: Record<string, string> = { status: "to_review" };
           if (autoTitle) patchBody.title = autoTitle;
@@ -435,7 +370,15 @@ export function useEncounterGeneration({
         );
       }
     },
-    [visitId, selectedTemplateId, doctorNotes, audioBlob, setVisit, setError],
+    [
+      visitId,
+      selectedTemplateId,
+      doctorNotes,
+      audioBlob,
+      setVisit,
+      setError,
+      setCachedTemplate,
+    ],
   );
 
   /* ------------------------------------------------------------------ */
@@ -483,10 +426,10 @@ export function useEncounterGeneration({
       try {
         // Recording is now handled via real-time transcript - no upload needed
         // Clear template cache — new context invalidates previous outputs
-        templateCacheRef.current.clear();
+        clearCache();
 
         // Re-generate via SSE (same as handleGenerate but no retry logic)
-        let completedEvent: Record<string, unknown> | null = null;
+        const ctx = { completedEvent: null as Record<string, unknown> | null };
 
         const res = await fetch("/api/generate", {
           method: "POST",
@@ -510,96 +453,65 @@ export function useEncounterGeneration({
           throw new Error(message);
         }
 
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("generation_failed");
+        if (!res.body) throw new Error("generation_failed");
 
-        const decoder = new TextDecoder();
-        let buffer = "";
+        await parseSSEStream(res.body, {
+          onStreamingStart: (e) => {
+            setIsStreaming(true);
+            setStreamedSections([]);
+            setStreamingSectionIds(e.sectionIds);
+            setStreamingSectionLabels(e.sectionLabels);
+          },
+          onSection: (e) => {
+            setStreamedSections((prev) => [
+              ...prev,
+              { id: e.id, title: e.title, content: e.content },
+            ]);
+          },
+          onComplete: (event) => {
+            ctx.completedEvent = event;
+            setCachedTemplate(capturedTemplateId, {
+              generatedNote: event.generatedNote as string,
+              letter: (event.letter as string) || "",
+            });
+            setGeneratedNoteHtml(event.generatedNote as string);
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+            setVisit((prev) => {
+              if (!prev) return prev;
+              const existingMeta = (prev.metadata ?? {}) as Record<
+                string,
+                unknown
+              >;
+              return {
+                ...prev,
+                encounter_note: event.generatedNote as string,
+                patient_letter: event.letter as string,
+                status: "to_review",
+                ...(streamingTranscript
+                  ? { raw_text: streamingTranscript }
+                  : {}),
+                metadata: {
+                  ...existingMeta,
+                  ...(event.clinicalAnalysis
+                    ? { clinical_analysis: event.clinicalAnalysis }
+                    : {}),
+                },
+              };
+            });
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6);
-            if (!jsonStr) continue;
-
-            try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === "streaming_start") {
-                setIsStreaming(true);
-                setStreamedSections([]);
-                setStreamingSectionIds(event.sectionIds);
-                setStreamingSectionLabels(event.sectionLabels);
-              } else if (event.type === "section") {
-                setStreamedSections((prev) => [
-                  ...prev,
-                  {
-                    id: event.id,
-                    title: event.title,
-                    content: event.content,
-                  },
-                ]);
-              } else if (event.type === "complete") {
-                completedEvent = event;
-                templateCacheRef.current.set(capturedTemplateId, {
-                  generatedNote: event.generatedNote,
-                  letter: event.letter || "",
-                });
-                setGeneratedNoteHtml(event.generatedNote);
-
-                // ATOMIC UPDATE: Set note content + status together
-                setVisit((prev) => {
-                  if (!prev) return prev;
-                  const existingMeta = (prev.metadata ?? {}) as Record<
-                    string,
-                    unknown
-                  >;
-                  return {
-                    ...prev,
-                    encounter_note: event.generatedNote,
-                    patient_letter: event.letter,
-                    status: "to_review", // Set status atomically
-                    ...(streamingTranscript
-                      ? { raw_text: streamingTranscript }
-                      : {}),
-                    metadata: {
-                      ...existingMeta,
-                      ...(event.clinicalAnalysis
-                        ? { clinical_analysis: event.clinicalAnalysis }
-                        : {}),
-                    },
-                  };
-                });
-
-                // Dispatch event immediately for sidebar sync
-                window.dispatchEvent(
-                  new CustomEvent("encounter-update", {
-                    detail: { id: visitId, status: "to_review" },
-                  }),
-                );
-              } else if (event.type === "error") {
-                throw new Error(event.error);
-              }
-            } catch (parseErr) {
-              if (
-                parseErr instanceof Error &&
-                parseErr.message !== "Unexpected end of JSON input"
-              ) {
-                throw parseErr;
-              }
-            }
-          }
-        }
+            window.dispatchEvent(
+              new CustomEvent("encounter-update", {
+                detail: { id: visitId, status: "to_review" },
+              }),
+            );
+          },
+          onError: (error) => {
+            throw new Error(error);
+          },
+        });
 
         // Persist to database (fire-and-forget, UI already updated)
-        if (completedEvent) {
+        if (ctx.completedEvent) {
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -633,7 +545,15 @@ export function useEncounterGeneration({
         );
       }
     },
-    [visitId, selectedTemplateId, doctorNotes, setVisit, setError],
+    [
+      visitId,
+      selectedTemplateId,
+      doctorNotes,
+      setVisit,
+      setError,
+      clearCache,
+      setCachedTemplate,
+    ],
   );
 
   const handleLanguageChange = useCallback(
@@ -679,7 +599,7 @@ export function useEncounterGeneration({
 
       // Cache current template's note before switching
       if (visit?.encounter_note) {
-        templateCacheRef.current.set(selectedTemplateId, {
+        setCachedTemplate(selectedTemplateId, {
           generatedNote: visit.encounter_note,
           letter: visit.patient_letter || "",
         });
@@ -688,7 +608,7 @@ export function useEncounterGeneration({
       setSelectedTemplateId(newTemplateId);
 
       // Instant restore from cache if target template was previously generated
-      const cached = templateCacheRef.current.get(newTemplateId);
+      const cached = getCachedTemplate(newTemplateId);
       if (cached) {
         setGeneratedNoteHtml(cached.generatedNote);
         setVisit((prev) =>
@@ -769,68 +689,38 @@ export function useEncounterGeneration({
               throw err;
             }
 
-            const reader = res.body?.getReader();
-            if (!reader) throw new Error("generation_failed");
+            if (!res.body) throw new Error("generation_failed");
 
-            const decoder = new TextDecoder();
-            let buffer = "";
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-
-              buffer += decoder.decode(value, { stream: true });
-
-              const lines = buffer.split("\n");
-              buffer = lines.pop() ?? "";
-
-              for (const line of lines) {
-                if (!line.startsWith("data: ")) continue;
-                const jsonStr = line.slice(6);
-                if (!jsonStr) continue;
-
-                try {
-                  const event = JSON.parse(jsonStr);
-
-                  if (event.type === "streaming_start") {
-                    setStreamedSections([]);
-                  } else if (event.type === "section") {
-                    setStreamedSections((prev) => [
-                      ...prev,
-                      {
-                        id: event.id,
-                        title: event.title,
-                        content: event.content,
-                      },
-                    ]);
-                  } else if (event.type === "complete") {
-                    templateCacheRef.current.set(newTemplateId, {
-                      generatedNote: event.generatedNote,
-                      letter: event.letter || "",
-                    });
-                    setGeneratedNoteHtml(event.generatedNote);
-                    setVisit((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            encounter_note: event.generatedNote,
-                            patient_letter: event.letter,
-                          }
-                        : prev,
-                    );
-                  } else if (event.type === "error") {
-                    throw new Error(event.error);
-                  }
-                } catch (parseErr) {
-                  if (
-                    parseErr instanceof Error &&
-                    parseErr.message !== "Unexpected end of JSON input"
-                  ) {
-                    throw parseErr;
-                  }
-                }
-              }
-            }
+            await parseSSEStream(res.body, {
+              onStreamingStart: () => {
+                setStreamedSections([]);
+              },
+              onSection: (e) => {
+                setStreamedSections((prev) => [
+                  ...prev,
+                  { id: e.id, title: e.title, content: e.content },
+                ]);
+              },
+              onComplete: (event) => {
+                setCachedTemplate(newTemplateId, {
+                  generatedNote: event.generatedNote as string,
+                  letter: (event.letter as string) || "",
+                });
+                setGeneratedNoteHtml(event.generatedNote as string);
+                setVisit((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        encounter_note: event.generatedNote as string,
+                        patient_letter: event.letter as string,
+                      }
+                    : prev,
+                );
+              },
+              onError: (error) => {
+                throw new Error(error);
+              },
+            });
 
             break; // Success
           } catch (err) {
@@ -850,7 +740,7 @@ export function useEncounterGeneration({
 
         // Revert template selection so the old note + template stay consistent
         setSelectedTemplateId(previousTemplateId);
-        const cachedPrev = templateCacheRef.current.get(previousTemplateId);
+        const cachedPrev = getCachedTemplate(previousTemplateId);
         if (cachedPrev) {
           setGeneratedNoteHtml(cachedPrev.generatedNote);
           setVisit((prev) =>
@@ -886,106 +776,46 @@ export function useEncounterGeneration({
       doctorNotes,
       setVisit,
       setError,
+      getCachedTemplate,
+      setCachedTemplate,
     ],
   );
 
+  // Polling + generation-done recovery (extracted hook)
+  useGenerationPolling({
+    visitId,
+    visit,
+    setVisit,
+    isStreaming,
+    updateTitleRef,
+    setGeneratedNoteHtml,
+    setCachedTemplate,
+  });
+
   /** Initialize state from fetched visit data */
-  // Poll for server-side generation completion when page loads mid-generation
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-  }, []);
-
-  // Clean up polling on unmount
-  useEffect(() => stopPolling, [stopPolling]);
-
-  const initFromVisit = useCallback((data: Encounter) => {
-    setGenerationLanguage((data.language as SupportedLanguage) || "sk");
-    const meta = data.metadata as Record<string, unknown>;
-    if (meta?.template_id) {
-      setSelectedTemplateId(meta.template_id as string);
-    }
-    if (meta?.doctor_notes) {
-      setDoctorNotes(meta.doctor_notes as string);
-      initialDoctorNotesRef.current = meta.doctor_notes as string;
-    }
-    if (data.encounter_note) {
-      setGeneratedNoteHtml(data.encounter_note);
-      // Seed cache with the initially loaded template's note
-      const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
-      templateCacheRef.current.set(tid, {
-        generatedNote: data.encounter_note,
-        letter: data.patient_letter || "",
-      });
-    }
-    // Polling for "processing" status is handled by the reactive useEffect below
-  }, []);
-
-  // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
-  const POLL_TIMEOUT_MS = 90_000;
-  useEffect(() => {
-    if (visit?.status !== "processing" || isStreaming) {
-      stopPolling();
-      return;
-    }
-    const pollStart = Date.now();
-    pollingRef.current = setInterval(async () => {
-      // Timeout — server likely failed; reset to "started" so user can retry
-      if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
-        stopPolling();
-        setVisit((prev) =>
-          prev ? { ...prev, status: "started" as const } : prev,
-        );
-        fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "started" }),
-        }).catch(() => {});
-        window.dispatchEvent(
-          new CustomEvent("encounter-update", {
-            detail: { id: visitId, status: "started" },
-          }),
-        );
-        return;
+  const initFromVisit = useCallback(
+    (data: Encounter) => {
+      setGenerationLanguage((data.language as SupportedLanguage) || "sk");
+      const meta = data.metadata as Record<string, unknown>;
+      if (meta?.template_id) {
+        setSelectedTemplateId(meta.template_id as string);
       }
-      try {
-        const res = await fetch(`/api/encounters/${visitId}`);
-        if (!res.ok) return;
-        const updated: Encounter = await res.json();
-        if (updated.encounter_note || updated.status !== "processing") {
-          stopPolling();
-          setVisit(updated);
-          if (updated.encounter_note) {
-            setGeneratedNoteHtml(updated.encounter_note);
-            const tid =
-              ((updated.metadata as Record<string, unknown>)
-                ?.template_id as string) || DEFAULT_TEMPLATE_ID;
-            templateCacheRef.current.set(tid, {
-              generatedNote: updated.encounter_note,
-              letter: updated.patient_letter || "",
-            });
-          }
-          if (updated.title) updateTitleRef.current(updated.title);
-          window.dispatchEvent(
-            new CustomEvent("encounter-update", {
-              detail: {
-                id: visitId,
-                status: updated.status,
-                ...(updated.title ? { title: updated.title } : {}),
-              },
-            }),
-          );
-        }
-      } catch {
-        /* silent — retry next interval */
+      if (meta?.doctor_notes) {
+        setDoctorNotes(meta.doctor_notes as string);
+        initialDoctorNotesRef.current = meta.doctor_notes as string;
       }
-    }, 3000);
-    return () => stopPolling();
-  }, [visit?.status, isStreaming, visitId, setVisit, stopPolling]);
+      if (data.encounter_note) {
+        setGeneratedNoteHtml(data.encounter_note);
+        // Seed cache with the initially loaded template's note
+        const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
+        setCachedTemplate(tid, {
+          generatedNote: data.encounter_note,
+          letter: data.patient_letter || "",
+        });
+      }
+    },
+    [setCachedTemplate],
+  );
 
   // Calculate content metrics for timer estimation
   // Note: fileCount and imageCount are not available in this hook yet
@@ -1026,7 +856,6 @@ export function useEncounterGeneration({
     recordingBarRef,
     syncTitle,
     initFromVisit,
-    handleRecordingComplete,
     handleRecordingStateChange,
     handleGenerate,
     handleLanguageChange,
