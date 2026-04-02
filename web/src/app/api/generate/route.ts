@@ -15,9 +15,7 @@ import { resolveTemplate } from "@/lib/templates/server";
 import { flattenSectionIds } from "@/lib/templates/html";
 import { runClinicalAnalysis } from "@/lib/clinical";
 import { logAudit, createAuditContext } from "@/lib/audit";
-import { sendNoteEmail } from "@/lib/email/send-note-email";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
+import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 
@@ -537,8 +535,7 @@ export async function POST(request: NextRequest) {
                     candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
                     matchedConcepts: clinicalAnalysis.matchedConcepts,
                     problemClusters: clinicalAnalysis.problemClusters,
-                    mentionedMedications:
-                      clinicalAnalysis.mentionedMedications,
+                    mentionedMedications: clinicalAnalysis.mentionedMedications,
                   },
                 }
               : {}),
@@ -550,38 +547,14 @@ export async function POST(request: NextRequest) {
           // email is dispatched.
           if (sendAsEmail) {
             try {
-              const admin = createAdminClient();
-              if (!admin) {
-                throw new Error("Admin client unavailable");
-              }
-              // Use admin.getUserById instead of supabase.auth.getUser() —
-              // during impersonation, supabase is a service-role client with no session.
-              const { data: userData } =
-                await admin.auth.admin.getUserById(userId);
-              const userEmail = userData?.user?.email;
-              if (userEmail) {
-                const encounterPath = `/${language}/encounters/${visitId}`;
-                const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
-                const redirectTo = `${appUrl}${encounterPath}`;
-
-                const { data: linkData } = await admin.auth.admin.generateLink({
-                  type: "magiclink",
-                  email: userEmail,
-                  options: { redirectTo },
-                });
-                const viewUrl =
-                  linkData?.properties?.action_link ||
-                  `${appUrl}${encounterPath}`;
-
-                await sendNoteEmail({
-                  to: userEmail,
-                  title: autoTitle || visit.title || "Untitled",
-                  noteHtml: filterEmptySectionsHtml(generatedNote),
-                  viewUrl,
-                  language,
-                });
-                lap("email-sent");
-              }
+              await dispatchNoteEmail({
+                userId,
+                visitId,
+                title: autoTitle || visit.title || "Untitled",
+                noteHtml: generatedNote,
+                language,
+              });
+              lap("email-sent");
             } catch (err) {
               console.error("[email] Failed to send note email:", err);
             }

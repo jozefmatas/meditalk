@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { sendNoteEmail } from "@/lib/email/send-note-email";
-import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
+import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 
 export async function POST(request: Request) {
   try {
@@ -40,48 +38,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get user email — use admin.getUserById instead of supabase.auth.getUser()
-    // because during impersonation supabase is a service-role client with no session.
-    const admin = createAdminClient();
-    if (!admin) {
-      return NextResponse.json(
-        { error: "Admin client unavailable" },
-        { status: 500 },
-      );
-    }
-
-    const { data: userData } = await admin.auth.admin.getUserById(userId);
-    const userEmail = userData?.user?.email;
-
-    if (!userEmail) {
-      return NextResponse.json(
-        { error: "User email not found" },
-        { status: 400 },
-      );
-    }
-
-    // Generate magic link for "View in App" button
-    const language = encounter.language || "sk";
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
-    const encounterPath = `/${language}/encounters/${visitId}`;
-    const redirectTo = `${appUrl}${encounterPath}`;
-
-    const { data: linkData } = await admin.auth.admin.generateLink({
-      type: "magiclink",
-      email: userEmail,
-      options: { redirectTo },
-    });
-
-    // Use magic link if available, otherwise fall back to direct link
-    const viewUrl =
-      linkData?.properties?.action_link || `${appUrl}${encounterPath}`;
-
-    await sendNoteEmail({
-      to: userEmail,
+    await dispatchNoteEmail({
+      userId,
+      visitId,
       title: encounter.title || "Untitled",
-      noteHtml: filterEmptySectionsHtml(encounter.encounter_note),
-      viewUrl,
-      language,
+      noteHtml: encounter.encounter_note,
+      language: encounter.language || "sk",
     });
 
     logAudit({
@@ -89,7 +51,6 @@ export async function POST(request: Request) {
       action: "email.send",
       resourceType: "encounter",
       resourceId: visitId,
-      metadata: { recipient: userEmail },
     });
 
     return NextResponse.json({ success: true });

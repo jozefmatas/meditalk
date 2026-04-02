@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { filterEmptySectionsHtml } from "@/lib/parse-note-sections";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -115,7 +117,7 @@ function buildEmailHtml({
 </html>`;
 }
 
-export async function sendNoteEmail({
+async function sendNoteEmail({
   to,
   title,
   noteHtml,
@@ -136,4 +138,52 @@ export async function sendNoteEmail({
   if (error) {
     throw new Error(`Failed to send email: ${error.message}`);
   }
+}
+
+interface DispatchNoteEmailParams {
+  userId: string;
+  visitId: string;
+  title: string;
+  noteHtml: string;
+  language: string;
+}
+
+/**
+ * Full email pipeline: resolve user email, generate magic link, filter HTML,
+ * and send. Used by both /api/generate (inline) and /api/send-note-email.
+ */
+export async function dispatchNoteEmail({
+  userId,
+  visitId,
+  title,
+  noteHtml,
+  language,
+}: DispatchNoteEmailParams) {
+  const admin = createAdminClient();
+  if (!admin) throw new Error("Admin client unavailable");
+
+  const { data: userData } = await admin.auth.admin.getUserById(userId);
+  const userEmail = userData?.user?.email;
+  if (!userEmail) throw new Error("User email not found");
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+  const encounterPath = `/${language}/encounters/${visitId}`;
+  const redirectTo = `${appUrl}${encounterPath}`;
+
+  const { data: linkData } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: userEmail,
+    options: { redirectTo },
+  });
+
+  const viewUrl =
+    linkData?.properties?.action_link || `${appUrl}${encounterPath}`;
+
+  await sendNoteEmail({
+    to: userEmail,
+    title,
+    noteHtml: filterEmptySectionsHtml(noteHtml),
+    viewUrl,
+    language,
+  });
 }

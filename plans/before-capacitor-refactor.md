@@ -14,7 +14,7 @@
 - [x] Phase 3: Consolidate extraction logic
 - [x] Phase 5: Simplify file metadata
 - [x] Phase 4: Split ReviewView (~1,054 → ~660 lines)
-- [ ] Phase 6: Consolidate email logic
+- [x] Phase 6: Consolidate email logic
 
 ---
 
