@@ -19,6 +19,7 @@ import {
 } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
 import type { FileMetadata } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
@@ -144,18 +145,18 @@ export function FilesContent({
           })
             .then((extractRes) => {
               if (extractRes.ok) {
-                console.log(`[extract] Started extraction for ${file.name}`);
+                logger.debug(`[extract] Started extraction for ${file.name}`);
               }
             })
             .catch((extractErr) => {
-              console.warn(
+              logger.warn(
                 `[extract] Failed to trigger extraction for ${file.name}:`,
                 extractErr,
               );
             });
         });
       } catch (err) {
-        console.error("File upload error:", err);
+        logger.error("File upload error:", err);
       } finally {
         setIsUploading(false);
       }
@@ -171,12 +172,12 @@ export function FilesContent({
           { method: "DELETE" },
         );
         if (!res.ok) {
-          console.error("File delete failed:", res.status);
+          logger.error("File delete failed:", res.status);
           return;
         }
         onFilesChange(files.filter((f) => f.id !== fileId));
       } catch (err) {
-        console.error("File delete error:", err);
+        logger.error("File delete error:", err);
       }
     },
     [visitId, files, onFilesChange],

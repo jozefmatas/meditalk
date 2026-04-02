@@ -29,6 +29,7 @@ import { useAudioDevices } from "@/components/encounters/hooks/use-audio-devices
 import { useRecordingGuards } from "@/components/encounters/hooks/use-recording-guards";
 import { useAudioRecorder } from "@/components/encounters/hooks/use-audio-recorder";
 import { useScribeStreaming } from "@/components/encounters/hooks/use-scribe-streaming";
+import { logger } from "@/lib/logger";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -131,7 +132,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
           // If actively recording, wait briefly for VAD to commit final chunks
           if (rec.state === "recording") {
-            console.log(
+            logger.debug(
               "[recording] finalize() called while recording — waiting for final transcript chunks",
             );
             await new Promise((resolve) => setTimeout(resolve, 200));
@@ -140,7 +141,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           // Stop Scribe and grab transcript
           scr.stopScribe();
           const transcript = scr.consumeTranscript();
-          console.log(
+          logger.debug(
             `[recording] finalize() — transcript length: ${transcript?.length || 0} chars`,
           );
 

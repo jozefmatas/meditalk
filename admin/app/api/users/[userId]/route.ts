@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 /** List all files in a storage bucket under a prefix, handling pagination. */
 async function listAllFiles(
@@ -47,7 +48,7 @@ export async function DELETE(
         .from("encounter-files")
         .remove(encounterFiles);
       if (error) {
-        console.warn(
+        logger.warn(
           "[user-delete] encounter-files cleanup failed:",
           error.message,
         );
@@ -59,7 +60,7 @@ export async function DELETE(
     if (audioFiles.length > 0) {
       const { error } = await sb.storage.from("audio").remove(audioFiles);
       if (error) {
-        console.warn("[user-delete] audio cleanup failed:", error.message);
+        logger.warn("[user-delete] audio cleanup failed:", error.message);
         storageErrors.push(`audio: ${error.message}`);
       }
     }
@@ -90,7 +91,7 @@ export async function DELETE(
       })
       .then(({ error: auditErr }) => {
         if (auditErr)
-          console.error("[audit] user_delete log failed:", auditErr.message);
+          logger.error("[audit] user_delete log failed:", auditErr.message);
       });
 
     return NextResponse.json({ ok: true });

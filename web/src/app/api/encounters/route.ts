@@ -8,6 +8,7 @@ import type {
   CreateEncounterRequest,
 } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/encounters
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest) {
     const { data: visits, error, count } = await query;
 
     if (error) {
-      console.error("Error fetching visits:", error);
+      logger.error("Error fetching visits:", error);
       return NextResponse.json(
         { error: "Failed to fetch visits" },
         { status: 500 },
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Visits list error:", err);
+    logger.error("Visits list error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (error) {
-      console.error("Error creating visit:", error);
+      logger.error("Error creating visit:", error);
       return NextResponse.json(
         { error: "Failed to create visit" },
         { status: 500 },
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(visit, { status: 201 });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Visit creation error:", err);
+    logger.error("Visit creation error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

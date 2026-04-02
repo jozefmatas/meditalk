@@ -1,4 +1,5 @@
 import { uploadToStorage } from "@/lib/supabase/upload";
+import { logger } from "@/lib/logger";
 
 export interface UploadResult {
   id: string;
@@ -51,7 +52,7 @@ export async function uploadWithRetry(
         source: options?.source,
       };
     } catch (err) {
-      console.error(
+      logger.error(
         `[upload] ${name} attempt ${attempt + 1}/${UPLOAD_MAX_RETRIES + 1} failed:`,
         err,
       );

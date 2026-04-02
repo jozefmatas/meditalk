@@ -19,6 +19,7 @@ import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
 
@@ -31,7 +32,7 @@ const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
 export async function POST(request: NextRequest) {
   const t0 = Date.now();
   const lap = (label: string) =>
-    console.log(`[generate] ${label} — ${Date.now() - t0}ms`);
+    logger.debug(`[generate] ${label} — ${Date.now() - t0}ms`);
 
   // Auth — return JSON errors for auth failures
   let userId: string;
@@ -57,9 +58,9 @@ export async function POST(request: NextRequest) {
     // Scribe real-time transcript (used for recording files instead of Whisper)
     const transcriptText: string | undefined = body.transcriptText;
     const sendAsEmail: boolean = body.sendAsEmail === true;
-    console.log("[generate] sendAsEmail:", sendAsEmail);
+    logger.debug("[generate] sendAsEmail:", sendAsEmail);
 
-    console.log(
+    logger.debug(
       `[generate] transcriptText: ${transcriptText ? `${transcriptText.length} chars` : "NONE"}`,
     );
 
@@ -108,7 +109,9 @@ export async function POST(request: NextRequest) {
     );
 
     if (pendingIds.size > 0) {
-      console.log(`[generate] Waiting for ${pendingIds.size} extraction(s)...`);
+      logger.debug(
+        `[generate] Waiting for ${pendingIds.size} extraction(s)...`,
+      );
       const pollStart = Date.now();
       const MAX_WAIT = 60000;
 
@@ -136,7 +139,7 @@ export async function POST(request: NextRequest) {
       const completed = uploadedFiles.filter(
         (f) => pendingIds.has(f.id) && f.extraction_status === "completed",
       ).length;
-      console.log(
+      logger.debug(
         `[generate] Extraction wait done (${Date.now() - pollStart}ms): ${completed}/${pendingIds.size} completed`,
       );
     }
@@ -157,7 +160,7 @@ export async function POST(request: NextRequest) {
         (f) => f.extraction_status === "failed",
       );
       const legacy = unprocessed.filter((f) => !f.extraction_status);
-      console.log(
+      logger.debug(
         `[generate] ${unprocessed.length} unprocessed file(s): ${failed.length} failed, ${legacy.length} legacy (no status)`,
       );
       lap("extraction-start");
@@ -178,7 +181,7 @@ export async function POST(request: NextRequest) {
                   language,
                 });
                 file.extracted_text = result.text;
-                console.log(
+                logger.debug(
                   `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
                 );
               } catch (extractError) {
@@ -186,7 +189,7 @@ export async function POST(request: NextRequest) {
                   extractError instanceof Error
                     ? extractError.message
                     : "Unknown extraction error";
-                console.error(
+                logger.error(
                   `[generate] Extraction failed for ${file.name}:`,
                   extractError,
                 );
@@ -204,7 +207,7 @@ export async function POST(request: NextRequest) {
                   transcriptText,
                 });
                 file.extracted_text = result.text;
-                console.log(
+                logger.debug(
                   `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
                 );
               } catch (extractError) {
@@ -212,7 +215,7 @@ export async function POST(request: NextRequest) {
                   extractError instanceof Error
                     ? extractError.message
                     : "Unknown extraction error";
-                console.error(
+                logger.error(
                   `[generate] Audio extraction failed for ${file.name}:`,
                   extractError,
                 );
@@ -222,7 +225,7 @@ export async function POST(request: NextRequest) {
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : "Unknown extraction error";
-            console.error(`Text extraction failed for ${file.name}:`, err);
+            logger.error(`Text extraction failed for ${file.name}:`, err);
             extractionErrors.push(`${file.name}: ${msg}`);
           }
         }),
@@ -333,7 +336,7 @@ export async function POST(request: NextRequest) {
           );
 
           if (rpcError) {
-            console.error("match_chunks RPC error:", rpcError);
+            logger.error("match_chunks RPC error:", rpcError);
             return {
               chunkContents: [] as string[],
               usedChunks: [] as string[],
@@ -353,7 +356,7 @@ export async function POST(request: NextRequest) {
       clinicalInputParts.length > 0
         ? runClinicalAnalysis(clinicalInputParts, language, { userId, visitId })
             .then((result) => {
-              console.log(
+              logger.debug(
                 "Clinical analysis complete — specialty:",
                 result.inferredSpecialty,
                 "concepts:",
@@ -366,7 +369,7 @@ export async function POST(request: NextRequest) {
               return result;
             })
             .catch((err) => {
-              console.warn(
+              logger.warn(
                 "Clinical analysis failed, proceeding without enrichment:",
                 err,
               );
@@ -397,7 +400,7 @@ export async function POST(request: NextRequest) {
       !hasFileContent
     ) {
       if (extractionErrors.length > 0) {
-        console.error(
+        logger.error(
           `[generate] File processing failed: ${extractionErrors.join("; ")}`,
         );
       }
@@ -408,7 +411,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use two-pass generation (Haiku draft → Opus refinement)
-    console.log(
+    logger.debug(
       `[generate] Starting two-pass generation (${transcriptChunks.length} chunks, ${fileTexts.length} files)`,
     );
 
@@ -488,7 +491,7 @@ export async function POST(request: NextRequest) {
           })
           .eq("id", visitId);
         if (saveError) {
-          console.error("Failed to save generated content:", saveError);
+          logger.error("Failed to save generated content:", saveError);
           sendEvent({ type: "error", error: "save_failed" });
           safeClose();
           return;
@@ -533,14 +536,14 @@ export async function POST(request: NextRequest) {
             });
             lap("email-sent");
           } catch (err) {
-            console.error("[email] Failed to send note email:", err);
+            logger.error("[email] Failed to send note email:", err);
           }
         }
 
         lap("total");
         safeClose();
       } catch (err) {
-        console.error("Generate stream error:", err);
+        logger.error("Generate stream error:", err);
 
         // Handle insufficient context error specially
         if (err instanceof InsufficientContextError) {
@@ -560,7 +563,7 @@ export async function POST(request: NextRequest) {
     return sseResponse(readable);
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Generate route error:", err);
+    logger.error("Generate route error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

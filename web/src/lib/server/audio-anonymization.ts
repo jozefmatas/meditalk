@@ -17,6 +17,7 @@ import { promisify } from "util";
 import crypto from "crypto";
 import fs from "fs/promises";
 import path from "path";
+import { logger } from "@/lib/logger";
 
 const execAsync = promisify(exec);
 
@@ -84,10 +85,10 @@ export async function anonymizeAudio(
 
   try {
     await execAsync(ffmpegCommand, { timeout: 60000 }); // 1 min max
-    console.log(`[anonymize] Success: ${inputPath} → ${outputPath}`);
+    logger.debug(`[anonymize] Success: ${inputPath} → ${outputPath}`);
     return outputPath;
   } catch (error) {
-    console.error("[anonymize] ffmpeg failed:", error);
+    logger.error("[anonymize] ffmpeg failed:", error);
     throw new Error(
       `Audio anonymization failed: ${error instanceof Error ? error.message : "unknown error"}`,
     );
@@ -118,14 +119,14 @@ function getPitchShiftForUser(userId: string): number {
  */
 export async function checkFfmpegAvailable(): Promise<boolean> {
   try {
-    console.log(`[anonymize] Checking ffmpeg at: ${FFMPEG_BIN}`);
+    logger.debug(`[anonymize] Checking ffmpeg at: ${FFMPEG_BIN}`);
     const { stdout } = await execAsync(`"${FFMPEG_BIN}" -version`, {
       timeout: 5000,
     });
-    console.log(`[anonymize] ffmpeg available: ${stdout.split("\n")[0]}`);
+    logger.debug(`[anonymize] ffmpeg available: ${stdout.split("\n")[0]}`);
     return true;
   } catch (error) {
-    console.error(`[anonymize] ffmpeg check failed:`, error);
+    logger.error(`[anonymize] ffmpeg check failed:`, error);
     return false;
   }
 }

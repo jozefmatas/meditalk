@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { extractTextFromFile } from "@/lib/file-extraction";
 import type { SupportedLanguage } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 export interface ExtractFileParams {
   file: {
@@ -70,7 +71,7 @@ export async function extractFileText(
       .download(file.path);
 
     if (dlError || !fileData) {
-      console.error(`[extract-file] Failed to download ${file.name}:`, dlError);
+      logger.error(`[extract-file] Failed to download ${file.name}:`, dlError);
       throw new Error(
         `File download failed: ${dlError?.message || "Unknown error"}`,
       );
@@ -91,7 +92,7 @@ export async function extractFileText(
       .createSignedUrl(file.path, 300); // 5 min expiry
 
     if (urlError || !urlData?.signedUrl) {
-      console.error(
+      logger.error(
         `[extract-file] Failed to create signed URL for ${file.name}:`,
         urlError,
       );
@@ -114,7 +115,7 @@ export async function extractFileText(
 
     // Priority 1: Use real-time transcript if available (fastest!)
     if (isRecording && transcriptText) {
-      console.log(
+      logger.debug(
         `[extract-file] Using real-time transcript (${transcriptText.length} chars) for ${file.name} - skipping download`,
       );
       extractedText = transcriptText;
@@ -125,7 +126,7 @@ export async function extractFileText(
         .download(file.path);
 
       if (dlError || !fileData) {
-        console.error(
+        logger.error(
           `[extract-file] Failed to download ${file.name}:`,
           dlError,
         );
@@ -153,7 +154,7 @@ export async function extractFileText(
 
   const elapsedMs = Date.now() - startTime;
 
-  console.log(
+  logger.debug(
     `[extract-file] Successfully extracted ${extractedText.length} chars from ${file.name} in ${elapsedMs}ms`,
   );
 

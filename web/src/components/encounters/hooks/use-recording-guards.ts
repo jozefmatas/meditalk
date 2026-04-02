@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
+import { logger } from "@/lib/logger";
 
 /** Detect if the device is Android */
 function isAndroid(): boolean {
@@ -91,7 +92,7 @@ export function useRecordingGuards(
       }
     } catch (err) {
       // Notification failed — not critical, recording will still work
-      console.warn("[notification] Failed to show notification:", err);
+      logger.warn("[notification] Failed to show notification:", err);
     }
   }, [t]);
 

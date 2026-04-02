@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "./supabase";
+import { logger } from "@/lib/logger";
 
 export interface ModelBreakdown {
   provider: string;
@@ -40,7 +41,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     );
 
   if (error || !rows) {
-    console.error("[admin] getDashboardStats error:", error?.message);
+    logger.error("[admin] getDashboardStats error:", error?.message);
     return {
       totalCost: 0,
       totalRequests: 0,
@@ -167,7 +168,7 @@ export async function getUsers(): Promise<UserRow[]> {
     .select("user_id, cost_usd");
 
   if (usageError) {
-    console.error("[admin] getUsers usage error:", usageError.message);
+    logger.error("[admin] getUsers usage error:", usageError.message);
   }
 
   const userUsage = new Map<string, { requests: number; cost: number }>();
@@ -241,7 +242,7 @@ export async function getEncounters(): Promise<EncounterRow[]> {
     .order("visit_date", { ascending: false });
 
   if (visitError || !visits) {
-    console.error("[admin] getEncounters error:", visitError?.message);
+    logger.error("[admin] getEncounters error:", visitError?.message);
     return [];
   }
 
@@ -251,7 +252,7 @@ export async function getEncounters(): Promise<EncounterRow[]> {
     .select("visit_id, cost_usd");
 
   if (usageError) {
-    console.error("[admin] getEncounters usage error:", usageError.message);
+    logger.error("[admin] getEncounters usage error:", usageError.message);
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
@@ -327,10 +328,7 @@ export async function getEncounterDetail(
     .order("created_at", { ascending: false });
 
   if (usageError) {
-    console.error(
-      "[admin] getEncounterDetail usage error:",
-      usageError.message,
-    );
+    logger.error("[admin] getEncounterDetail usage error:", usageError.message);
   }
 
   const safeRows = usageRows ?? [];
@@ -368,7 +366,7 @@ export async function getUserEncounters(
     .order("visit_date", { ascending: false });
 
   if (visitError || !visits) {
-    console.error("[admin] getUserEncounters error:", visitError?.message);
+    logger.error("[admin] getUserEncounters error:", visitError?.message);
     return [];
   }
 
@@ -380,7 +378,7 @@ export async function getUserEncounters(
     .in("visit_id", visitIds);
 
   if (usageError) {
-    console.error("[admin] getUserEncounters usage error:", usageError.message);
+    logger.error("[admin] getUserEncounters usage error:", usageError.message);
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
@@ -428,7 +426,7 @@ export async function getUserDetail(userId: string): Promise<UserDetail> {
     .limit(200);
 
   if (usageError) {
-    console.error("[admin] getUserDetail usage error:", usageError.message);
+    logger.error("[admin] getUserDetail usage error:", usageError.message);
   }
 
   const safeRows = usageRows ?? [];
@@ -478,7 +476,7 @@ export async function getTemplates(): Promise<TemplateRow[]> {
     .order("sort_order");
 
   if (error || !data) {
-    console.error("[admin] getTemplates error:", error?.message);
+    logger.error("[admin] getTemplates error:", error?.message);
     return [];
   }
 

@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { clientEnv } from "@/lib/env/client";
 import { serverEnv } from "@/lib/env/server";
+import { logger } from "@/lib/logger";
 
 let _adminClient: ReturnType<typeof createClient> | null = null;
 
@@ -14,7 +15,7 @@ export function createAdminClient(): ReturnType<typeof createClient> | null {
 
   const serviceRoleKey = serverEnv.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceRoleKey) {
-    console.warn(
+    logger.warn(
       "[admin] SUPABASE_SERVICE_ROLE_KEY not set — admin operations will be skipped",
     );
     return null;

@@ -29,6 +29,7 @@ import {
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
+import { logger } from "@/lib/logger";
 
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: "English",
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (chunksError) {
-      console.error("Chunk fetch error:", chunksError);
+      logger.error("Chunk fetch error:", chunksError);
     }
 
     // Resolve template from DB
@@ -209,7 +210,7 @@ Rules:
             { userId, visitId },
           );
         } catch (analysisErr) {
-          console.warn(
+          logger.warn(
             "Clinical analysis failed, proceeding without enrichment:",
             analysisErr,
           );
@@ -304,7 +305,7 @@ Rules:
             err instanceof Error &&
             err.message.toLowerCase().includes("overloaded");
           if (isOverloaded && mi < streamModels.length - 1) {
-            console.warn(
+            logger.warn(
               `[regenerate] ${model} overloaded, falling back to ${streamModels[mi + 1]} in ${MODEL_FALLBACK_DELAY}ms`,
             );
             await new Promise((r) => setTimeout(r, MODEL_FALLBACK_DELAY));
@@ -392,7 +393,7 @@ Rules:
           })
           .eq("id", visitId);
         if (saveError) {
-          console.error("Failed to save regenerated content:", saveError);
+          logger.error("Failed to save regenerated content:", saveError);
           sendEvent({ type: "error", error: "save_failed" });
           safeClose();
           return;
@@ -434,7 +435,7 @@ Rules:
 
         safeClose();
       } catch (err) {
-        console.error("Regenerate stream error:", err);
+        logger.error("Regenerate stream error:", err);
         sendEvent({
           type: "error",
           error: err instanceof Error ? err.message : "Generation failed",
@@ -445,7 +446,7 @@ Rules:
 
     return sseResponse(readable);
   } catch (err) {
-    console.error("Regenerate route error:", err);
+    logger.error("Regenerate route error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

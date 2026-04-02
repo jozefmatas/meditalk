@@ -14,6 +14,7 @@ import { useGenerationTimer } from "@/hooks/use-generation-timer";
 import { parseSSEStream } from "@/lib/api/parse-sse-stream";
 import { useTemplateCache } from "./use-template-cache";
 import { useGenerationPolling } from "./use-generation-polling";
+import { logger } from "@/lib/logger";
 
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
@@ -182,7 +183,7 @@ export function useEncounterGeneration({
       const blobToProcess = finalized?.blob ?? audioBlob;
       const streamingTranscript = finalized?.transcript ?? null;
 
-      console.log(
+      logger.debug(
         `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
       );
 
@@ -199,7 +200,7 @@ export function useEncounterGeneration({
 
         for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
           if (attempt > 0) {
-            console.warn(
+            logger.warn(
               `[generate] Client retry ${attempt}/${CLIENT_MAX_RETRIES}`,
             );
             await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY));
@@ -654,7 +655,7 @@ export function useEncounterGeneration({
       try {
         for (let attempt = 0; attempt <= CLIENT_MAX_RETRIES; attempt++) {
           if (attempt > 0) {
-            console.warn(
+            logger.warn(
               `[regenerate] Client retry ${attempt}/${CLIENT_MAX_RETRIES}`,
             );
             await new Promise((r) => setTimeout(r, CLIENT_RETRY_DELAY));

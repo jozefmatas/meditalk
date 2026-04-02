@@ -8,6 +8,7 @@ import { extractJson } from "./clinical/json-repair";
 import { validateIcdDescriptions } from "./clinical/icd-index";
 import { extractSectionsFromStream } from "./api/sse";
 import type { ClinicalAnalysis } from "./clinical/types";
+import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
   constructor() {
@@ -33,81 +34,6 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   sk: "Slovak",
   cs: "Czech",
 };
-
-function buildSystemPrompt(language: SupportedLanguage): string {
-  const notStated = NOT_STATED[language];
-  const langLabel = LANGUAGE_LABELS[language];
-
-  return `You are a medical documentation assistant. You MUST follow these rules strictly:
-
-1. GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, or hallucinate any medical facts.
-2. OUTPUT LANGUAGE: Write everything in ${langLabel}, except medical terms and proper nouns which should be kept as-is.
-3. MISSING INFORMATION: If a SOAP section has no relevant information in the chunks, write "${notStated}".
-4. FORMAT: Return valid JSON with exactly two keys: "soap" and "letter".
-
-SOAP NOTE FORMAT:
-S (Subjective): Patient's complaints, symptoms, history as reported.
-O (Objective): Observable/measurable findings mentioned.
-A (Assessment): Diagnosis or clinical impression.
-P (Plan): Treatment plan, medications, follow-up.
-
-PATIENT LETTER FORMAT:
-A clear, patient-friendly summary letter of the consultation in ${langLabel}. Use simple language. Include what was discussed, any diagnoses, and next steps.`;
-}
-
-/**
- * Generate a SOAP note and patient letter from transcript chunks.
- *
- * @param chunks    Array of transcript text chunks
- * @param language  Output language
- * @returns         Object with `soap` and `letter` strings
- */
-export async function generateSOAPAndLetter(
-  chunks: string[],
-  language: SupportedLanguage,
-): Promise<{ soap: string; letter: string }> {
-  const numberedChunks = chunks
-    .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
-    .join("\n\n");
-
-  const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
-    system: buildSystemPrompt(language),
-    messages: [
-      {
-        role: "user",
-        content: `Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}\n\nGenerate the SOAP note and patient letter based ONLY on the information above. Return valid JSON with keys "soap" and "letter".`,
-      },
-    ],
-  });
-
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-
-  const parsed = extractJson<{
-    soap: string | Record<string, string>;
-    letter: string;
-  }>(text);
-
-  // Claude sometimes returns soap as {S, O, A, P} object — normalize to string
-  let soap: string;
-  if (typeof parsed.soap === "object" && parsed.soap !== null) {
-    soap = Object.entries(parsed.soap)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join("\n\n");
-  } else {
-    soap = parsed.soap;
-  }
-
-  // Same safety check for letter
-  const letter =
-    typeof parsed.letter === "string"
-      ? parsed.letter
-      : JSON.stringify(parsed.letter);
-
-  return { soap, letter };
-}
 
 /**
  * Build a system prompt for template-based generation.
@@ -273,7 +199,7 @@ export async function generateFromTemplate(
     );
   }
 
-  console.log(
+  logger.debug(
     `[generate] Streaming generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
   );
 
@@ -306,7 +232,7 @@ export async function generateFromTemplate(
   const finalMessage = await stream.finalMessage();
 
   const elapsed = Date.now() - startTime;
-  console.log(
+  logger.debug(
     `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${finalMessage.usage.input_tokens} in / ${finalMessage.usage.output_tokens} out`,
   );
 

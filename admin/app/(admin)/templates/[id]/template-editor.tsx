@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { SpecialtyCombobox } from "@/components/specialty-combobox";
 import { LocaleCombobox } from "@/components/locale-combobox";
+import { logger } from "@/lib/logger";
 
 // ── Analysis types ──────────────────────────────────────────────────
 
@@ -740,7 +741,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
           setDescription(finalDesc);
           setSections(finalSections);
         } else {
-          console.error(
+          logger.error(
             "[template-editor] translate failed:",
             translateRes.status,
             await translateRes.text(),

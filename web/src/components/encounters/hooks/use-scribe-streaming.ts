@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 export interface UseScribeStreamingReturn {
   /** Start Scribe real-time streaming using the given mic stream. */
@@ -74,11 +75,11 @@ export function useScribeStreaming(
 
   const startScribe = useCallback(
     async (stream: MediaStream) => {
-      console.log("[scribe] Starting real-time transcription...");
+      logger.debug("[scribe] Starting real-time transcription...");
       try {
         const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
         if (!tokenRes.ok) {
-          console.warn("[scribe] Token fetch failed, will fall back to batch");
+          logger.warn("[scribe] Token fetch failed, will fall back to batch");
           return;
         }
         const { token } = await tokenRes.json();
@@ -91,7 +92,7 @@ export function useScribeStreaming(
         audioCtxRef.current = audioCtx;
         const source = audioCtx.createMediaStreamSource(stream);
 
-        console.log(
+        logger.debug(
           `[scribe] Native sample rate: ${audioCtx.sampleRate}Hz → downsampling to ${SCRIBE_SAMPLE_RATE}Hz`,
         );
 
@@ -112,7 +113,7 @@ export function useScribeStreaming(
               transcriptRef.current = transcriptRef.current
                 ? transcriptRef.current + " " + msg.text
                 : msg.text;
-              console.log(
+              logger.debug(
                 `[scribe] Received transcript chunk (total: ${transcriptRef.current.length} chars)`,
               );
             }
@@ -133,7 +134,7 @@ export function useScribeStreaming(
           ) {
             return; // Expected when closing connection (pause/stop/generate)
           }
-          console.warn("[scribe] Streaming error:", err);
+          logger.warn("[scribe] Streaming error:", err);
         });
 
         // ── AudioWorklet pipeline (off main thread) ──
@@ -163,9 +164,9 @@ export function useScribeStreaming(
         silent.connect(audioCtx.destination);
 
         scribeRef.current = connection;
-        console.log("[scribe] Real-time connection established successfully");
+        logger.debug("[scribe] Real-time connection established successfully");
       } catch (err) {
-        console.warn("[scribe] Failed to start streaming:", err);
+        logger.warn("[scribe] Failed to start streaming:", err);
       }
     },
     [language],

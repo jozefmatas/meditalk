@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { supabaseAdmin } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 function generateTemplateId(): string {
   return `t_${nanoid(10)}`;
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ id: newId });
   } catch (err) {
-    console.error("[admin] duplicate error:", err);
+    logger.error("[admin] duplicate error:", err);
     return NextResponse.json({ error: "Duplicate failed" }, { status: 500 });
   }
 }

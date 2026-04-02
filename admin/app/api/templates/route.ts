@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { nanoid } from "nanoid";
 import { supabaseAdmin } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 function generateTemplateId(): string {
   return `t_${nanoid(10)}`;
@@ -40,7 +41,7 @@ export async function POST() {
 
     return NextResponse.json({ id: newId });
   } catch (err) {
-    console.error("[admin] create template error:", err);
+    logger.error("[admin] create template error:", err);
     return NextResponse.json({ error: "Create failed" }, { status: 500 });
   }
 }

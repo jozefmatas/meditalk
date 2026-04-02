@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { Encounter, UpdateEncounterRequest } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
+import { logger } from "@/lib/logger";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     } as Encounter & { chunkCount: number });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Visit fetch error:", err);
+    logger.error("Visit fetch error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -115,7 +116,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       .single();
 
     if (error) {
-      console.error("Error updating visit:", error);
+      logger.error("Error updating visit:", error);
       return NextResponse.json(
         { error: "Failed to update visit" },
         { status: 500 },
@@ -137,7 +138,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json(visit as Encounter);
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Visit update error:", err);
+    logger.error("Visit update error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -175,7 +176,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
           .from("audio")
           .remove([visit.audio_path]);
         if (audioErr) {
-          console.warn("[delete] audio cleanup failed:", audioErr.message);
+          logger.warn("[delete] audio cleanup failed:", audioErr.message);
           storageErrors.push(`audio: ${audioErr.message}`);
         }
       }
@@ -188,7 +189,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
           .from("encounter-files")
           .remove(filePaths);
         if (filesErr) {
-          console.warn("[delete] files cleanup failed:", filesErr.message);
+          logger.warn("[delete] files cleanup failed:", filesErr.message);
           storageErrors.push(`files: ${filesErr.message}`);
         }
       }
@@ -201,7 +202,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         .eq("user_id", userId);
 
       if (error) {
-        console.error("Error deleting visit:", error);
+        logger.error("Error deleting visit:", error);
         return NextResponse.json(
           { error: "Failed to delete visit" },
           { status: 500 },
@@ -228,7 +229,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         .eq("user_id", userId);
 
       if (error) {
-        console.error("Error archiving visit:", error);
+        logger.error("Error archiving visit:", error);
         return NextResponse.json(
           { error: "Failed to archive visit" },
           { status: 500 },
@@ -248,7 +249,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Visit delete error:", err);
+    logger.error("Visit delete error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

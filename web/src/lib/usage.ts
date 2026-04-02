@@ -1,6 +1,7 @@
 import { createAdminClient } from "./supabase/admin";
 import { clientEnv } from "@/lib/env/client";
 import { serverEnv } from "@/lib/env/server";
+import { logger } from "@/lib/logger";
 
 const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
@@ -82,7 +83,7 @@ export function logUsage(params: UsageParams): void {
     })
     .then(({ error }: { error: { message: string } | null }) => {
       if (error) {
-        console.error("[usage-log] Insert failed:", {
+        logger.error("[usage-log] Insert failed:", {
           message: error.message,
           provider: params.provider,
           model: params.model,
@@ -92,7 +93,7 @@ export function logUsage(params: UsageParams): void {
     })
     .catch((err: unknown) => {
       const error = err instanceof Error ? err : new Error(String(err));
-      console.error("[usage-log] Network/fetch error:", {
+      logger.error("[usage-log] Network/fetch error:", {
         error: error.message,
         name: error.name,
         cause: error.cause,

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { routing } from "./i18n/routing";
 import { clientEnv } from "@/lib/env/client";
+import { logger } from "@/lib/logger";
 
 // Create next-intl middleware handler
 const handleI18nRouting = createIntlMiddleware(routing);
@@ -191,7 +192,7 @@ export async function proxy(request: NextRequest) {
   } catch (e) {
     // If Supabase auth fails (network error, etc.), let the request through
     // so the page can handle auth state on its own
-    console.error("[middleware] Supabase auth error:", e);
+    logger.error("[middleware] Supabase auth error:", e);
   }
 
   return supabaseResponse;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: Request) {
   try {
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true });
   } catch (error) {
     if (error instanceof Response) throw error;
-    console.error("Send note email error:", error);
+    logger.error("Send note email error:", error);
     return NextResponse.json(
       { error: "Failed to send email" },
       { status: 500 },

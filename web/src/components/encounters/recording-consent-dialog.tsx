@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/shared/dialog";
 import { Button } from "@/components/shared/button";
+import { logger } from "@/lib/logger";
 
 interface RecordingConsentDialogProps {
   open: boolean;
@@ -32,7 +33,7 @@ export function RecordingConsentDialog({
       await onConsent();
       onOpenChange(false);
     } catch (error) {
-      console.error("Failed to save consent:", error);
+      logger.error("Failed to save consent:", error);
     } finally {
       setIsProcessing(false);
     }

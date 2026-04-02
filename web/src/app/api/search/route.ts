@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { embedText } from "@/lib/openai";
 import type { SearchResponse } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (rpcError) {
-      console.error("match_chunks RPC error:", rpcError);
+      logger.error("match_chunks RPC error:", rpcError);
       return NextResponse.json(
         { error: `Search failed: ${rpcError.message}` },
         { status: 500 },
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("Search route error:", err);
+    logger.error("Search route error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
+import { logger } from "@/lib/logger";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           });
 
         if (uploadError) {
-          console.error("File upload error:", uploadError);
+          logger.error("File upload error:", uploadError);
           continue;
         }
 
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ files: newFiles });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("File upload error:", err);
+    logger.error("File upload error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -251,7 +252,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({ success: true });
   } catch (err) {
     if (err instanceof Response) return err;
-    console.error("File delete error:", err);
+    logger.error("File delete error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

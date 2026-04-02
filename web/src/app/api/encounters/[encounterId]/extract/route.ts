@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { extractFileText } from "@/lib/extraction/extract-file";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
 
@@ -67,7 +68,7 @@ export async function POST(
 
     // Skip if already extracted
     if (file.extracted_text && file.extraction_status === "completed") {
-      console.log(`[extract] File ${file.name} already has extracted text`);
+      logger.debug(`[extract] File ${file.name} already has extracted text`);
       return NextResponse.json({
         extracted: true,
         cached: true,
@@ -77,7 +78,9 @@ export async function POST(
 
     // Skip if extraction is already in progress (prevent duplicate work)
     if (file.extraction_status === "extracting") {
-      console.log(`[extract] File ${file.name} extraction already in progress`);
+      logger.debug(
+        `[extract] File ${file.name} extraction already in progress`,
+      );
       return NextResponse.json({
         extracted: false,
         inProgress: true,
@@ -95,7 +98,7 @@ export async function POST(
 
     const filePath = file.path;
     const startTime = Date.now();
-    console.log(`[extract] Extracting text from ${file.name} (${file.type})`);
+    logger.debug(`[extract] Extracting text from ${file.name} (${file.type})`);
 
     // Mark extraction as in progress using atomic update
     const { error: extractingError } = await supabase.rpc(
@@ -108,7 +111,7 @@ export async function POST(
     );
 
     if (extractingError) {
-      console.error(
+      logger.error(
         `[extract] Failed to set status="extracting" for ${file.name}:`,
         extractingError,
       );
@@ -125,13 +128,13 @@ export async function POST(
         language,
       });
       extractedText = result.text;
-      console.log(`[extract] Extraction took ${result.elapsedMs}ms`);
+      logger.debug(`[extract] Extraction took ${result.elapsedMs}ms`);
     } catch (extractError) {
       const errorMsg =
         extractError instanceof Error
           ? extractError.message
           : "Unknown extraction error";
-      console.error(
+      logger.error(
         `[extract] Extraction failed for ${file.name}:`,
         extractError,
       );
@@ -151,7 +154,7 @@ export async function POST(
 
     // Check if extraction actually succeeded (non-empty text)
     if (!extractedText || extractedText.trim().length === 0) {
-      console.warn(
+      logger.warn(
         `[extract] Extraction returned empty text for ${file.name}, marking as failed`,
       );
       // Use atomic update to mark as failed
@@ -178,7 +181,7 @@ export async function POST(
     );
 
     if (rpcError) {
-      console.error(
+      logger.error(
         `[extract] Atomic update failed for ${file.name}:`,
         rpcError,
       );
@@ -189,7 +192,7 @@ export async function POST(
     }
 
     const elapsedMs = Date.now() - startTime;
-    console.log(
+    logger.debug(
       `[extract] ${file.name}: ${extractedText.length} chars in ${elapsedMs}ms`,
     );
 
@@ -200,7 +203,7 @@ export async function POST(
       elapsedMs,
     });
   } catch (err) {
-    console.error("Extract route error:", err);
+    logger.error("Extract route error:", err);
 
     // Mark extraction as failed (only if we have fileId)
     if (fileId) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { logger } from "@/lib/logger";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -173,7 +174,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setState("recording");
         return stream;
       } catch (err) {
-        console.warn("[recording] Mic access failed:", err);
+        logger.warn("[recording] Mic access failed:", err);
         setMicError(true);
         return null;
       }

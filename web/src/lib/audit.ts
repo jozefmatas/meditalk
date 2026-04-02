@@ -1,5 +1,6 @@
 import { createAdminClient } from "./supabase/admin";
 import { serverEnv } from "@/lib/env/server";
+import { logger } from "@/lib/logger";
 
 export interface AuditEntry {
   actorId: string;
@@ -40,7 +41,7 @@ export function logAudit(entry: AuditEntry): void {
     .then(({ error }: { error: { message: string } | null }) => {
       // Only log errors in development — production fails silently
       if (error && serverEnv.NODE_ENV === "development") {
-        console.error("[audit] Insert failed:", error.message);
+        logger.error("[audit] Insert failed:", error.message);
       }
     })
     .catch(() => {

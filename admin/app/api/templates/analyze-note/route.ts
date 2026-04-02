@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
 import { extractTextFromUpload } from "@/lib/file-extraction";
 import { supabaseAdmin } from "@/lib/supabase";
+import { logger } from "@/lib/logger";
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -93,7 +94,7 @@ export async function POST(request: NextRequest) {
 
       // For images: EXIF auto-rotate before uploading (fixes phone photos)
       if (isImage) {
-        console.log("[analyze-note] EXIF auto-rotating image before upload");
+        logger.debug("[analyze-note] EXIF auto-rotating image before upload");
         finalBuffer = await sharp(buffer).rotate().toBuffer();
       }
 
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
         });
 
       if (uploadError) {
-        console.error("[analyze-note] Upload failed:", uploadError);
+        logger.error("[analyze-note] Upload failed:", uploadError);
         return NextResponse.json(
           { error: "Failed to upload file" },
           { status: 500 },
@@ -118,7 +119,7 @@ export async function POST(request: NextRequest) {
         .createSignedUrl(tempFilePath, 300);
 
       if (urlError || !urlData?.signedUrl) {
-        console.error("[analyze-note] Signed URL failed:", urlError);
+        logger.error("[analyze-note] Signed URL failed:", urlError);
         return NextResponse.json(
           { error: "Failed to create signed URL" },
           { status: 500 },
@@ -184,7 +185,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
-    console.error("[admin] analyze-note error:", err);
+    logger.error("[admin] analyze-note error:", err);
     return NextResponse.json({ error: "Analysis failed" }, { status: 500 });
   } finally {
     // Clean up temporary file
@@ -193,7 +194,7 @@ export async function POST(request: NextRequest) {
         .from("encounter-files")
         .remove([tempFilePath])
         .catch((err) =>
-          console.error("[analyze-note] Failed to delete temp file:", err),
+          logger.error("[analyze-note] Failed to delete temp file:", err),
         );
     }
   }

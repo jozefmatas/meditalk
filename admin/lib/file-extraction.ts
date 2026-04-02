@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
+import { logger } from "@/lib/logger";
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -78,7 +79,7 @@ export async function extractTextFromUpload(
 }
 
 async function ocrDocumentWithUrl(url: string): Promise<string | null> {
-  console.log(`[pdf-extract] using URL source (no size limit)`);
+  logger.debug(`[pdf-extract] using URL source (no size limit)`);
   const response = await anthropic().messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 8192,
@@ -130,7 +131,7 @@ async function ocrDocument(
 }
 
 async function ocrImageWithUrl(url: string): Promise<string | null> {
-  console.log(`[image-extract] using URL source (no size limit)`);
+  logger.debug(`[image-extract] using URL source (no size limit)`);
   const response = await anthropic().messages.create({
     model: "claude-sonnet-4-5-20250929",
     max_tokens: 8192,

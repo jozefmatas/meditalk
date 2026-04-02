@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { LOCALES } from "@/lib/template-types";
+import { logger } from "@/lib/logger";
 
 const LOCALE_NAMES: Record<string, string> = {
   sk: "Slovak",
@@ -72,7 +73,7 @@ Return ONLY valid JSON, no explanation or markdown.`;
     const parsed = JSON.parse(jsonMatch[0]);
     return NextResponse.json({ translations: parsed });
   } catch (err) {
-    console.error("[admin] translate error:", err);
+    logger.error("[admin] translate error:", err);
     return NextResponse.json({ error: "Translation failed" }, { status: 500 });
   }
 }

@@ -53,23 +53,31 @@
 > - 6 stories files (card, tabs, accordion, command, input-group, table)
 >   Only `generated/ui/` files (untouchable) retain bracket values
 
-### 5. Test coverage for critical modules
+### 5. ~~Test coverage for critical modules~~ ✅
 
-- [ ] `app/api/regenerate/route.ts` — no tests
-- [ ] `lib/file-extraction.ts` — no tests
-- [ ] `lib/anthropic.ts` — no tests (core generation, 404 lines)
-- [ ] `lib/clinical/pipeline.ts` — no tests
+> Added 58 tests across 4 new test files (334 total, up from 276):
+> `lib/anthropic.test.ts` (22 tests) — buildTemplateSystemPrompt, buildTemplateUserMessage, InsufficientContextError, GENERATION_MODELS
+> `lib/clinical/pipeline.test.ts` (12 tests) — buildEnrichedSystemPrompt (ICD codes, concepts, medications, clusters)
+> `lib/file-extraction.test.ts` (16 tests) — extractTextFromFile routing (PDF/image/audio), normalizeImage, priority, error handling
+> `app/api/regenerate/route.test.ts` (8 tests) — auth, validation, 404s, audit logging
 
-### 6. Clean up console.logs (58+ in API routes)
+### 6. Clean up console.logs (58+ in API routes) ✅
 
-- [ ] Replace with structured logger or remove debug logs
-- [ ] Important for Capacitor — WebView console isn't easily accessible
+> Created `logger.ts` utility (debug/info/warn/error). `debug` is silent in production.
+> Replaced 90+ console.\* calls across 35 files (web + admin).
+> Skipped: logger.ts itself, eruda-loader (debug tool), stories (dev-only callbacks).
 
-### 7. Remove dead code
+- [x] Replace with structured logger or remove debug logs
+- [x] Important for Capacitor — WebView console isn't easily accessible
 
-- [ ] Verify `spiral.tsx` usage — possibly unused
-- [ ] Verify `animated-magic-wand.tsx` usage — possibly unused
-- [ ] Check if `generateSOAPAndLetter()` in `lib/anthropic.ts` is still called
+### 7. Remove dead code ✅
+
+> `spiral.tsx` and `animated-magic-wand.tsx` are used by the processing overlay — kept.
+> Removed `generateSOAPAndLetter()` and its helper `buildSystemPrompt()` from `lib/anthropic.ts` — legacy SOAP generation replaced by template-based `generateFromTemplate()`.
+
+- [x] Verify `spiral.tsx` usage — used (processing overlay)
+- [x] Verify `animated-magic-wand.tsx` usage — used (processing overlay)
+- [x] Check if `generateSOAPAndLetter()` in `lib/anthropic.ts` is still called — removed (dead code)
 
 ---
 

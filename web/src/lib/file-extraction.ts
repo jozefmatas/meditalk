@@ -4,6 +4,7 @@ import sharp from "sharp";
 import { transcribeAudio } from "./elevenlabs";
 import type { SupportedLanguage } from "./types";
 import { logUsage, type UsageContext } from "./usage";
+import { logger } from "@/lib/logger";
 
 let _anthropic: Anthropic | null = null;
 function anthropic() {
@@ -98,7 +99,7 @@ export async function extractTextFromFile(
 
     return null;
   } catch (err) {
-    console.error(`Text extraction failed for ${filename}:`, err);
+    logger.error(`Text extraction failed for ${filename}:`, err);
     return null;
   }
 }
@@ -144,7 +145,7 @@ async function ocrImageWithUrl(
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  console.log(`[image-extract] using URL source (no size limit)`);
+  logger.debug(`[image-extract] using URL source (no size limit)`);
 
   const content: ContentBlockParam[] = [
     {
@@ -240,7 +241,7 @@ async function ocrPdfWithUrl(
   language: SupportedLanguage,
   ctx?: UsageContext,
 ): Promise<string | null> {
-  console.log(`[pdf-extract] using URL source (no download needed)`);
+  logger.debug(`[pdf-extract] using URL source (no download needed)`);
 
   const content: ContentBlockParam[] = [
     {

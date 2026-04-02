@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { logger } from "@/lib/logger";
 
 /**
  * GET /api/templates/usage
@@ -15,7 +16,7 @@ export async function GET() {
       .eq("user_id", userId);
 
     if (error) {
-      console.error("Failed to fetch template usage:", error);
+      logger.error("Failed to fetch template usage:", error);
       return NextResponse.json(
         { error: "Failed to fetch usage" },
         { status: 500 },
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      console.error("Failed to track template usage:", error);
+      logger.error("Failed to track template usage:", error);
       return NextResponse.json(
         { error: "Failed to track usage" },
         { status: 500 },
