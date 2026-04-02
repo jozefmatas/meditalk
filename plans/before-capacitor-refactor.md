@@ -35,7 +35,7 @@
 
 ### 3. ~~Add env var validation~~ ✅
 
-> Created `lib/env/server.ts` (Zod schema, fail-fast validation) + `lib/env/client.ts` (typed NEXT_PUBLIC_ constants)
+> Created `lib/env/server.ts` (Zod schema, fail-fast validation) + `lib/env/client.ts` (typed NEXT*PUBLIC* constants)
 > Migrated all `process.env` call sites in both web/ (17 files) and admin/ (2 files)
 > Added `server-only` guard, 8 tests for validation logic
 > Global `vi.mock("server-only")` in test setup for vitest compatibility
@@ -44,11 +44,14 @@
 
 ## Nice-to-Have (Can Do During or After Capacitor)
 
-### 4. Fix arbitrary Tailwind values
+### 4. ~~Fix arbitrary Tailwind values~~ ✅
 
-- [ ] `adjust-drawer.tsx`: `min-h-[50vh]` → standard class
-- [ ] `files-panel.tsx`: `w-[280px]` → `w-72`
-- [ ] `recording-bar.tsx`: `max-w-[320px]` → `max-w-xs`
+> Replaced all bracket-value classes with standard Tailwind utilities across 12 files:
+> `adjust-drawer.tsx`, `files-panel.tsx`, `recording-bar.tsx`, `tiptap-editor.tsx`,
+> `page.tsx` (home), `[visitId]/page.tsx` (4× `max-w-5xl`, `w-72`, `h-18`),
+>
+> - 6 stories files (card, tabs, accordion, command, input-group, table)
+>   Only `generated/ui/` files (untouchable) retain bracket values
 
 ### 5. Test coverage for critical modules
 

@@ -285,7 +285,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               disabled={!!disabled}
               size="lg"
               label={t("templateLabel")}
-              className="w-full desktop:w-auto desktop:max-w-[320px]"
+              className="w-full desktop:w-auto desktop:max-w-xs"
             />
           )}
           {/* Mobile: button then mic (reversed from desktop) */}

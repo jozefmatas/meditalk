@@ -156,7 +156,7 @@ export function AdjustDrawer({
               </DrawerDescription>
             </DrawerHeader>
 
-            <div className="flex min-h-[50vh] flex-1 flex-col gap-4 overflow-y-auto px-4 pb-2">
+            <div className="flex min-h-80 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-2">
               <Tabs
                 value={activeTab}
                 onValueChange={(v) => setActiveTab(v as "record" | "notes")}

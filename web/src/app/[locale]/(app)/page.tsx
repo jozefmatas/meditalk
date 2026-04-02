@@ -103,7 +103,7 @@ export default function HomePage() {
           <div className="flex w-full max-w-3xl flex-col gap-6">
             {/* Stats section */}
             <div className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border bg-background py-6 md:pl-4 pr-0 md:static md:bg-transparent">
-              <div className="flex flex-1 gap-[15%]">
+              <div className="flex flex-1 gap-16">
                 <div className="flex items-baseline gap-1">
                   {isStatsLoading ? (
                     <Skeleton className="h-6 w-12" />

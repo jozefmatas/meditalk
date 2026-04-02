@@ -55,7 +55,7 @@ export function TiptapEditor({
     },
     editorProps: {
       attributes: {
-        class: "outline-none min-h-[4rem]",
+        class: "outline-none min-h-16",
       },
     },
   });

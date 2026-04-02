@@ -23,7 +23,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {
   render: () => (
-    <Tabs defaultValue="tab1" className="w-[400px]">
+    <Tabs defaultValue="tab1" className="w-96">
       <TabsList>
         <TabsTrigger value="tab1">Account</TabsTrigger>
         <TabsTrigger value="tab2">Password</TabsTrigger>
@@ -50,7 +50,7 @@ export const Default: Story = {
 
 export const Line: Story = {
   render: () => (
-    <Tabs defaultValue="tab1" className="w-[400px]">
+    <Tabs defaultValue="tab1" className="w-96">
       <TabsList variant="line">
         <TabsTrigger value="tab1">Transcript</TabsTrigger>
         <TabsTrigger value="tab2">Note</TabsTrigger>
@@ -69,7 +69,7 @@ export const Line: Story = {
 
 export const TwoTabs: Story = {
   render: () => (
-    <Tabs defaultValue="tab1" className="w-[300px]">
+    <Tabs defaultValue="tab1" className="w-72">
       <TabsList>
         <TabsTrigger value="tab1">Overview</TabsTrigger>
         <TabsTrigger value="tab2">Details</TabsTrigger>
@@ -86,7 +86,7 @@ export const TwoTabs: Story = {
 
 export const Disabled: Story = {
   render: () => (
-    <Tabs defaultValue="tab1" className="w-[400px]">
+    <Tabs defaultValue="tab1" className="w-96">
       <TabsList>
         <TabsTrigger value="tab1">Active</TabsTrigger>
         <TabsTrigger value="tab2" disabled>
@@ -135,7 +135,7 @@ function LineWithActionDemo() {
       onValueChange={setActiveTab}
       onAddTab={handleAddTab}
       actionLabel="Add document"
-      className="w-[500px]"
+      className="w-xl"
     >
       {visibleTabs.map((tab) => (
         <TabsContent key={tab.value} value={tab.value}>
@@ -159,7 +159,7 @@ export const AllVariants: Story = {
         <p className="mb-2 text-sm font-medium text-muted-foreground">
           Default (pill)
         </p>
-        <Tabs defaultValue="tab1" className="w-[400px]">
+        <Tabs defaultValue="tab1" className="w-96">
           <TabsList>
             <TabsTrigger value="tab1">Account</TabsTrigger>
             <TabsTrigger value="tab2">Password</TabsTrigger>
@@ -174,7 +174,7 @@ export const AllVariants: Story = {
         <p className="mb-2 text-sm font-medium text-muted-foreground">
           Line variant
         </p>
-        <Tabs defaultValue="tab1" className="w-[400px]">
+        <Tabs defaultValue="tab1" className="w-96">
           <TabsList variant="line">
             <TabsTrigger value="tab1">Transcript</TabsTrigger>
             <TabsTrigger value="tab2">Note</TabsTrigger>

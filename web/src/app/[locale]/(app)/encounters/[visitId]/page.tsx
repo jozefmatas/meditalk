@@ -238,7 +238,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return (
       <AppShell contentClassName="flex flex-1 overflow-hidden">
         <div className="flex flex-1 justify-center p-6">
-          <div className="w-full max-w-[960px] space-y-6">
+          <div className="w-full max-w-5xl space-y-6">
             <Skeleton className="h-8 w-64" />
             <Skeleton className="h-9 w-48" />
             <div className="h-px bg-border" />
@@ -252,9 +252,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
             </div>
           </div>
         </div>
-        <div className="hidden h-full w-[280px] shrink-0 flex-col gap-8 border-l bg-background p-6 desktop:flex">
+        <div className="hidden h-full w-72 shrink-0 flex-col gap-8 border-l bg-background p-6 desktop:flex">
           <Skeleton className="h-6 w-16" />
-          <Skeleton className="h-[72px] w-full rounded-xl" />
+          <Skeleton className="h-18 w-full rounded-xl" />
         </div>
       </AppShell>
     );
@@ -292,7 +292,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
       {/* Streaming generation view — show sections progressively */}
       {generation.isStreaming ? (
         <div className="flex flex-1 justify-center overflow-y-auto px-4 pb-6 desktop:px-6">
-          <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-full">
+          <div className="flex w-full max-w-5xl flex-col gap-6 min-h-full">
             <ReviewView
               visit={data.visit}
               setVisit={data.setVisit}
@@ -339,7 +339,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         /* Draft mode — recording + editor */
         <>
           <div className="flex flex-1 justify-center px-4 pb-6 desktop:px-6 overflow-hidden">
-            <div className="flex w-full max-w-[960px] flex-col gap-3 min-h-0 desktop:gap-6">
+            <div className="flex w-full max-w-5xl flex-col gap-3 min-h-0 desktop:gap-6">
               <DraftView
                 visit={data.visit}
                 title={metadata.title}
@@ -384,7 +384,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
         /* Review mode — generated note */
         <>
           <div className="flex flex-1 justify-center px-4 pb-6 desktop:px-6 overflow-y-auto">
-            <div className="flex w-full max-w-[960px] flex-col gap-6 min-h-full">
+            <div className="flex w-full max-w-5xl flex-col gap-6 min-h-full">
               <ReviewView
                 visit={data.visit}
                 setVisit={data.setVisit}

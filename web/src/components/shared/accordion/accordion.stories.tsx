@@ -19,7 +19,7 @@ type Story = StoryObj;
 
 export const Default: Story = {
   render: () => (
-    <Accordion type="single" collapsible className="w-[400px]">
+    <Accordion type="single" collapsible className="w-96">
       <AccordionItem value="item-1">
         <AccordionTrigger>Is it accessible?</AccordionTrigger>
         <AccordionContent>
@@ -45,11 +45,7 @@ export const Default: Story = {
 
 export const Bordered: Story = {
   render: () => (
-    <Accordion
-      type="single"
-      collapsible
-      className="flex w-[400px] flex-col gap-3"
-    >
+    <Accordion type="single" collapsible className="flex w-96 flex-col gap-3">
       <AccordionItem value="item-1" variant="bordered">
         <AccordionTrigger>Recording transcript</AccordionTrigger>
         <AccordionContent>
@@ -75,7 +71,7 @@ export const Bordered: Story = {
 
 export const Disabled: Story = {
   render: () => (
-    <Accordion type="single" collapsible className="w-[400px]">
+    <Accordion type="single" collapsible className="w-96">
       <AccordionItem value="item-1">
         <AccordionTrigger>Active item</AccordionTrigger>
         <AccordionContent>This item can be expanded.</AccordionContent>
@@ -99,7 +95,7 @@ export const AllVariants: Story = {
         <p className="mb-2 text-sm font-medium text-muted-foreground">
           Default
         </p>
-        <Accordion type="single" collapsible className="w-[400px]">
+        <Accordion type="single" collapsible className="w-96">
           <AccordionItem value="item-1">
             <AccordionTrigger>First item</AccordionTrigger>
             <AccordionContent>Content for the first item.</AccordionContent>
@@ -117,7 +113,7 @@ export const AllVariants: Story = {
         <Accordion
           type="single"
           collapsible
-          className="flex w-[400px] flex-col gap-3"
+          className="flex w-96 flex-col gap-3"
         >
           <AccordionItem value="item-1" variant="bordered">
             <AccordionTrigger>First item</AccordionTrigger>
@@ -133,7 +129,7 @@ export const AllVariants: Story = {
         <p className="mb-2 text-sm font-medium text-muted-foreground">
           Disabled
         </p>
-        <Accordion type="single" collapsible className="w-[400px]">
+        <Accordion type="single" collapsible className="w-96">
           <AccordionItem value="item-1">
             <AccordionTrigger>Active</AccordionTrigger>
             <AccordionContent>Active content.</AccordionContent>

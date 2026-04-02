@@ -41,7 +41,7 @@ const invoices = [
 
 export const Default: Story = {
   render: () => (
-    <Table className="w-[500px]">
+    <Table className="w-xl">
       <TableCaption>A list of recent invoices.</TableCaption>
       <TableHeader>
         <TableRow>
@@ -79,7 +79,7 @@ const files = [
 export const Compact: Story = {
   name: "Compact (Files)",
   render: () => (
-    <div className="w-[240px]">
+    <div className="w-60">
       <span className="text-xs text-foreground/65">Uploaded files</span>
       <Table variant="compact">
         <TableBody>

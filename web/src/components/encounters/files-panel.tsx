@@ -304,7 +304,7 @@ export function FilesPanel({
   const t = useTranslations("encounters.detail");
 
   return (
-    <div className="hidden desktop:flex w-[280px] shrink-0 flex-col gap-4 border-l bg-background p-6">
+    <div className="hidden desktop:flex w-72 shrink-0 flex-col gap-4 border-l bg-background p-6">
       <div className="flex flex-col gap-1">
         <h3 className="text-lg font-medium leading-none">{t("files")}</h3>
         <p className="text-sm leading-snug text-foreground/65">
