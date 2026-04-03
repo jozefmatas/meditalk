@@ -4,8 +4,12 @@ import { useRef, useCallback } from "react";
 import { logger } from "@/lib/logger";
 
 export interface UseScribeStreamingReturn {
-  /** Start Scribe real-time streaming using the given mic stream. */
-  startScribe: (stream: MediaStream) => Promise<void>;
+  /** Web: Start Scribe real-time streaming using the given mic stream. Returns the AudioContext. */
+  startScribe: (stream: MediaStream) => Promise<AudioContext | null>;
+  /** Native: Start Scribe connection without AudioWorklet. Chunks are sent via sendChunk(). */
+  startScribeNative: () => Promise<void>;
+  /** Native: Send a base64-encoded Int16 PCM chunk directly to the Scribe connection. */
+  sendChunk: (base64: string) => void;
   /** Stop Scribe connection and audio pipeline. */
   stopScribe: () => void;
   /** Read and reset the accumulated transcript. Returns null if empty. */
@@ -39,10 +43,12 @@ function float32ToBase64Int16(pcm: Float32Array): string {
 /**
  * Hook for managing ElevenLabs Scribe real-time transcription.
  *
- * Uses an AudioWorklet to downsample mic audio to 16 kHz on a dedicated thread,
- * then sends ~250 ms chunks over the Scribe WebSocket. This prevents the
- * queue_overflow error that occurred with ScriptProcessorNode (main-thread
- * callbacks would stall during React renders, then burst-fire).
+ * **Web mode** (`startScribe`): Uses AudioWorklet to downsample mic audio to
+ * 16 kHz on a dedicated thread, then sends chunks over the Scribe WebSocket.
+ *
+ * **Native mode** (`startScribeNative` + `sendChunk`): Opens only the WebSocket
+ * connection. Audio chunks arrive from the NativeAudioStream Capacitor plugin
+ * (already 16 kHz Int16 PCM) and are forwarded directly via `sendChunk()`.
  */
 export function useScribeStreaming(
   language?: string,
@@ -73,14 +79,16 @@ export function useScribeStreaming(
     }
   }, []);
 
+  // ── Web mode: full AudioWorklet pipeline ──
+
   const startScribe = useCallback(
-    async (stream: MediaStream) => {
+    async (stream: MediaStream): Promise<AudioContext | null> => {
       logger.debug("[scribe] Starting real-time transcription...");
       try {
         const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
         if (!tokenRes.ok) {
           logger.warn("[scribe] Token fetch failed, will fall back to batch");
-          return;
+          return null;
         }
         const { token } = await tokenRes.json();
 
@@ -121,19 +129,44 @@ export function useScribeStreaming(
         );
 
         connection.on(RealtimeEvents.ERROR, (err: unknown) => {
-          // Suppress expected "1006 - No reason provided" when pausing/stopping.
-          // The error arrives as an object like { error: "WebSocket closed...", message_type: "error" },
-          // so we must stringify properly (String({}) → "[object Object]" misses the check).
-          const errStr =
-            typeof err === "object" && err !== null
-              ? JSON.stringify(err)
-              : String(err);
-          if (
-            errStr.includes("1006") ||
-            errStr.includes("No reason provided")
-          ) {
-            return; // Expected when closing connection (pause/stop/generate)
+          // Suppress expected WebSocket close events when pausing/stopping.
+          // The SDK fires errors in multiple shapes:
+          //   1. DOM Event (WebSocket onerror) — always a close artifact
+          //   2. Error instance — message has "1006" / "No reason provided"
+          //   3. Plain object { error: "...", message_type: "error" }
+          // JSON.stringify loses Error.message and DOM Event fields, so
+          // we check each shape individually.
+
+          // DOM Event from WebSocket onerror — always expected on close
+          if (err instanceof Event) return;
+
+          // Error instance — check message
+          if (err instanceof Error) {
+            const msg = err.message;
+            if (msg.includes("1006") || msg.includes("No reason provided")) {
+              return;
+            }
           }
+
+          // Plain object — stringify and check
+          if (typeof err === "object" && err !== null) {
+            try {
+              const s = JSON.stringify(err);
+              if (s.includes("1006") || s.includes("No reason provided")) {
+                return;
+              }
+            } catch {
+              // circular ref — fall through to warn
+            }
+          }
+
+          // String error
+          if (typeof err === "string") {
+            if (err.includes("1006") || err.includes("No reason provided")) {
+              return;
+            }
+          }
+
           logger.warn("[scribe] Streaming error:", err);
         });
 
@@ -146,8 +179,19 @@ export function useScribeStreaming(
         });
 
         // Worklet posts downsampled Float32 chunks → convert to Int16 base64 and send
+        let chunkCount = 0;
         workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
           try {
+            chunkCount++;
+            if (chunkCount <= 3 || chunkCount % 20 === 0) {
+              const maxVal = e.data.reduce(
+                (m, v) => Math.max(m, Math.abs(v)),
+                0,
+              );
+              logger.debug(
+                `[scribe] Audio chunk #${chunkCount}: ${e.data.length} samples, peak=${maxVal.toFixed(4)}`,
+              );
+            }
             connection.send({ audioBase64: float32ToBase64Int16(e.data) });
           } catch {
             // Connection closed
@@ -165,12 +209,92 @@ export function useScribeStreaming(
 
         scribeRef.current = connection;
         logger.debug("[scribe] Real-time connection established successfully");
+        return audioCtx;
       } catch (err) {
         logger.warn("[scribe] Failed to start streaming:", err);
+        return null;
       }
     },
     [language],
   );
+
+  // ── Native mode: WebSocket only, no AudioWorklet ──
+
+  const startScribeNative = useCallback(async (): Promise<void> => {
+    logger.debug("[scribe] Starting native real-time transcription...");
+    try {
+      const tokenRes = await fetch("/api/scribe-token", { method: "POST" });
+      if (!tokenRes.ok) {
+        logger.warn("[scribe] Token fetch failed, will fall back to batch");
+        return;
+      }
+      const { token } = await tokenRes.json();
+
+      const { Scribe, RealtimeEvents, AudioFormat, CommitStrategy } =
+        await import("@elevenlabs/client");
+
+      const connection = Scribe.connect({
+        token,
+        modelId: "scribe_v2_realtime",
+        audioFormat: AudioFormat.PCM_16000,
+        sampleRate: SCRIBE_SAMPLE_RATE,
+        commitStrategy: CommitStrategy.VAD,
+        ...(language && { languageCode: language }),
+      });
+
+      connection.on(
+        RealtimeEvents.COMMITTED_TRANSCRIPT,
+        (msg: { text: string }) => {
+          if (msg.text) {
+            transcriptRef.current = transcriptRef.current
+              ? transcriptRef.current + " " + msg.text
+              : msg.text;
+            logger.debug(
+              `[scribe] Received transcript chunk (total: ${transcriptRef.current.length} chars)`,
+            );
+          }
+        },
+      );
+
+      connection.on(RealtimeEvents.ERROR, (err: unknown) => {
+        if (err instanceof Event) return;
+        if (err instanceof Error) {
+          const msg = err.message;
+          if (msg.includes("1006") || msg.includes("No reason provided"))
+            return;
+        }
+        if (typeof err === "object" && err !== null) {
+          try {
+            const s = JSON.stringify(err);
+            if (s.includes("1006") || s.includes("No reason provided")) return;
+          } catch {
+            // fall through
+          }
+        }
+        if (typeof err === "string") {
+          if (err.includes("1006") || err.includes("No reason provided"))
+            return;
+        }
+        logger.warn("[scribe] Streaming error:", err);
+      });
+
+      scribeRef.current = connection;
+      logger.debug(
+        "[scribe] Native real-time connection established successfully",
+      );
+    } catch (err) {
+      logger.warn("[scribe] Failed to start native streaming:", err);
+    }
+  }, [language]);
+
+  /** Send a pre-encoded audio chunk directly to the Scribe WebSocket. */
+  const sendChunk = useCallback((base64: string): void => {
+    try {
+      scribeRef.current?.send({ audioBase64: base64 });
+    } catch {
+      // Connection closed
+    }
+  }, []);
 
   const consumeTranscript = useCallback((): string | null => {
     const transcript = transcriptRef.current || null;
@@ -178,5 +302,11 @@ export function useScribeStreaming(
     return transcript;
   }, []);
 
-  return { startScribe, stopScribe, consumeTranscript };
+  return {
+    startScribe,
+    startScribeNative,
+    sendChunk,
+    stopScribe,
+    consumeTranscript,
+  };
 }

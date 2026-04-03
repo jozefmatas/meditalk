@@ -4,7 +4,16 @@ import { config as dotenvConfig } from "dotenv";
 // Capacitor CLI doesn't load Next.js .env files — load .env.local manually.
 dotenvConfig({ path: ".env.local" });
 
-const serverUrl = process.env.CAP_SERVER_URL;
+const CAP_DEV_PORT = 8111;
+
+// "auto" → detect LAN IP automatically (works across networks)
+// explicit URL → use as-is (e.g. https://app.meditalk.ai for prod)
+// unset → no server URL (local webDir assets)
+const raw = process.env.CAP_SERVER_URL;
+// "auto" → http://localhost:<port> — secure context without HTTPS.
+//   iOS Simulator: localhost = host machine (works directly)
+//   Android Emulator: requires `adb forward tcp:<port> tcp:<port>`
+const serverUrl = raw === "auto" ? `http://localhost:${CAP_DEV_PORT}` : raw;
 
 const config: CapacitorConfig = {
   appId: "ai.meditalk.app",
@@ -13,8 +22,7 @@ const config: CapacitorConfig = {
   webDir: "cap-assets",
 
   server: {
-    // The native app always loads from a server URL (no static export).
-    // Dev:  CAP_SERVER_URL=http://192.168.x.x:8111
+    // Dev:  CAP_SERVER_URL=auto  (auto-detects LAN IP with HTTPS)
     // Prod: CAP_SERVER_URL=https://app.meditalk.ai
     ...(serverUrl && {
       url: serverUrl,

@@ -11,18 +11,219 @@ export type LiveWaveformProps = GeneratedLiveWaveformProps & {
   /** Provide an existing MediaStream for visualisation.
    *  Avoids a second getUserMedia() call (fixes mobile mic conflicts). */
   stream?: MediaStream | null;
+  /** External audio level (0–1). Drives the waveform without a MediaStream
+   *  (used on native where audio is captured outside the browser). */
+  level?: number;
 };
 
 /**
  * Shared LiveWaveform wrapper.
  * - When `stream` is provided the waveform visualises that stream directly
  *   without opening a second microphone (prevents mobile mic toggling).
+ * - When `level` is provided (no stream), the waveform is driven by the
+ *   external level value (e.g. from native PCM chunks).
  * - Otherwise delegates to the generated component which calls getUserMedia().
  */
-export const LiveWaveform = ({ stream, ...props }: LiveWaveformProps) => {
-  if (!stream) return <GeneratedLiveWaveform {...props} />;
-  return <StreamWaveform stream={stream} {...props} />;
+export const LiveWaveform = ({
+  stream,
+  level,
+  ...props
+}: LiveWaveformProps) => {
+  if (stream) return <StreamWaveform stream={stream} {...props} />;
+  if (level !== undefined) return <LevelWaveform level={level} {...props} />;
+  return <GeneratedLiveWaveform {...props} />;
 };
+
+/* ------------------------------------------------------------------ */
+/*  LevelWaveform — visualises an external audio level (0–1)           */
+/* ------------------------------------------------------------------ */
+
+type LevelWaveformProps = Omit<
+  LiveWaveformProps,
+  "stream" | "level" | "deviceId" | "onStreamReady" | "onStreamEnd" | "onError"
+> &
+  HTMLAttributes<HTMLDivElement> & { level: number };
+
+function LevelWaveform({
+  level,
+  active = false,
+  processing = false,
+  barWidth = 3,
+  barGap = 1,
+  barRadius = 1.5,
+  barColor,
+  fadeEdges = true,
+  fadeWidth = 24,
+  barHeight: baseBarHeight = 4,
+  height = 64,
+  sensitivity = 1,
+  className,
+  // Consume unused props so they don't spread onto the div
+  smoothingTimeConstant: _st,
+  fftSize: _ff,
+  historySize: _hs,
+  updateRate: _ur,
+  mode: _mode,
+  ...divProps
+}: LevelWaveformProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const gradientCacheRef = useRef<CanvasGradient | null>(null);
+  const lastWidthRef = useRef(0);
+  const smoothedLevelRef = useRef(0);
+
+  const heightStyle = typeof height === "number" ? `${height}px` : height;
+
+  // Canvas resize handling
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ro = new ResizeObserver(() => {
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.scale(dpr, dpr);
+      gradientCacheRef.current = null;
+      lastWidthRef.current = rect.width;
+    });
+
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
+  // Animation loop
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let rafId: number;
+    let time = 0;
+
+    const animate = () => {
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      if (active) {
+        time += 0.05;
+
+        // Smooth the level with exponential moving average for fluid animation
+        const target = level * sensitivity;
+        smoothedLevelRef.current += (target - smoothedLevelRef.current) * 0.15;
+        const smoothed = smoothedLevelRef.current;
+
+        const step = barWidth + barGap;
+        const barCount = Math.floor(rect.width / step);
+        const halfCount = Math.floor(barCount / 2);
+        const centerY = rect.height / 2;
+
+        const computedBarColor =
+          barColor || getComputedStyle(canvas).color || "#000";
+
+        // Draw mirrored bars from center, with per-bar variation
+        for (let i = 0; i < barCount; i++) {
+          const mirrorIdx = i < halfCount ? halfCount - 1 - i : i - halfCount;
+          const normalizedPos = mirrorIdx / Math.max(1, halfCount);
+
+          // Generate visual variation using sine waves
+          const wave1 = Math.sin(time * 2 + normalizedPos * 4) * 0.3;
+          const wave2 = Math.sin(time * 1.3 - normalizedPos * 6) * 0.2;
+          // Center bars are taller, edges shorter
+          const centerWeight = 1 - normalizedPos * 0.5;
+
+          const value = Math.max(
+            0.05,
+            Math.min(
+              1,
+              smoothed * centerWeight + wave1 * smoothed + wave2 * smoothed,
+            ),
+          );
+
+          const x = i * step;
+          const barH = Math.max(baseBarHeight, value * rect.height * 0.8);
+          const y = centerY - barH / 2;
+
+          ctx.fillStyle = computedBarColor;
+          ctx.globalAlpha = 0.4 + value * 0.6;
+
+          if (barRadius > 0) {
+            ctx.beginPath();
+            ctx.roundRect(x, y, barWidth, barH, barRadius);
+            ctx.fill();
+          } else {
+            ctx.fillRect(x, y, barWidth, barH);
+          }
+        }
+
+        // Edge fading
+        if (fadeEdges && fadeWidth > 0 && rect.width > 0) {
+          if (
+            !gradientCacheRef.current ||
+            lastWidthRef.current !== rect.width
+          ) {
+            const gradient = ctx.createLinearGradient(0, 0, rect.width, 0);
+            const fadePct = Math.min(0.3, fadeWidth / rect.width);
+            gradient.addColorStop(0, "rgba(255,255,255,1)");
+            gradient.addColorStop(fadePct, "rgba(255,255,255,0)");
+            gradient.addColorStop(1 - fadePct, "rgba(255,255,255,0)");
+            gradient.addColorStop(1, "rgba(255,255,255,1)");
+            gradientCacheRef.current = gradient;
+            lastWidthRef.current = rect.width;
+          }
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.fillStyle = gradientCacheRef.current;
+          ctx.fillRect(0, 0, rect.width, rect.height);
+          ctx.globalCompositeOperation = "source-over";
+        }
+
+        ctx.globalAlpha = 1;
+      }
+
+      rafId = requestAnimationFrame(animate);
+    };
+
+    rafId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafId);
+  }, [
+    active,
+    level,
+    sensitivity,
+    barWidth,
+    baseBarHeight,
+    barGap,
+    barRadius,
+    barColor,
+    fadeEdges,
+    fadeWidth,
+  ]);
+
+  return (
+    <div
+      className={cn("relative h-full w-full", className)}
+      ref={containerRef}
+      style={{ height: heightStyle }}
+      aria-label={active ? "Live audio waveform" : "Audio waveform idle"}
+      role="img"
+      {...divProps}
+    >
+      {!active && !processing && (
+        <div className="border-muted-foreground/20 absolute top-1/2 right-0 left-0 -translate-y-1/2 border-t-2 border-dotted" />
+      )}
+      <canvas
+        className="block h-full w-full"
+        ref={canvasRef}
+        aria-hidden="true"
+      />
+    </div>
+  );
+}
 
 /* ------------------------------------------------------------------ */
 /*  StreamWaveform — visualises an externally-provided MediaStream     */
@@ -30,7 +231,7 @@ export const LiveWaveform = ({ stream, ...props }: LiveWaveformProps) => {
 
 type StreamWaveformProps = Omit<
   LiveWaveformProps,
-  "stream" | "deviceId" | "onStreamReady" | "onStreamEnd" | "onError"
+  "stream" | "level" | "deviceId" | "onStreamReady" | "onStreamEnd" | "onError"
 > &
   HTMLAttributes<HTMLDivElement> & { stream: MediaStream };
 
@@ -51,9 +252,9 @@ function StreamWaveform({
   fftSize = 256,
   className,
   // Consume props that StreamWaveform doesn't need (avoid spreading onto div)
-  historySize: _hs, // eslint-disable-line @typescript-eslint/no-unused-vars
-  updateRate: _ur, // eslint-disable-line @typescript-eslint/no-unused-vars
-  mode: _mode, // eslint-disable-line @typescript-eslint/no-unused-vars
+  historySize: _hs,
+  updateRate: _ur,
+  mode: _mode,
   ...divProps
 }: StreamWaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

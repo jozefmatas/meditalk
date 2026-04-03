@@ -2,10 +2,15 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { logger } from "@/lib/logger";
+import { isNative } from "@/lib/platform";
+import {
+  nativeStartRecordingService,
+  nativeStopRecordingService,
+} from "@/lib/native-guards";
 
-/** Detect if the device is Android */
-function isAndroid(): boolean {
-  return /Android/i.test(navigator.userAgent);
+/** Detect Android browser (NOT native) for web notification guard. */
+function isAndroidBrowser(): boolean {
+  return !isNative && /Android/i.test(navigator.userAgent);
 }
 
 export interface UseRecordingGuardsReturn {
@@ -14,20 +19,25 @@ export interface UseRecordingGuardsReturn {
   closeNavDialog: () => void;
   confirmLeave: () => void;
 
-  // Wake lock
+  // Wake lock / foreground service
   acquireWakeLock: () => Promise<void>;
   releaseWakeLock: () => void;
 
   // Notifications
   showRecordingNotification: () => Promise<void>;
   closeRecordingNotification: () => void;
+
+  // Audio interruption (phone calls)
+  audioInterrupted: boolean;
+  setAudioContext: (ctx: AudioContext | null) => void;
 }
 
 /**
  * Hook for managing recording guards that prevent interruptions:
  * - Navigation guard: Prevents accidental tab close or navigation
- * - Wake lock: Keeps screen on during recording
- * - Android notifications: Prevents tab suspension when screen locks
+ * - Wake lock (web) / Foreground service (Android): Keeps recording alive
+ * - Android notifications (web): Prevents tab suspension when screen locks
+ * - Audio interruption detection: Auto-detects phone call interruptions
  *
  * @param isRecording - Whether recording is currently active (not idle)
  * @returns Guard management functions and navigation dialog state
@@ -35,21 +45,40 @@ export interface UseRecordingGuardsReturn {
 export function useRecordingGuards(
   isRecording: boolean,
 ): UseRecordingGuardsReturn {
-  const t = useTranslations("encounters.recording");
+  const t = useTranslations("encounters.detail");
   const router = useRouter();
 
   // Navigation guard state
   const [navDialogOpen, setNavDialogOpen] = useState(false);
   const pendingNavUrlRef = useRef<string | null>(null);
 
-  // Wake lock ref
+  // Wake lock ref (web only)
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
-  // Android notification ref
+  // Android notification ref (web only)
   const notificationRef = useRef<Notification | null>(null);
 
-  // Wake lock functions
+  // Audio interruption state (phone call detection)
+  const [audioInterrupted, setAudioInterrupted] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const setAudioContext = useCallback((ctx: AudioContext | null) => {
+    audioContextRef.current = ctx;
+  }, []);
+
+  // Wake lock / foreground service functions
   const acquireWakeLock = useCallback(async () => {
+    if (isNative) {
+      // Android: start foreground service (keeps WebView + mic alive on lock)
+      // iOS: no-op here — UIBackgroundModes:audio handles it at OS level
+      await nativeStartRecordingService(
+        t("recordingNotificationTitle"),
+        t("recordingNotificationBody"),
+      );
+      return;
+    }
+
+    // Web: existing Wake Lock API
     if (!("wakeLock" in navigator)) return;
     try {
       wakeLockRef.current = await navigator.wakeLock.request("screen");
@@ -59,25 +88,33 @@ export function useRecordingGuards(
     } catch {
       // Failed (e.g. low battery, page not visible)
     }
-  }, []);
+  }, [t]);
 
   const releaseWakeLock = useCallback(() => {
+    if (isNative) {
+      // Android: stop foreground service. iOS: no-op
+      nativeStopRecordingService();
+      return;
+    }
+
+    // Web: existing release
     wakeLockRef.current?.release();
     wakeLockRef.current = null;
   }, []);
 
   // Notification functions
   const showRecordingNotification = useCallback(async () => {
-    // Only for Android devices with Notification API support
-    if (!isAndroid() || !("Notification" in window)) return;
+    // Native: no-op — Android foreground service already shows notification
+    if (isNative) return;
+
+    // Web: Only for Android browser devices with Notification API support
+    if (!isAndroidBrowser() || !("Notification" in window)) return;
 
     try {
-      // Request permission if not already granted
       if (Notification.permission === "default") {
         await Notification.requestPermission();
       }
 
-      // Create notification if permission granted
       if (Notification.permission === "granted") {
         notificationRef.current = new Notification(
           t("recordingNotificationTitle"),
@@ -86,17 +123,19 @@ export function useRecordingGuards(
             requireInteraction: true,
             icon: "/icon-192.png",
             badge: "/icon-192.png",
-            tag: "meditalk-recording", // Replaces previous notification if any
+            tag: "meditalk-recording",
           },
         );
       }
     } catch (err) {
-      // Notification failed — not critical, recording will still work
       logger.warn("[notification] Failed to show notification:", err);
     }
   }, [t]);
 
   const closeRecordingNotification = useCallback(() => {
+    // Native: no-op
+    if (isNative) return;
+
     if (notificationRef.current) {
       notificationRef.current.close();
       notificationRef.current = null;
@@ -116,8 +155,11 @@ export function useRecordingGuards(
     if (url) router.push(url);
   }, [router]);
 
-  // Re-acquire wake lock when page becomes visible (OS releases it on hide)
+  // Re-acquire wake lock when page becomes visible (web only — OS releases it on hide)
+  // Native: UIBackgroundModes (iOS) + foreground service (Android) persist
   useEffect(() => {
+    if (isNative) return;
+
     const handleVisibility = () => {
       if (
         document.visibilityState === "visible" &&
@@ -131,6 +173,27 @@ export function useRecordingGuards(
     return () =>
       document.removeEventListener("visibilitychange", handleVisibility);
   }, [isRecording, acquireWakeLock]);
+
+  // Detect phone call interruptions via AudioContext state changes.
+  // iOS: AudioContext transitions to "interrupted" → "running" after call.
+  // Android: AudioContext transitions to "suspended" → "running".
+  useEffect(() => {
+    const ctx = audioContextRef.current;
+    if (!ctx || !isRecording) return;
+
+    const handleStateChange = () => {
+      if (ctx.state === "interrupted" || ctx.state === "suspended") {
+        setAudioInterrupted(true);
+        logger.info("[recording-guards] Audio interrupted (phone call?)");
+      } else if (ctx.state === "running") {
+        setAudioInterrupted(false);
+        logger.info("[recording-guards] Audio resumed after interruption");
+      }
+    };
+
+    ctx.addEventListener("statechange", handleStateChange);
+    return () => ctx.removeEventListener("statechange", handleStateChange);
+  }, [isRecording]);
 
   // Prevent accidental navigation while recording is active
   useEffect(() => {
@@ -179,5 +242,7 @@ export function useRecordingGuards(
     releaseWakeLock,
     showRecordingNotification,
     closeRecordingNotification,
+    audioInterrupted,
+    setAudioContext,
   };
 }

@@ -11,6 +11,7 @@ import { ImpersonationProvider } from "@/components/admin/impersonation-context"
 import { ConditionalAnalytics } from "@/components/analytics/conditional-analytics";
 import { Toaster } from "@/components/shared/sonner";
 import { ErudaLoader } from "@/components/debug/eruda-loader";
+import { NativeLifecycle } from "@/components/native/native-lifecycle";
 import "../globals.css";
 
 const figtree = Figtree({
@@ -70,6 +71,7 @@ export default async function LocaleLayout({
         </NextIntlClientProvider>
         <ConditionalAnalytics />
         <ErudaLoader />
+        <NativeLifecycle />
       </body>
     </html>
   );

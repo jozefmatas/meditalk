@@ -30,6 +30,7 @@ import { useRecordingGuards } from "@/components/encounters/hooks/use-recording-
 import { useAudioRecorder } from "@/components/encounters/hooks/use-audio-recorder";
 import { useScribeStreaming } from "@/components/encounters/hooks/use-scribe-streaming";
 import { logger } from "@/lib/logger";
+import { isNative } from "@/lib/platform";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -101,6 +102,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       releaseWakeLock,
       showRecordingNotification,
       closeRecordingNotification,
+      audioInterrupted,
+      setAudioContext,
     } = useRecordingGuards(recorder.state !== "idle");
 
     // Keep latest hook values in refs so mount-only effects don't go stale
@@ -118,8 +121,50 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         scribeRef.current.stopScribe();
         releaseWakeLock();
         closeRecordingNotification();
+        setAudioContext(null);
       };
-    }, [releaseWakeLock, closeRecordingNotification]);
+    }, [releaseWakeLock, closeRecordingNotification, setAudioContext]);
+
+    // Auto-pause/resume on phone call interruption
+    const wasInterruptedRef = useRef(false);
+    useEffect(() => {
+      if (audioInterrupted && recorder.state === "recording") {
+        wasInterruptedRef.current = true;
+        recorder.pause();
+        scribe.stopScribe();
+        logger.info(
+          "[recording] Auto-paused due to audio interruption (phone call?)",
+        );
+        onRecordingStateChange?.("paused");
+      } else if (
+        !audioInterrupted &&
+        wasInterruptedRef.current &&
+        recorder.state === "paused"
+      ) {
+        wasInterruptedRef.current = false;
+        recorder.resume();
+
+        if (isNative) {
+          scribe.startScribeNative();
+        } else {
+          const stream = recorder.recordingStream;
+          if (stream) {
+            scribe.startScribe(stream).then((ctx) => {
+              if (ctx) setAudioContext(ctx);
+            });
+          }
+        }
+
+        logger.info("[recording] Auto-resumed after audio interruption ended");
+        onRecordingStateChange?.("recording");
+      }
+    }, [
+      audioInterrupted,
+      recorder,
+      scribe,
+      setAudioContext,
+      onRecordingStateChange,
+    ]);
 
     // ── Finalize (exposed via ref) ──
 
@@ -162,19 +207,29 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // ── Actions (no manual useCallback — React Compiler handles memoization) ──
 
     const startRecordingFlow = async () => {
-      const stream = await recorder.start(selectedDeviceId);
-      if (!stream) return;
+      if (isNative) {
+        // Native: open Scribe WebSocket, then start native recorder
+        // Chunks flow: native plugin → onNativeChunk → scribe.sendChunk
+        await scribe.startScribeNative();
+        await recorder.start({
+          onNativeChunk: (chunk) => scribe.sendChunk(chunk),
+        });
 
-      // Start Scribe streaming from the same mic stream (non-blocking)
-      scribe.startScribe(stream);
+        // Android foreground service / iOS background mode
+        acquireWakeLock();
+        onRecordingStateChange?.("recording");
+      } else {
+        // Web: start MediaRecorder, pipe stream to Scribe AudioWorklet
+        const stream = await recorder.start({ deviceId: selectedDeviceId });
+        if (!stream) return;
 
-      // Keep screen awake during recording
-      acquireWakeLock();
+        const audioCtx = await scribe.startScribe(stream);
+        if (audioCtx) setAudioContext(audioCtx);
 
-      // Show persistent notification on Android to prevent tab suspension
-      await showRecordingNotification();
-
-      onRecordingStateChange?.("recording");
+        acquireWakeLock();
+        await showRecordingNotification();
+        onRecordingStateChange?.("recording");
+      }
     };
 
     const handleStart = () => {
@@ -188,21 +243,31 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const handlePause = () => {
       recorder.pause();
       scribe.stopScribe();
-      closeRecordingNotification();
+
+      if (!isNative) {
+        setAudioContext(null);
+        closeRecordingNotification();
+      }
+
       onRecordingStateChange?.("paused");
     };
 
-    const handleResume = () => {
-      recorder.resume();
-
-      // Reconnect Scribe using the existing recording stream
-      const stream = recorder.recordingStream;
-      if (stream) {
-        scribe.startScribe(stream);
+    const handleResume = async () => {
+      if (isNative) {
+        // Native: reconnect Scribe WebSocket, then resume native recorder
+        await scribe.startScribeNative();
+        recorder.resume();
+      } else {
+        // Web: resume MediaRecorder, reconnect Scribe AudioWorklet
+        recorder.resume();
+        const stream = recorder.recordingStream;
+        if (stream) {
+          const audioCtx = await scribe.startScribe(stream);
+          if (audioCtx) setAudioContext(audioCtx);
+        }
+        showRecordingNotification();
       }
 
-      // Re-show notification on resume
-      showRecordingNotification();
       onRecordingStateChange?.("recording");
     };
 
@@ -339,6 +404,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               <LiveWaveform
                 active
                 stream={recorder.recordingStream}
+                level={isNative ? recorder.nativeLevel : undefined}
                 height={36}
                 barWidth={2}
                 barGap={1}

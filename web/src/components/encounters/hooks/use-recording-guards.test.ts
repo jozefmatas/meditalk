@@ -22,10 +22,27 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+// Mock platform detection — default to web
+vi.mock("@/lib/platform", () => ({
+  isNative: false,
+  isIOS: false,
+  isAndroid: false,
+  isWeb: true,
+}));
+
+// Mock native guards
+const mockStartRecordingService = vi.fn().mockResolvedValue(undefined);
+const mockStopRecordingService = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/lib/native-guards", () => ({
+  nativeStartRecordingService: (...args: unknown[]) =>
+    mockStartRecordingService(...args),
+  nativeStopRecordingService: (...args: unknown[]) =>
+    mockStopRecordingService(...args),
+}));
+
 describe("useRecordingGuards", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset DOM
     document.body.innerHTML = "";
   });
 
@@ -43,7 +60,6 @@ describe("useRecordingGuards", () => {
     it("should open dialog when isRecording is true and link is clicked", async () => {
       const { result } = renderHook(() => useRecordingGuards(true));
 
-      // Create a link and click it
       const link = document.createElement("a");
       link.href = "/encounters/new";
       document.body.appendChild(link);
@@ -70,7 +86,6 @@ describe("useRecordingGuards", () => {
     it("should navigate when confirmLeave is called", async () => {
       const { result } = renderHook(() => useRecordingGuards(true));
 
-      // Simulate pending navigation
       const link = document.createElement("a");
       link.href = "/settings";
       document.body.appendChild(link);
@@ -117,7 +132,7 @@ describe("useRecordingGuards", () => {
     });
   });
 
-  describe("Wake lock", () => {
+  describe("Wake lock (web)", () => {
     it("should provide acquireWakeLock function", () => {
       const { result } = renderHook(() => useRecordingGuards(false));
 
@@ -137,7 +152,6 @@ describe("useRecordingGuards", () => {
         await result.current.acquireWakeLock();
       });
 
-      // Should not throw error even if wakeLock is not supported
       expect(true).toBe(true);
     });
 
@@ -157,7 +171,6 @@ describe("useRecordingGuards", () => {
 
       renderHook(() => useRecordingGuards(true));
 
-      // Trigger visibility change
       Object.defineProperty(document, "visibilityState", {
         value: "visible",
         writable: true,
@@ -169,22 +182,31 @@ describe("useRecordingGuards", () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       });
 
-      // Should attempt to acquire wake lock when visible
       expect(mockWakeLock.request).toHaveBeenCalled();
+    });
+
+    it("should not call native guards on web", async () => {
+      const { result } = renderHook(() => useRecordingGuards(false));
+
+      await act(async () => {
+        await result.current.acquireWakeLock();
+      });
+
+      expect(mockStartRecordingService).not.toHaveBeenCalled();
+
+      act(() => {
+        result.current.releaseWakeLock();
+      });
+
+      expect(mockStopRecordingService).not.toHaveBeenCalled();
     });
   });
 
-  describe("Notifications", () => {
+  describe("Notifications (web)", () => {
     it("should provide showRecordingNotification function", () => {
       const { result } = renderHook(() => useRecordingGuards(false));
 
       expect(typeof result.current.showRecordingNotification).toBe("function");
-    });
-
-    it("should provide closeRecordingNotification function", () => {
-      const { result } = renderHook(() => useRecordingGuards(false));
-
-      expect(typeof result.current.closeRecordingNotification).toBe("function");
     });
 
     it("should handle missing Notification API gracefully", async () => {
@@ -194,29 +216,59 @@ describe("useRecordingGuards", () => {
         await result.current.showRecordingNotification();
       });
 
-      // Should not throw error even if Notification is not supported
       expect(true).toBe(true);
     });
   });
 
-  describe("Android detection", () => {
-    it("should detect Android devices", async () => {
-      // Mock Android user agent
-      Object.defineProperty(navigator, "userAgent", {
-        value:
-          "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
-        writable: true,
-        configurable: true,
-      });
-
+  describe("Audio interruption", () => {
+    it("should initialize audioInterrupted as false", () => {
       const { result } = renderHook(() => useRecordingGuards(false));
 
-      // Android-specific notification behavior would be tested here
-      await act(async () => {
-        await result.current.showRecordingNotification();
+      expect(result.current.audioInterrupted).toBe(false);
+    });
+
+    it("should provide setAudioContext function", () => {
+      const { result } = renderHook(() => useRecordingGuards(false));
+
+      expect(typeof result.current.setAudioContext).toBe("function");
+    });
+
+    it("should detect interrupted AudioContext state", async () => {
+      // Create a mock AudioContext with event support
+      const listeners: Record<string, (() => void)[]> = {};
+      const mockCtx = {
+        state: "running" as string,
+        addEventListener: vi.fn((event: string, cb: () => void) => {
+          if (!listeners[event]) listeners[event] = [];
+          listeners[event].push(cb);
+        }),
+        removeEventListener: vi.fn(),
+      };
+
+      // Start with isRecording=false, set audioContext, then switch to recording
+      let isRecording = false;
+      const { result, rerender } = renderHook(() =>
+        useRecordingGuards(isRecording),
+      );
+
+      // Set the AudioContext while not recording
+      act(() => {
+        result.current.setAudioContext(mockCtx as unknown as AudioContext);
       });
 
-      expect(true).toBe(true);
+      // Switch to recording — triggers the effect that attaches statechange listener
+      isRecording = true;
+      rerender();
+
+      // Simulate phone call interruption
+      mockCtx.state = "interrupted";
+      act(() => {
+        listeners["statechange"]?.forEach((cb) => cb());
+      });
+
+      await waitFor(() => {
+        expect(result.current.audioInterrupted).toBe(true);
+      });
     });
   });
 
