@@ -138,12 +138,8 @@ export function ReviewView({
   const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
 
   // Extracted hooks
-  const {
-    mobileHeaderHidden,
-    mobileCollapsibleRef,
-    onCollapsibleTransitionEnd,
-    skipTransition,
-  } = useMobileHeaderCollapse(activeTab);
+  const { mobileHeaderHidden, mobileCollapsibleRef } =
+    useMobileHeaderCollapse(activeTab);
 
   const { noteCopied, emailStatus, handleCopyNote, handleSendEmail } =
     useNoteActions({
@@ -368,11 +364,10 @@ export function ReviewView({
           {/* Collapsible part: title, date, template, buttons */}
           <div
             ref={mobileCollapsibleRef}
-            className={`grid ${skipTransition ? "" : "transition-[grid-template-rows] duration-300 ease-in-out"}`}
+            className="grid"
             style={{
               gridTemplateRows: mobileHeaderHidden ? "0fr" : "1fr",
             }}
-            onTransitionEnd={onCollapsibleTransitionEnd}
           >
             <div className="overflow-hidden">
               <div className="flex flex-col gap-4 pt-4 pb-2">

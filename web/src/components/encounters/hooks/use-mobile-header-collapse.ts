@@ -1,29 +1,22 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { isAndroid } from "@/lib/platform";
+import { useState, useRef, useEffect } from "react";
 
 /**
  * Manages mobile header collapse on scroll — hides title/template/buttons
  * when scrolling down to maximize reading space, reveals on scroll up.
  *
- * Handles edge cases: CSS transition locking, iOS rubber-band bounce
- * at bottom of content, and auto-expand on tab change.
+ * The collapse is instant (no CSS transition) because animating
+ * grid-template-rows inside a sticky element causes layout thrashing
+ * and sticky position flicker on mobile browsers.
+ *
+ * Handles edge cases: iOS rubber-band bounce at bottom of content,
+ * and auto-expand on tab change.
  */
 export function useMobileHeaderCollapse(activeTab: string) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const mobileCollapsibleRef = useRef<HTMLDivElement>(null);
   const anchorY = useRef(0);
   const isHidden = useRef(false);
-  const transitioning = useRef(false);
   const [prevActiveTab, setPrevActiveTab] = useState(activeTab);
-
-  const onCollapsibleTransitionEnd = useCallback(() => {
-    transitioning.current = false;
-  }, []);
-
-  // Android WebView: grid-template-rows transition inside a sticky element
-  // causes layout thrashing — the sticky position flickers during animation.
-  // Skip the CSS transition entirely on Android to avoid the jank.
-  const skipTransition = isAndroid;
 
   // Auto-expand header when switching tabs — the new tab's content may be too
   // short to scroll, so the scroll-based reveal would never fire.
@@ -35,12 +28,9 @@ export function useMobileHeaderCollapse(activeTab: string) {
     }
   }
 
-  // Keep scroll-handler refs in sync with state changes
+  // Keep scroll-handler ref in sync with state changes
   useEffect(() => {
-    if (mobileHeaderHidden !== isHidden.current) {
-      isHidden.current = mobileHeaderHidden;
-      transitioning.current = true;
-    }
+    isHidden.current = mobileHeaderHidden;
   }, [mobileHeaderHidden]);
 
   useEffect(() => {
@@ -55,8 +45,6 @@ export function useMobileHeaderCollapse(activeTab: string) {
     anchorY.current = getScrollY();
 
     const handleScroll = () => {
-      if (transitioning.current) return;
-
       const currentY = getScrollY();
       const delta = currentY - anchorY.current;
 
@@ -74,9 +62,6 @@ export function useMobileHeaderCollapse(activeTab: string) {
         }
 
         isHidden.current = true;
-        // On Android (no CSS transition), skip the transitioning lock —
-        // the state change is instant so we don't need debounce protection.
-        if (!skipTransition) transitioning.current = true;
         setMobileHeaderHidden(true);
         anchorY.current = currentY;
       } else if (isHidden.current && (delta < -30 || currentY < 40)) {
@@ -93,7 +78,6 @@ export function useMobileHeaderCollapse(activeTab: string) {
         }
 
         isHidden.current = false;
-        if (!skipTransition) transitioning.current = true;
         setMobileHeaderHidden(false);
         anchorY.current = currentY;
       }
@@ -105,13 +89,11 @@ export function useMobileHeaderCollapse(activeTab: string) {
 
     target.addEventListener("scroll", handleScroll, { passive: true });
     return () => target.removeEventListener("scroll", handleScroll);
-  }, [skipTransition]);
+  }, []);
 
   return {
     mobileHeaderHidden,
     setMobileHeaderHidden,
     mobileCollapsibleRef,
-    onCollapsibleTransitionEnd,
-    skipTransition,
   };
 }
