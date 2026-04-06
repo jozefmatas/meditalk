@@ -39,17 +39,9 @@ export function useMobileHeaderCollapse(activeTab: string) {
   useEffect(() => {
     if (mobileHeaderHidden !== isHidden.current) {
       isHidden.current = mobileHeaderHidden;
-      // On Android (no CSS transition), clear transitioning flag after a frame
-      // so the scroll handler resumes immediately. On web, onTransitionEnd clears it.
-      if (skipTransition) {
-        requestAnimationFrame(() => {
-          transitioning.current = false;
-        });
-      } else {
-        transitioning.current = true;
-      }
+      transitioning.current = true;
     }
-  }, [mobileHeaderHidden, skipTransition]);
+  }, [mobileHeaderHidden]);
 
   useEffect(() => {
     const scrollParent = mobileCollapsibleRef.current?.closest(
@@ -82,7 +74,9 @@ export function useMobileHeaderCollapse(activeTab: string) {
         }
 
         isHidden.current = true;
-        transitioning.current = true;
+        // On Android (no CSS transition), skip the transitioning lock —
+        // the state change is instant so we don't need debounce protection.
+        if (!skipTransition) transitioning.current = true;
         setMobileHeaderHidden(true);
         anchorY.current = currentY;
       } else if (isHidden.current && (delta < -30 || currentY < 40)) {
@@ -99,7 +93,7 @@ export function useMobileHeaderCollapse(activeTab: string) {
         }
 
         isHidden.current = false;
-        transitioning.current = true;
+        if (!skipTransition) transitioning.current = true;
         setMobileHeaderHidden(false);
         anchorY.current = currentY;
       }
@@ -111,7 +105,7 @@ export function useMobileHeaderCollapse(activeTab: string) {
 
     target.addEventListener("scroll", handleScroll, { passive: true });
     return () => target.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [skipTransition]);
 
   return {
     mobileHeaderHidden,
