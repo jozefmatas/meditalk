@@ -142,6 +142,7 @@ export function ReviewView({
     mobileHeaderHidden,
     mobileCollapsibleRef,
     onCollapsibleTransitionEnd,
+    skipTransition,
   } = useMobileHeaderCollapse(activeTab);
 
   const { noteCopied, emailStatus, handleCopyNote, handleSendEmail } =
@@ -367,7 +368,7 @@ export function ReviewView({
           {/* Collapsible part: title, date, template, buttons */}
           <div
             ref={mobileCollapsibleRef}
-            className="grid transition-[grid-template-rows] duration-300 ease-in-out"
+            className={`grid ${skipTransition ? "" : "transition-[grid-template-rows] duration-300 ease-in-out"}`}
             style={{
               gridTemplateRows: mobileHeaderHidden ? "0fr" : "1fr",
             }}

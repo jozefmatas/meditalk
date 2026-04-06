@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { isAndroid } from "@/lib/platform";
 
 /**
  * Manages mobile header collapse on scroll — hides title/template/buttons
@@ -19,6 +20,11 @@ export function useMobileHeaderCollapse(activeTab: string) {
     transitioning.current = false;
   }, []);
 
+  // Android WebView: grid-template-rows transition inside a sticky element
+  // causes layout thrashing — the sticky position flickers during animation.
+  // Skip the CSS transition entirely on Android to avoid the jank.
+  const skipTransition = isAndroid;
+
   // Auto-expand header when switching tabs — the new tab's content may be too
   // short to scroll, so the scroll-based reveal would never fire.
   // Uses React-sanctioned "adjust state during render" pattern (state, not refs).
@@ -33,9 +39,17 @@ export function useMobileHeaderCollapse(activeTab: string) {
   useEffect(() => {
     if (mobileHeaderHidden !== isHidden.current) {
       isHidden.current = mobileHeaderHidden;
-      transitioning.current = true;
+      // On Android (no CSS transition), clear transitioning flag after a frame
+      // so the scroll handler resumes immediately. On web, onTransitionEnd clears it.
+      if (skipTransition) {
+        requestAnimationFrame(() => {
+          transitioning.current = false;
+        });
+      } else {
+        transitioning.current = true;
+      }
     }
-  }, [mobileHeaderHidden]);
+  }, [mobileHeaderHidden, skipTransition]);
 
   useEffect(() => {
     const scrollParent = mobileCollapsibleRef.current?.closest(
@@ -104,5 +118,6 @@ export function useMobileHeaderCollapse(activeTab: string) {
     setMobileHeaderHidden,
     mobileCollapsibleRef,
     onCollapsibleTransitionEnd,
+    skipTransition,
   };
 }
