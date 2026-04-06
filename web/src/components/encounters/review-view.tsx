@@ -137,7 +137,6 @@ export function ReviewView({
   const [mobileTab, setMobileTab] = useState<"note" | "codes">("note");
   const [visibleTabs, setVisibleTabs] = useState<TabOption[]>([]);
 
-  // Extracted hooks
   const { mobileHeaderHidden, mobileCollapsibleRef } =
     useMobileHeaderCollapse(activeTab);
 
@@ -362,7 +361,7 @@ export function ReviewView({
         {/* Collapsible part — NOT inside sticky to avoid layout thrashing */}
         <div
           ref={mobileCollapsibleRef}
-          className="grid"
+          className="grid transition-[grid-template-rows] duration-200 ease-out"
           style={{
             gridTemplateRows: mobileHeaderHidden ? "0fr" : "1fr",
           }}
@@ -390,9 +389,7 @@ export function ReviewView({
                   }}
                 />
                 <div className="flex items-center gap-3">
-                  <Badge
-                    variant={`status-${visit.status}` as "status-started"}
-                  >
+                  <Badge variant={`status-${visit.status}` as "status-started"}>
                     {t(`status.${visit.status}`)}
                   </Badge>
                   <span className="text-sm text-foreground/65">
@@ -424,17 +421,13 @@ export function ReviewView({
                       size="lg"
                       className="flex-1"
                       onClick={handleSendEmail}
-                      disabled={
-                        !generatedNoteHtml || emailStatus === "sending"
-                      }
+                      disabled={!generatedNoteHtml || emailStatus === "sending"}
                     >
                       <HugeiconsIcon
                         icon={emailIcon}
                         size={16}
                         className={
-                          emailStatus === "sending"
-                            ? "animate-spin"
-                            : undefined
+                          emailStatus === "sending" ? "animate-spin" : undefined
                         }
                       />
                       {emailLabel}

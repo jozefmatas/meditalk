@@ -4,23 +4,23 @@ import { useState, useRef, useEffect } from "react";
  * Manages mobile header collapse on scroll — hides title/template/buttons
  * when scrolling down to maximize reading space, reveals on scroll up.
  *
- * The collapse is instant (no CSS transition) because animating
- * grid-template-rows inside a sticky element causes layout thrashing
- * and sticky position flicker on mobile browsers.
+ * Uses a scroll-lock mechanism: after toggling, scroll events are ignored
+ * for 300ms to prevent feedback loops caused by the height change shifting
+ * scroll position. This makes CSS transitions safe on all platforms.
  *
  * Handles edge cases: iOS rubber-band bounce at bottom of content,
- * and auto-expand on tab change.
+ * content too short to scroll, and auto-expand on tab change.
  */
 export function useMobileHeaderCollapse(activeTab: string) {
   const [mobileHeaderHidden, setMobileHeaderHidden] = useState(false);
   const mobileCollapsibleRef = useRef<HTMLDivElement>(null);
   const anchorY = useRef(0);
   const isHidden = useRef(false);
+  const scrollLocked = useRef(false);
   const [prevActiveTab, setPrevActiveTab] = useState(activeTab);
 
   // Auto-expand header when switching tabs — the new tab's content may be too
   // short to scroll, so the scroll-based reveal would never fire.
-  // Uses React-sanctioned "adjust state during render" pattern (state, not refs).
   if (prevActiveTab !== activeTab) {
     setPrevActiveTab(activeTab);
     if (mobileHeaderHidden) {
@@ -44,15 +44,28 @@ export function useMobileHeaderCollapse(activeTab: string) {
 
     anchorY.current = getScrollY();
 
+    /**
+     * Lock scroll handling for a duration after toggling collapse state.
+     * The height change shifts scrollTop, which the handler would
+     * misinterpret as user scroll — causing an infinite toggle loop.
+     */
+    const lockScroll = () => {
+      scrollLocked.current = true;
+      setTimeout(() => {
+        scrollLocked.current = false;
+        anchorY.current = getScrollY();
+      }, 300);
+    };
+
     const handleScroll = () => {
+      if (scrollLocked.current) return;
+
       const currentY = getScrollY();
       const delta = currentY - anchorY.current;
 
       if (!isHidden.current && delta > 40 && currentY > 80) {
         // Don't collapse if the content barely overflows — collapsing the header
         // would remove the overflow entirely, leaving no way to scroll back up.
-        // Use 2x header height as threshold to account for mobile browser chrome
-        // (address bar, bottom toolbar) which dynamically changes viewport size.
         const el = scrollParent || document.documentElement;
         const collapsibleH = mobileCollapsibleRef.current?.scrollHeight ?? 0;
         const scrollableOverflow = el.scrollHeight - el.clientHeight;
@@ -63,11 +76,10 @@ export function useMobileHeaderCollapse(activeTab: string) {
 
         isHidden.current = true;
         setMobileHeaderHidden(true);
-        anchorY.current = currentY;
+        lockScroll();
       } else if (isHidden.current && (delta < -30 || currentY < 40)) {
         // Ignore overscroll bounce at the bottom — on iOS the scroll position
-        // briefly decreases when content rubber-bands, which looks like a
-        // scroll-up but isn't intentional user input.
+        // briefly decreases when content rubber-bands.
         if (delta < -30 && currentY > 40) {
           const el = scrollParent || document.documentElement;
           const atBottom = el.scrollHeight - el.clientHeight - currentY < 30;
@@ -79,7 +91,7 @@ export function useMobileHeaderCollapse(activeTab: string) {
 
         isHidden.current = false;
         setMobileHeaderHidden(false);
-        anchorY.current = currentY;
+        lockScroll();
       }
 
       // Move anchor when continuing same direction
