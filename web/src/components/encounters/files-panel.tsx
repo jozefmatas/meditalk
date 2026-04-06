@@ -106,6 +106,11 @@ export function FilesContent({
           );
 
         if (uploadResults.length === 0) {
+          // All uploads failed — remove pending files so spinners stop
+          onFilesChange((prevFiles) => {
+            const pendingIds = new Set(pendingFiles.map((f) => f.id));
+            return prevFiles.filter((f) => !pendingIds.has(f.id));
+          });
           return;
         }
 
@@ -157,6 +162,11 @@ export function FilesContent({
         });
       } catch (err) {
         logger.error("File upload error:", err);
+        // Remove pending files so spinners stop
+        onFilesChange((prevFiles) => {
+          const pendingIds = new Set(pendingFiles.map((f) => f.id));
+          return prevFiles.filter((f) => !pendingIds.has(f.id));
+        });
       } finally {
         setIsUploading(false);
       }
