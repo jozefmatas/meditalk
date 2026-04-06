@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { FileMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
+import { isAndroid } from "@/lib/platform";
 
 export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
@@ -209,7 +210,15 @@ export function FilesContent({
       {/* Upload dropzone */}
       <button
         type="button"
-        onClick={() => inputRef.current?.click()}
+        onClick={async () => {
+          if (isAndroid) {
+            const { StoragePermission } =
+              await import("@/lib/storage-permission");
+            const { granted } = await StoragePermission.request();
+            if (!granted) return;
+          }
+          inputRef.current?.click();
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDragging(true);

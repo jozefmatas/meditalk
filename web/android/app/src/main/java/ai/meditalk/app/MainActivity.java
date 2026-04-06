@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativeAudioStreamPlugin.class);
+        registerPlugin(StoragePermissionPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Accept self-signed dev certs (mkcert) in debug builds
