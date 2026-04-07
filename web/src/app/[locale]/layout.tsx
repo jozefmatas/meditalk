@@ -36,10 +36,9 @@ export const viewport: Viewport = {
   themeColor: "#f1eee7",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
-  // DO NOT add viewportFit: "cover" — it kills background audio recording
-  // on both iOS Safari (mobile web) and Capacitor WebView (native).
+  // maximumScale, userScalable, and viewportFit were removed —
+  // they all break background audio recording on iOS/Android.
+  // See commits d8f88bf and 5015cb7 for what NOT to add back.
 };
 
 export default async function LocaleLayout({

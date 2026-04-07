@@ -98,6 +98,14 @@ export function useScribeStreaming(
         const audioCtx = new AudioContext();
         await audioCtx.resume(); // mobile browsers may start suspended
         audioCtxRef.current = audioCtx;
+
+        // ── Diagnostic: AudioContext state monitoring ──
+        logger.info(
+          `[scribe-diag] AudioContext: state=${audioCtx.state}, sampleRate=${audioCtx.sampleRate}`,
+        );
+        audioCtx.onstatechange = () =>
+          logger.info(`[scribe-diag] AudioContext state → ${audioCtx.state}`);
+
         const source = audioCtx.createMediaStreamSource(stream);
 
         logger.debug(

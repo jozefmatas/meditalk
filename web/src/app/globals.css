@@ -143,7 +143,6 @@
   }
   body {
     @apply bg-sidebar text-foreground;
-    overscroll-behavior: none;
   }
   button,
   [role="button"] {

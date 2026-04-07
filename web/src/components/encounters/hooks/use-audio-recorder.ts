@@ -247,14 +247,54 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         streamRef.current = stream;
         setRecordingStream(stream);
 
+        // ── Diagnostic: track + visibility monitoring ──
+        const track = stream.getAudioTracks()[0];
+        if (track) {
+          logger.info(
+            `[rec-diag] Track: readyState=${track.readyState}, muted=${track.muted}, enabled=${track.enabled}`,
+          );
+          track.onended = () =>
+            logger.warn("[rec-diag] TRACK ENDED (mic killed by OS?)");
+          track.onmute = () => logger.warn("[rec-diag] TRACK MUTED");
+          track.onunmute = () => logger.info("[rec-diag] Track unmuted");
+        }
+
+        const visHandler = () => {
+          const vis = document.visibilityState;
+          const tr = stream.getAudioTracks()[0];
+          const rec = mediaRecorderRef.current;
+          logger.info(
+            `[rec-diag] Visibility=${vis} | track=${tr?.readyState ?? "gone"},muted=${tr?.muted} | recorder=${rec?.state ?? "gone"}`,
+          );
+        };
+        document.addEventListener("visibilitychange", visHandler);
+        stream.addEventListener("removetrack", () => {
+          logger.warn("[rec-diag] STREAM removetrack fired");
+          document.removeEventListener("visibilitychange", visHandler);
+        });
+
         mimeTypeRef.current = mimeType;
         const recorder = new MediaRecorder(stream, { mimeType });
         mediaRecorderRef.current = recorder;
         chunksRef.current = [];
 
-        recorder.ondataavailable = onDataAvailable;
-        recorder.onstop = createSegmentOnStop();
+        recorder.ondataavailable = (e: BlobEvent) => {
+          logger.info(
+            `[rec-diag] Data chunk: ${e.data.size} bytes, recorder=${recorder.state}`,
+          );
+          onDataAvailable(e);
+        };
+        recorder.onstop = () => {
+          logger.info("[rec-diag] MediaRecorder onstop fired");
+          createSegmentOnStop()();
+        };
+        recorder.onerror = (e) =>
+          logger.error("[rec-diag] MediaRecorder ERROR:", e);
+
         recorder.start();
+        logger.info(
+          `[rec-diag] Started: mime=${mimeType}, recorder=${recorder.state}`,
+        );
 
         startTimer();
         setState("recording");
@@ -269,12 +309,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   );
 
   const pause = useCallback(() => {
+    logger.info(`[rec-diag] pause() called, isNative=${isNative}`);
     if (isNative) {
       nativePluginRef.current
         ?.pause()
         .catch((e) => logger.warn("[recording] Native pause failed:", e));
     } else {
       const recorder = mediaRecorderRef.current;
+      logger.info(`[rec-diag] pause: recorder=${recorder?.state}`);
       if (recorder?.state === "recording") {
         recorder.stop(); // triggers onstop → blob saved to segments array
       }
@@ -331,12 +373,17 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
     // ── Web path ──
     const recorder = mediaRecorderRef.current;
+    const track = streamRef.current?.getAudioTracks()[0];
+    logger.info(
+      `[rec-diag] stop(): recorder=${recorder?.state}, track=${track?.readyState ?? "gone"}, chunks=${chunksRef.current.length}, segments=${segmentsRef.current.length}`,
+    );
 
     if (!recorder || recorder.state === "inactive") {
       const blob = buildBlob();
       chunksRef.current = [];
       const mergedBlob = mergeSegments(blob);
       segmentsRef.current = [];
+      logger.info(`[rec-diag] stop() merged: ${mergedBlob?.size ?? 0} bytes`);
       return mergedBlob;
     }
 
@@ -346,6 +393,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         chunksRef.current = [];
         const mergedBlob = mergeSegments(blob);
         segmentsRef.current = [];
+        logger.info(`[rec-diag] stop() merged: ${mergedBlob?.size ?? 0} bytes`);
         resolve(mergedBlob);
       };
       recorder.stop();
