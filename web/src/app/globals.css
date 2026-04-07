@@ -133,6 +133,7 @@
 @layer base {
   html {
     font-size: 17px;
+    @apply bg-sidebar;
     @media (width >= theme(--breakpoint-desktop)) {
       font-size: 16px;
     }
