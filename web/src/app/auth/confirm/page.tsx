@@ -21,6 +21,8 @@ function AuthConfirmContent() {
     | "magiclink"
     | "email"
     | "signup"
+    | "invite"
+    | "recovery"
     | null;
 
   async function handleConfirm() {
