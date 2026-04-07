@@ -8,8 +8,8 @@ export interface StoragePermissionPlugin {
 /**
  * StoragePermission Capacitor plugin proxy.
  *
- * Requests READ_EXTERNAL_STORAGE (API < 33) or READ_MEDIA_IMAGES/VIDEO (API 33+)
- * so the WebView file picker can read selected files on Android.
+ * API < 33: Requests READ_EXTERNAL_STORAGE ("photos, media, and files" dialog).
+ * API 33+: Returns granted immediately (file picker grants per-file URI access).
  *
  * `registerPlugin` returns a synchronous Proxy — it must NOT be awaited
  * or returned from an async function, because JS would call `.then()`

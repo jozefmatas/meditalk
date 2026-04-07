@@ -35,6 +35,13 @@ export async function uploadWithRetry(
     onProgress?: (uploaded: boolean) => void;
   },
 ): Promise<UploadResult> {
+  // Pre-flight: reject empty files immediately (likely a permission/read issue)
+  if (blob.size === 0) {
+    throw new Error(
+      `[upload] ${name}: file is empty (0 bytes) — the device may not have permission to read this file`,
+    );
+  }
+
   for (let attempt = 0; attempt <= UPLOAD_MAX_RETRIES; attempt++) {
     try {
       const { path, fileId } = await uploadToStorage(blob, name, {
@@ -52,9 +59,16 @@ export async function uploadWithRetry(
         source: options?.source,
       };
     } catch (err) {
+      // Capture full error details — some errors serialize as empty `{}`
+      const errorDetail =
+        err instanceof Error
+          ? `${err.name}: ${err.message}`
+          : typeof err === "object" && err !== null
+            ? JSON.stringify(err)
+            : String(err);
+
       logger.error(
-        `[upload] ${name} attempt ${attempt + 1}/${UPLOAD_MAX_RETRIES + 1} failed:`,
-        err,
+        `[upload] ${name} (${blob.size} bytes, ${blob.type || "unknown"}) attempt ${attempt + 1}/${UPLOAD_MAX_RETRIES + 1} failed: ${errorDetail}`,
       );
 
       if (attempt < UPLOAD_MAX_RETRIES) {
@@ -63,7 +77,7 @@ export async function uploadWithRetry(
         await new Promise((r) => setTimeout(r, delay));
       } else {
         throw new Error(
-          `Upload failed after ${UPLOAD_MAX_RETRIES + 1} attempts: ${err instanceof Error ? err.message : "Unknown error"}`,
+          `Upload failed after ${UPLOAD_MAX_RETRIES + 1} attempts: ${errorDetail}`,
         );
       }
     }
