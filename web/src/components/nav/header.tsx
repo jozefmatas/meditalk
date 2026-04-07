@@ -85,35 +85,37 @@ export function Header() {
   const breadcrumbs = buildBreadcrumbs();
 
   return (
-    <header className="sticky top-0 z-10 flex min-h-13 shrink-0 items-center gap-2 border-b border-border bg-background px-4 pt-safe">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 self-auto! h-4" />
-      <Breadcrumb className="min-w-0 flex-1">
-        <BreadcrumbList className="flex-nowrap">
-          {breadcrumbs.map((crumb, index) => {
-            const isLast = index === breadcrumbs.length - 1;
-            return (
-              <React.Fragment key={index}>
-                {index > 0 && <BreadcrumbSeparator />}
-                <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
-                  {!isLast && crumb.href ? (
-                    <BreadcrumbLink asChild>
-                      <Link href={crumb.href}>{crumb.label}</Link>
-                    </BreadcrumbLink>
-                  ) : (
-                    <BreadcrumbPage className="truncate">
-                      {crumb.label}
-                    </BreadcrumbPage>
-                  )}
-                </BreadcrumbItem>
-              </React.Fragment>
-            );
-          })}
-        </BreadcrumbList>
-      </Breadcrumb>
-      {headerActions && (
-        <div className="ml-auto flex items-center gap-2">{headerActions}</div>
-      )}
+    <header className="sticky top-0 z-10 shrink-0 border-b border-border bg-background pt-safe">
+      <div className="flex h-13 items-center gap-2 px-4">
+        <SidebarTrigger className="-ml-1" />
+        <Separator orientation="vertical" className="mr-2 self-auto! h-4" />
+        <Breadcrumb className="min-w-0 flex-1">
+          <BreadcrumbList className="flex-nowrap">
+            {breadcrumbs.map((crumb, index) => {
+              const isLast = index === breadcrumbs.length - 1;
+              return (
+                <React.Fragment key={index}>
+                  {index > 0 && <BreadcrumbSeparator />}
+                  <BreadcrumbItem className={isLast ? "min-w-0" : "shrink-0"}>
+                    {!isLast && crumb.href ? (
+                      <BreadcrumbLink asChild>
+                        <Link href={crumb.href}>{crumb.label}</Link>
+                      </BreadcrumbLink>
+                    ) : (
+                      <BreadcrumbPage className="truncate">
+                        {crumb.label}
+                      </BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </React.Fragment>
+              );
+            })}
+          </BreadcrumbList>
+        </Breadcrumb>
+        {headerActions && (
+          <div className="ml-auto flex items-center gap-2">{headerActions}</div>
+        )}
+      </div>
     </header>
   );
 }

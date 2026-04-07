@@ -26,7 +26,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         {...props}
       >
         {/* Figma node 100:1619 — entire content area has p-2, sidebar root has 0 padding */}
-        <SidebarContent className="gap-0 overflow-hidden p-2">
+        <SidebarContent className="gap-0 overflow-hidden p-2 pt-safe">
           {/* Brand + nav — sticky top, never scrolls */}
           <div className="flex shrink-0 flex-col gap-3 pb-6">
             <div className="flex h-9 items-center">
@@ -46,7 +46,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <ImpersonationBanner />
 
         {/* Figma node 100:1690 — footer has p-2 */}
-        <SidebarFooter className="p-0">
+        <SidebarFooter className="p-0 pb-safe">
           <ClinicSwitcher />
         </SidebarFooter>
       </Sidebar>
