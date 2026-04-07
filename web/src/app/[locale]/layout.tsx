@@ -38,7 +38,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  viewportFit: "cover",
+  // viewportFit: "cover" is added dynamically by NativeLifecycle on Capacitor only.
+  // Setting it statically breaks iOS Safari background audio (recording dies on screen lock).
 };
 
 export default async function LocaleLayout({
