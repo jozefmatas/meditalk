@@ -16,17 +16,6 @@ export function NativeLifecycle() {
   useEffect(() => {
     if (!isNative) return;
 
-    // Native needs viewport-fit=cover for safe area handling.
-    // Added dynamically here (not in static viewport export) because
-    // it breaks iOS Safari background audio on mobile web.
-    const meta = document.querySelector('meta[name="viewport"]');
-    if (meta) {
-      const content = meta.getAttribute("content") || "";
-      if (!content.includes("viewport-fit=cover")) {
-        meta.setAttribute("content", content + ", viewport-fit=cover");
-      }
-    }
-
     let cleanup: (() => void) | undefined;
 
     async function init() {
