@@ -48,7 +48,7 @@ export function MobileDraftBottomBar({
   };
 
   return (
-    <div className="fixed bottom-0 left-0 z-10 flex w-full flex-col gap-2 border-t border-border bg-background px-4 py-3 desktop:hidden">
+    <div className="fixed bottom-0 left-0 z-10 flex w-full flex-col gap-2 border-t border-border bg-background px-4 py-3 pb-safe desktop:hidden">
       <div className="flex items-center gap-4">
         <LabeledSwitch
           label={t("detail.sendAsEmail")}

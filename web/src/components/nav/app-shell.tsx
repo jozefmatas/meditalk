@@ -2,6 +2,7 @@
 
 import { SidebarProvider, SidebarInset } from "@/components/shared/sidebar";
 import { TooltipProvider } from "@/components/shared/tooltip";
+import { cn } from "@/lib/utils";
 import { AppSidebar } from "./app-sidebar";
 import { Header } from "./header";
 
@@ -18,7 +19,12 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
         <AppSidebar />
         <SidebarInset className="max-h-svh overflow-hidden">
           <Header />
-          <div className={contentClassName ?? "flex-1 overflow-y-auto p-6"}>
+          <div
+            className={cn(
+              contentClassName ?? "flex-1 overflow-y-auto p-6",
+              "pb-safe",
+            )}
+          >
             {children}
           </div>
         </SidebarInset>
