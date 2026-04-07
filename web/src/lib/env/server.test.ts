@@ -19,7 +19,7 @@ describe("validateServerEnv", () => {
 
   it("applies defaults for optional vars", () => {
     const env = validateServerEnv(VALID_ENV);
-    expect(env.EMAIL_FROM).toBe("MediTalk <noreply@meditalk.ai>");
+    expect(env.EMAIL_FROM).toBe("MediTalk <team@meditalk.ai>");
     expect(env.ADMIN_EMAILS).toBe("");
     expect(env.NODE_ENV).toBe("development");
     expect(env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined();

@@ -7,7 +7,7 @@ const serverSchema = z.object({
   ELEVENLABS_API_KEY: z.string().min(1, "ELEVENLABS_API_KEY is required"),
   RESEND_API_KEY: z.string().min(1, "RESEND_API_KEY is required"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
-  EMAIL_FROM: z.string().default("MediTalk <noreply@meditalk.ai>"),
+  EMAIL_FROM: z.string().default("MediTalk <team@meditalk.ai>"),
   ADMIN_EMAILS: z.string().default(""),
   NODE_ENV: z
     .enum(["development", "production", "test"])
