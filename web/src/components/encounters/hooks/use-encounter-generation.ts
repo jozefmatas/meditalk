@@ -181,14 +181,49 @@ export function useEncounterGeneration({
 
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
-      const streamingTranscript = finalized?.transcript ?? null;
+      let streamingTranscript = finalized?.transcript ?? null;
 
       logger.debug(
         `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
       );
 
       try {
-        // Recording is now handled via real-time transcript - no upload needed
+        // Fallback: if Scribe real-time gave no transcript but we have a
+        // recorded blob, batch-transcribe it server-side so generation
+        // still has input (common when screen locks kill the WebSocket).
+        if (!streamingTranscript && blobToProcess && blobToProcess.size > 0) {
+          logger.debug(
+            `[generate] No real-time transcript — batch-transcribing ${blobToProcess.size} bytes`,
+          );
+          try {
+            const form = new FormData();
+            form.append("audio", blobToProcess, "recording.webm");
+            form.append("language", generationLanguage);
+            form.append("visitId", visitId);
+
+            const transcribeRes = await fetch("/api/batch-transcribe", {
+              method: "POST",
+              body: form,
+            });
+
+            if (transcribeRes.ok) {
+              const { text } = await transcribeRes.json();
+              if (text) {
+                streamingTranscript = text;
+                logger.debug(
+                  `[generate] Batch transcription succeeded: ${text.length} chars`,
+                );
+              }
+            } else {
+              logger.warn(
+                `[generate] Batch transcription failed: ${transcribeRes.status}`,
+              );
+            }
+          } catch (err) {
+            logger.warn("[generate] Batch transcription error:", err);
+          }
+        }
+
         setAudioBlob(null);
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
@@ -376,6 +411,7 @@ export function useEncounterGeneration({
       selectedTemplateId,
       doctorNotes,
       audioBlob,
+      generationLanguage,
       setVisit,
       setError,
       setCachedTemplate,
