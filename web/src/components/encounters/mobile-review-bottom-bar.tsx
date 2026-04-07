@@ -17,7 +17,7 @@ export function MobileReviewBottomBar({
   const t = useTranslations("encounters");
 
   return (
-    <div className="fixed bottom-0 left-0 z-10 flex w-full border-t border-border bg-background px-4 py-3 pb-safe desktop:hidden">
+    <div className="fixed bottom-0 left-0 z-10 flex w-full border-t border-border bg-background px-4 py-3 desktop:hidden">
       <Button
         size="lg"
         className="w-full"

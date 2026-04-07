@@ -7,11 +7,9 @@ const figtree = Figtree({
 });
 
 export const viewport: Viewport = {
-  themeColor: "#4945ff",
+  themeColor: "#f1eee7",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export default function AuthLayout({
