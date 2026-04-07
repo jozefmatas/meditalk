@@ -60,9 +60,16 @@ export async function uploadToStorage(
   const contentType =
     file instanceof File ? file.type : "application/octet-stream";
 
+  // Android WebView workaround: File objects from the system file picker
+  // may not work with fetch() — convert to a plain Blob via ArrayBuffer.
+  const uploadBlob =
+    file instanceof File
+      ? new Blob([await file.arrayBuffer()], { type: file.type })
+      : file;
+
   const { error: uploadError } = await supabase.storage
     .from("encounter-files")
-    .upload(path, file, { contentType, upsert: false });
+    .upload(path, uploadBlob, { contentType, upsert: false });
 
   if (uploadError) {
     throw new Error(`Upload failed: ${uploadError.message}`);
