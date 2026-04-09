@@ -5,6 +5,7 @@ import {
   AccordionContent,
 } from "@/components/shared/accordion";
 import { Badge } from "@/components/shared/badge";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
   Mic01Icon,
   Note01Icon,
@@ -12,6 +13,7 @@ import {
   Image01Icon,
 } from "@hugeicons/core-free-icons";
 import type { Encounter } from "@/lib/types";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 interface ResourcesPanelProps {
   visit: Encounter;
@@ -39,6 +41,7 @@ function resourceTypeLabelKey(file: EncounterFile): string {
 }
 
 export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
+  const isAdmin = useIsAdmin();
   const meta = visit.metadata as Record<string, unknown> | undefined;
   const doctorNotes = (meta?.doctor_notes as string) || "";
   const files = ((meta?.files as EncounterFile[]) || []).filter((f) =>
@@ -51,7 +54,39 @@ export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   const hasFiles = files.length > 0;
   const hasAnything = hasTranscript || hasDoctorNotes || hasFiles;
 
-  // First non-empty section starts open
+  if (!hasAnything) {
+    return (
+      <p className="text-sm text-muted-foreground">{t("detail.noResources")}</p>
+    );
+  }
+
+  // Non-admin: plain labels, no expandable content
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col gap-3">
+        {hasTranscript && (
+          <ResourceLabel icon={Mic01Icon}>
+            {t("detail.recordingTranscript")}
+          </ResourceLabel>
+        )}
+        {hasDoctorNotes && (
+          <ResourceLabel icon={Note01Icon}>
+            {t("detail.doctorNotes")}
+          </ResourceLabel>
+        )}
+        {files.map((file, i) => (
+          <ResourceLabel key={file.name + i} icon={iconForFileType(file.type)}>
+            <span className="truncate">{file.name}</span>
+            <Badge variant="status-started" className="ml-2 shrink-0">
+              {t(resourceTypeLabelKey(file))}
+            </Badge>
+          </ResourceLabel>
+        ))}
+      </div>
+    );
+  }
+
+  // Admin: expandable accordions with content
   const defaultOpen = hasTranscript
     ? ["transcript"]
     : hasDoctorNotes
@@ -59,12 +94,6 @@ export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
       : hasFiles
         ? ["file-0"]
         : [];
-
-  if (!hasAnything) {
-    return (
-      <p className="text-sm text-muted-foreground">{t("detail.noResources")}</p>
-    );
-  }
 
   return (
     <Accordion
@@ -116,5 +145,21 @@ export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
         </AccordionItem>
       ))}
     </Accordion>
+  );
+}
+
+/** Plain resource label — no chevron, no expandable content */
+function ResourceLabel({
+  icon,
+  children,
+}: {
+  icon: IconSvgElement;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-medium">
+      <HugeiconsIcon icon={icon} size={16} className="shrink-0" />
+      {children}
+    </div>
   );
 }
