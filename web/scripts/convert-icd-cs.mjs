@@ -55,7 +55,9 @@ async function main() {
 
     // Output format matches English CSV: "description",CODE-truncated_description
     const truncated = description.substring(0, 40);
-    const escaped = description.includes(",") ? `"${description}"` : description;
+    const escaped = description.includes(",")
+      ? `"${description}"`
+      : description;
     outputLines.push(`${escaped},${code}-${truncated}`);
   }
 

@@ -162,8 +162,9 @@ async function ocrImageWithUrl(
   ];
 
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    temperature: 0,
     messages: [{ role: "user", content }],
   });
 
@@ -172,7 +173,7 @@ async function ocrImageWithUrl(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       operation: "ocr_image",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -210,8 +211,9 @@ async function ocrImageWithBase64(
   ];
 
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    temperature: 0,
     messages: [{ role: "user", content }],
   });
 
@@ -220,7 +222,7 @@ async function ocrImageWithBase64(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       operation: "ocr_image",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -258,8 +260,9 @@ async function ocrPdfWithUrl(
   ];
 
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    temperature: 0,
     messages: [{ role: "user", content }],
   });
 
@@ -268,7 +271,7 @@ async function ocrPdfWithUrl(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       operation: "ocr_pdf",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -304,8 +307,9 @@ async function ocrPdfWithClaude(
   ];
 
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 4096,
+    model: "claude-sonnet-4-6",
+    max_tokens: 8192,
+    temperature: 0,
     messages: [{ role: "user", content }],
   });
 
@@ -314,7 +318,7 @@ async function ocrPdfWithClaude(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       operation: "ocr_pdf",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,

@@ -6,7 +6,10 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import { usePageTitle } from "@/components/nav/page-title-context";
 import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
-import { FilesPanel } from "@/components/encounters/files-panel";
+import {
+  FilesPanel,
+  hasUploadingFiles,
+} from "@/components/encounters/files-panel";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
 import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
@@ -174,13 +177,17 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [data, generation]);
 
   // --- Derived state ---
-  const canGenerate = !!(
-    data.visit?.raw_text ||
-    generation.audioBlob ||
-    generation.doctorNotes.trim() ||
-    data.files.length > 0 ||
-    generation.hasActiveRecording
-  );
+  // Block generation while any file is still uploading so the pipeline
+  // doesn't race the uploads and miss their extracted content.
+  const filesUploading = hasUploadingFiles(data.files);
+  const canGenerate =
+    !!(
+      data.visit?.raw_text ||
+      generation.audioBlob ||
+      generation.doctorNotes.trim() ||
+      data.files.length > 0 ||
+      generation.hasActiveRecording
+    ) && !filesUploading;
   const isDraft = data.visit
     ? data.visit.status === "started" || data.visit.status === "recording"
     : true;
@@ -332,8 +339,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
             <div aria-hidden className="min-h-32 shrink-0" />
           </div>
         </div>
-      ) : data.visit.status === "processing" ? (
-        /* Processing overlay — server generating, SSE not connected */
+      ) : generation.isGenerating || data.visit.status === "processing" ? (
+        /* Processing overlay — server generating, SSE not connected.
+         * `isGenerating` keeps the overlay pinned during the entire
+         * client-driven generation lifecycle so the UI never falls back
+         * to DraftView if visit.status gets transiently reset by a stray
+         * event or stale poll response. */
         <ProcessingOverlay />
       ) : isDraft ? (
         /* Draft mode — recording + editor */

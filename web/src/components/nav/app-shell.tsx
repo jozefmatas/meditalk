@@ -18,9 +18,7 @@ export function AppShell({ children, contentClassName }: AppShellProps) {
         <AppSidebar />
         <SidebarInset className="max-h-svh overflow-hidden">
           <Header />
-          <div
-            className={contentClassName ?? "flex-1 overflow-y-auto p-6"}
-          >
+          <div className={contentClassName ?? "flex-1 overflow-y-auto p-6"}>
             {children}
           </div>
         </SidebarInset>

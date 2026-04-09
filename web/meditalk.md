@@ -4,23 +4,23 @@ AI-powered medical documentation platform. Records consultations, transcribes au
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Framework | Next.js 16 (App Router) |
-| Language | TypeScript 5 |
-| UI | React 19, Tailwind CSS v4 (PostCSS), shadcn (radix-nova style) |
-| Icons | `@hugeicons/react` + `@hugeicons/core-free-icons` |
-| Editor | TipTap 3 (StarterKit, Placeholder, Slash Commands) |
-| AI Generation | Anthropic Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) |
-| Transcription | OpenAI Whisper (`whisper-1`) |
-| Embeddings | OpenAI `text-embedding-ada-002` (1536 dimensions) |
-| PDF Parsing | `pdf-parse` v2 |
-| Database | Supabase (PostgreSQL + pgvector + Storage) |
-| Auth | Supabase Magic Link |
-| i18n | `next-intl` — Slovak (default), Czech, English |
-| Animations | Motion (Framer Motion) |
-| Variants | `class-variance-authority` (CVA) |
-| Package manager | npm |
+| Layer           | Technology                                                     |
+| --------------- | -------------------------------------------------------------- |
+| Framework       | Next.js 16 (App Router)                                        |
+| Language        | TypeScript 5                                                   |
+| UI              | React 19, Tailwind CSS v4 (PostCSS), shadcn (radix-nova style) |
+| Icons           | `@hugeicons/react` + `@hugeicons/core-free-icons`              |
+| Editor          | TipTap 3 (StarterKit, Placeholder, Slash Commands)             |
+| AI Generation   | Anthropic Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)     |
+| Transcription   | OpenAI Whisper (`whisper-1`)                                   |
+| Embeddings      | OpenAI `text-embedding-ada-002` (1536 dimensions)              |
+| PDF Parsing     | `pdf-parse` v2                                                 |
+| Database        | Supabase (PostgreSQL + pgvector + Storage)                     |
+| Auth            | Supabase Magic Link                                            |
+| i18n            | `next-intl` — Slovak (default), Czech, English                 |
+| Animations      | Motion (Framer Motion)                                         |
+| Variants        | `class-variance-authority` (CVA)                               |
+| Package manager | npm                                                            |
 
 ## Project Structure
 
@@ -92,18 +92,18 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ### Scripts
 
-| Script | Command | Description |
-|---|---|---|
-| `npm run dev` | `next dev -p 8111` | Dev server on port 8111 |
-| `npm run build` | `next build` | Production build |
-| `npm test` | `vitest` | Run all tests (unit + storybook) |
-| `npm run test:unit` | `vitest --project unit` | Run unit tests only |
-| `npm run storybook` | `storybook dev -p 8001` | Storybook on port 8001 |
-| `npm run db:push` | `supabase db push` | Push migrations to remote |
-| `npm run db:reset` | `supabase db reset --linked --yes` | Reset remote DB |
-| `npm run db:types` | `supabase gen types ...` | Generate TS types from DB |
-| `npm run db:migration:new` | `supabase migration new` | Create new migration |
-| `npm run db:status` | `supabase migration list --linked` | Check migration status |
+| Script                     | Command                            | Description                      |
+| -------------------------- | ---------------------------------- | -------------------------------- |
+| `npm run dev`              | `next dev -p 8111`                 | Dev server on port 8111          |
+| `npm run build`            | `next build`                       | Production build                 |
+| `npm test`                 | `vitest`                           | Run all tests (unit + storybook) |
+| `npm run test:unit`        | `vitest --project unit`            | Run unit tests only              |
+| `npm run storybook`        | `storybook dev -p 8001`            | Storybook on port 8001           |
+| `npm run db:push`          | `supabase db push`                 | Push migrations to remote        |
+| `npm run db:reset`         | `supabase db reset --linked --yes` | Reset remote DB                  |
+| `npm run db:types`         | `supabase gen types ...`           | Generate TS types from DB        |
+| `npm run db:migration:new` | `supabase migration new`           | Create new migration             |
+| `npm run db:status`        | `supabase migration list --linked` | Check migration status           |
 
 ### Running Locally
 
@@ -129,39 +129,40 @@ Applied in order:
 
 #### `visits` (originally `transcripts`)
 
-| Column | Type | Default | Description |
-|---|---|---|---|
-| `id` | uuid | `gen_random_uuid()` | Primary key |
-| `user_id` | uuid | — | FK to `auth.users`, cascade delete |
-| `title` | text | null | Encounter title |
-| `audio_path` | text | null | Path in `encounter-files` bucket |
-| `raw_text` | text | null | Full transcribed text |
-| `language` | text | `'en'` | `'en'` / `'sk'` / `'cs'` |
-| `visit_date` | timestamptz | `now()` | Date of visit |
-| `patient_name` | text | null | Patient name |
-| `patient_id` | text | null | Patient identifier |
-| `visit_type` | text | `'consultation'` | consultation, follow_up, preventive, acute, specialist_referral, telemedicine, home_visit |
-| `status` | text | `'draft'` | started, recording, processing, to_review, completed, archived |
-| `soap_note` | text | null | Generated medical note (HTML) |
-| `patient_letter` | text | null | Patient-friendly letter |
-| `metadata` | jsonb | `'{}'` | Flexible metadata (files[], doctor_notes, template_id) |
-| `created_at` | timestamptz | `now()` | Creation timestamp |
+| Column           | Type        | Default             | Description                                                                               |
+| ---------------- | ----------- | ------------------- | ----------------------------------------------------------------------------------------- |
+| `id`             | uuid        | `gen_random_uuid()` | Primary key                                                                               |
+| `user_id`        | uuid        | —                   | FK to `auth.users`, cascade delete                                                        |
+| `title`          | text        | null                | Encounter title                                                                           |
+| `audio_path`     | text        | null                | Path in `encounter-files` bucket                                                          |
+| `raw_text`       | text        | null                | Full transcribed text                                                                     |
+| `language`       | text        | `'en'`              | `'en'` / `'sk'` / `'cs'`                                                                  |
+| `visit_date`     | timestamptz | `now()`             | Date of visit                                                                             |
+| `patient_name`   | text        | null                | Patient name                                                                              |
+| `patient_id`     | text        | null                | Patient identifier                                                                        |
+| `visit_type`     | text        | `'consultation'`    | consultation, follow_up, preventive, acute, specialist_referral, telemedicine, home_visit |
+| `status`         | text        | `'draft'`           | started, recording, processing, to_review, completed, archived                            |
+| `soap_note`      | text        | null                | Generated medical note (HTML)                                                             |
+| `patient_letter` | text        | null                | Patient-friendly letter                                                                   |
+| `metadata`       | jsonb       | `'{}'`              | Flexible metadata (files[], doctor_notes, template_id)                                    |
+| `created_at`     | timestamptz | `now()`             | Creation timestamp                                                                        |
 
 **Indexes:**
+
 - `idx_visits_user_date` — (user_id, visit_date DESC)
 - `idx_visits_status` — (user_id, status)
 - `idx_visits_patient` — (user_id, patient_name)
 
 #### `transcript_chunks`
 
-| Column | Type | Description |
-|---|---|---|
-| `id` | uuid | Primary key |
-| `visit_id` | uuid | FK to `visits`, cascade delete |
-| `chunk_index` | int | Position in sequence |
-| `content` | text | Chunk text |
-| `embedding` | vector(1536) | OpenAI embedding |
-| `created_at` | timestamptz | Creation timestamp |
+| Column        | Type         | Description                    |
+| ------------- | ------------ | ------------------------------ |
+| `id`          | uuid         | Primary key                    |
+| `visit_id`    | uuid         | FK to `visits`, cascade delete |
+| `chunk_index` | int          | Position in sequence           |
+| `content`     | text         | Chunk text                     |
+| `embedding`   | vector(1536) | OpenAI embedding               |
+| `created_at`  | timestamptz  | Creation timestamp             |
 
 **Index:** IVFFlat on `embedding` for cosine similarity (100 lists)
 
@@ -193,14 +194,15 @@ Transcribe audio, chunk text, generate embeddings, store everything.
 
 **Request:** `multipart/form-data`
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `file` | File | Yes | Audio file (any `audio/*`, max 50MB) |
-| `title` | string | No | Encounter title |
-| `language` | string | Yes | `en` / `sk` / `cs` |
-| `visitId` | string | No | Attach to existing visit |
+| Field      | Type   | Required | Description                          |
+| ---------- | ------ | -------- | ------------------------------------ |
+| `file`     | File   | Yes      | Audio file (any `audio/*`, max 50MB) |
+| `title`    | string | No       | Encounter title                      |
+| `language` | string | Yes      | `en` / `sk` / `cs`                   |
+| `visitId`  | string | No       | Attach to existing visit             |
 
 **Response:** `ProcessAudioResponse`
+
 ```json
 {
   "visitId": "uuid",
@@ -211,6 +213,7 @@ Transcribe audio, chunk text, generate embeddings, store everything.
 ```
 
 **Pipeline:**
+
 1. Validate file type and size
 2. Upload to `encounter-files` bucket
 3. Transcribe via Whisper
@@ -224,6 +227,7 @@ Transcribe audio, chunk text, generate embeddings, store everything.
 Generate a medical note from transcript chunks + doctor notes + uploaded files.
 
 **Request:** JSON
+
 ```json
 {
   "visitId": "uuid",
@@ -233,6 +237,7 @@ Generate a medical note from transcript chunks + doctor notes + uploaded files.
 ```
 
 **Response:** `GenerateResponse`
+
 ```json
 {
   "generatedNote": "<h2>...</h2><p>...</p>",
@@ -244,6 +249,7 @@ Generate a medical note from transcript chunks + doctor notes + uploaded files.
 ```
 
 **Pipeline:**
+
 1. Fetch visit (language, metadata)
 2. Collect extracted text from uploaded files (`metadata.files[].extracted_text`)
 3. Load template + section labels from locale messages
@@ -260,14 +266,14 @@ List encounters with pagination, filtering, sorting.
 
 **Query params:**
 
-| Param | Default | Description |
-|---|---|---|
-| `page` | 1 | Page number |
-| `limit` | 10 (max 50) | Items per page |
-| `status` | — | Filter by status |
-| `search` | — | Search title + patient name (ilike) |
-| `sortBy` | `visit_date` | `visit_date` / `created_at` / `patient_name` |
-| `sortOrder` | `desc` | `asc` / `desc` |
+| Param       | Default      | Description                                  |
+| ----------- | ------------ | -------------------------------------------- |
+| `page`      | 1            | Page number                                  |
+| `limit`     | 10 (max 50)  | Items per page                               |
+| `status`    | —            | Filter by status                             |
+| `search`    | —            | Search title + patient name (ilike)          |
+| `sortBy`    | `visit_date` | `visit_date` / `created_at` / `patient_name` |
+| `sortOrder` | `desc`       | `asc` / `desc`                               |
 
 **Response:** `EncounterListResponse`
 
@@ -302,6 +308,7 @@ Upload file(s), extract text, store in Supabase Storage.
 **Request:** `multipart/form-data` — field `files` (multiple)
 
 **Pipeline per file:**
+
 1. Upload to `encounter-files` bucket at `{userId}/{encounterId}/{fileId}-{filename}`
 2. Extract text via `extractTextFromFile()` (see File Extraction Pipeline)
 3. Store file metadata in `visit.metadata.files[]` including `extracted_text`
@@ -315,6 +322,7 @@ Remove file from storage and metadata.
 Semantic search within a visit's transcript chunks.
 
 **Request:**
+
 ```json
 {
   "visitId": "uuid",
@@ -401,6 +409,7 @@ The generate route uses a **clinical retrieval query** (language-specific) to em
 ### Generation Prompts
 
 System prompts enforce:
+
 1. **Grounding** — only use information from transcript chunks, uploaded files, and doctor notes
 2. **Output language** — write in the visit's language (except medical terms)
 3. **Missing info** — write "Not stated" / "Neuvedene" / "Neuvedeno" for empty sections
@@ -410,12 +419,12 @@ System prompts enforce:
 
 When files are uploaded via `POST /api/encounters/[encounterId]/files`:
 
-| File Type | Extraction Method | Details |
-|---|---|---|
-| PDF (text-based) | `pdf-parse` | Uses `PDFParse` class, `getText()` method |
-| PDF (scanned) | Claude document API | Fallback when pdf-parse returns < 50 chars. Uses `type: 'document'`, `media_type: 'application/pdf'` |
-| Image (PNG/JPEG/GIF/WebP) | Claude Vision API | `type: 'image'`, base64 encoded. OCR prompt asks to preserve structure |
-| Audio | Whisper | Reuses `transcribeAudio()` |
+| File Type                 | Extraction Method   | Details                                                                                              |
+| ------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |
+| PDF (text-based)          | `pdf-parse`         | Uses `PDFParse` class, `getText()` method                                                            |
+| PDF (scanned)             | Claude document API | Fallback when pdf-parse returns < 50 chars. Uses `type: 'document'`, `media_type: 'application/pdf'` |
+| Image (PNG/JPEG/GIF/WebP) | Claude Vision API   | `type: 'image'`, base64 encoded. OCR prompt asks to preserve structure                               |
+| Audio                     | Whisper             | Reuses `transcribeAudio()`                                                                           |
 
 Extracted text is stored in `visit.metadata.files[].extracted_text` and included in the generation context alongside transcript chunks and doctor notes.
 
@@ -434,6 +443,7 @@ Extracted text is stored in `visit.metadata.files[].extracted_text` and included
 The encounter page has two modes based on status:
 
 **Draft Mode** (status: started, recording, processing):
+
 - Sticky header with editable title + RecordingBar
 - TemplateSidebar (collapsible sections with progress indicators)
 - TipTap editor for doctor notes (auto-save with 2s debounce)
@@ -441,6 +451,7 @@ The encounter page has two modes based on status:
 - Slash command (`/`) for inserting template section headings
 
 **Review Mode** (status: to_review, completed):
+
 - Tab navigation: Transcript, Note, Add Document
 - TemplateSidebar shows which sections are documented
 - NoteSectionCard displays parsed note sections
@@ -459,18 +470,18 @@ The encounter page has two modes based on status:
 
 ### Key Components
 
-| Component | Location | Purpose |
-|---|---|---|
-| AppShell | `components/nav/app-shell.tsx` | Main layout with sidebar |
-| RecordingBar | `components/encounters/recording-bar.tsx` | WebAudio recorder with waveform |
-| TipTapEditor | `components/editor/tiptap-editor.tsx` | Rich text editor |
-| SlashCommand | `components/editor/slash-command.tsx` | `/` command palette |
-| TemplateSidebar | `components/encounters/template-sidebar.tsx` | Collapsible template sections |
-| FilesPanel | `components/encounters/files-panel.tsx` | File upload with drag-and-drop |
+| Component         | Location                                       | Purpose                           |
+| ----------------- | ---------------------------------------------- | --------------------------------- |
+| AppShell          | `components/nav/app-shell.tsx`                 | Main layout with sidebar          |
+| RecordingBar      | `components/encounters/recording-bar.tsx`      | WebAudio recorder with waveform   |
+| TipTapEditor      | `components/editor/tiptap-editor.tsx`          | Rich text editor                  |
+| SlashCommand      | `components/editor/slash-command.tsx`          | `/` command palette               |
+| TemplateSidebar   | `components/encounters/template-sidebar.tsx`   | Collapsible template sections     |
+| FilesPanel        | `components/encounters/files-panel.tsx`        | File upload with drag-and-drop    |
 | ProcessingOverlay | `components/encounters/processing-overlay.tsx` | Animated spiral during generation |
-| PatientPanel | `components/encounters/patient-panel.tsx` | Patient metadata form |
-| NoteSectionCard | `components/encounters/note-section-card.tsx` | Individual note section display |
-| NavEncounters | `components/nav/nav-encounters.tsx` | Infinite scroll encounters list |
+| PatientPanel      | `components/encounters/patient-panel.tsx`      | Patient metadata form             |
+| NoteSectionCard   | `components/encounters/note-section-card.tsx`  | Individual note section display   |
+| NavEncounters     | `components/nav/nav-encounters.tsx`            | Infinite scroll encounters list   |
 
 ## Templates System
 
@@ -480,14 +491,14 @@ Templates define the structure of generated medical notes.
 
 ```typescript
 interface TemplateSection {
-  id: string;           // e.g. "physical_exam"
-  labelKey: string;     // i18n key: "templates.sections.physical_exam"
+  id: string; // e.g. "physical_exam"
+  labelKey: string; // i18n key: "templates.sections.physical_exam"
   subsections?: TemplateSection[];
 }
 
 interface Template {
-  id: string;           // e.g. "comprehensive-medical-exam"
-  nameKey: string;      // i18n key for template name
+  id: string; // e.g. "comprehensive-medical-exam"
+  nameKey: string; // i18n key for template name
   descriptionKey: string;
   sections: TemplateSection[];
 }
@@ -506,6 +517,7 @@ interface Template {
 ### HTML Generation
 
 `buildTemplateHtml(template, sectionContents, sectionLabels)` produces structured HTML:
+
 - Top-level sections → `<h2>`
 - Subsections → `<h3>`
 - Content → `<p>` tags
@@ -515,11 +527,13 @@ interface Template {
 TipTap 3 editor with:
 
 **Extensions:**
+
 - StarterKit (heading levels 2, 3)
 - Placeholder
 - Custom slash command extension (via `@tiptap/suggestion`)
 
 **Slash Command:**
+
 - Triggered by typing `/`
 - Powered by `cmdk` for fuzzy search
 - Groups: "Sections" (inserts h2) and "Subsections" (inserts h3)
@@ -527,6 +541,7 @@ TipTap 3 editor with:
 - Keyboard navigation (arrow keys, Enter, Escape)
 
 **Props:**
+
 - `content` — HTML string
 - `onChange` — callback with updated HTML
 - `placeholder` — placeholder text
@@ -590,9 +605,9 @@ npm run test:unit     # Run unit tests only
 
 ### Existing Tests
 
-| Test | File | Coverage |
-|---|---|---|
-| `useLocalizedHref` | `src/hooks/use-localized-href.test.ts` | Locale prefix logic for default/non-default locales |
+| Test                   | File                                       | Coverage                                                          |
+| ---------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `useLocalizedHref`     | `src/hooks/use-localized-href.test.ts`     | Locale prefix logic for default/non-default locales               |
 | `useSidebarEncounters` | `src/hooks/use-sidebar-encounters.test.ts` | Fetch, pagination, optimistic delete/markComplete, error handling |
 
 ## i18n
@@ -629,6 +644,7 @@ Messages in `messages/{locale}.json`:
 ### API Protection
 
 All API routes use `requireAuth()` from `src/lib/supabase/auth.ts`:
+
 - Creates a server-scoped Supabase client with cookie-based auth
 - Calls `supabase.auth.getUser()` to verify session
 - Returns `{userId, supabase}` — the Supabase client is scoped to the authenticated user
@@ -637,6 +653,7 @@ All API routes use `requireAuth()` from `src/lib/supabase/auth.ts`:
 ### RLS Enforcement
 
 Database-level security:
+
 - **visits:** `auth.uid() = user_id` on all operations
 - **transcript_chunks:** JOIN check to parent visit's `user_id`
 - **Storage:** Path-based — `storage.foldername(name)[1] = auth.uid()::text`
@@ -655,17 +672,17 @@ Database-level security:
 
 ### Individual Subsystems
 
-| Subsystem | How to Verify |
-|---|---|
-| Auth | Log out, visit `/encounters/...` → redirected to login |
-| Transcription | Upload audio via `POST /api/process-audio` → check `raw_text` |
-| Chunking | Check `transcript_chunks` table after transcription |
-| Embeddings | Check `embedding` column is populated (1536 values) |
-| File extraction (PDF) | Upload text PDF → check `extracted_text` in metadata |
-| File extraction (image) | Upload image with text → check OCR result |
-| Semantic search | `POST /api/search` with a query → verify relevant chunks returned |
-| Generation | `POST /api/generate` → verify structured HTML in response |
-| i18n | Switch locale → verify UI labels change |
-| Storybook | `npm run storybook` → verify components render |
-| Tests | `npm test` → all tests pass |
-| Build | `npm run build` → no TypeScript errors |
+| Subsystem               | How to Verify                                                     |
+| ----------------------- | ----------------------------------------------------------------- |
+| Auth                    | Log out, visit `/encounters/...` → redirected to login            |
+| Transcription           | Upload audio via `POST /api/process-audio` → check `raw_text`     |
+| Chunking                | Check `transcript_chunks` table after transcription               |
+| Embeddings              | Check `embedding` column is populated (1536 values)               |
+| File extraction (PDF)   | Upload text PDF → check `extracted_text` in metadata              |
+| File extraction (image) | Upload image with text → check OCR result                         |
+| Semantic search         | `POST /api/search` with a query → verify relevant chunks returned |
+| Generation              | `POST /api/generate` → verify structured HTML in response         |
+| i18n                    | Switch locale → verify UI labels change                           |
+| Storybook               | `npm run storybook` → verify components render                    |
+| Tests                   | `npm test` → all tests pass                                       |
+| Build                   | `npm run build` → no TypeScript errors                            |

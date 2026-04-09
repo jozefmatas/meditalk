@@ -1,9 +1,9 @@
-import type { Preview } from '@storybook/nextjs-vite'
-import { NextIntlClientProvider } from 'next-intl'
-import { TooltipProvider } from '../src/components/shared/tooltip'
-import '@fontsource-variable/figtree'
-import '../src/app/globals.css'
-import messages from '../messages/sk.json'
+import type { Preview } from "@storybook/nextjs-vite";
+import { NextIntlClientProvider } from "next-intl";
+import { TooltipProvider } from "../src/components/shared/tooltip";
+import "@fontsource-variable/figtree";
+import "../src/app/globals.css";
+import messages from "../messages/sk.json";
 
 const preview: Preview = {
   decorators: [
@@ -20,7 +20,7 @@ const preview: Preview = {
   parameters: {
     options: {
       storySort: {
-        method: 'alphabetical',
+        method: "alphabetical",
       },
     },
     controls: {
@@ -32,11 +32,11 @@ const preview: Preview = {
     nextjs: {
       appDirectory: true,
       navigation: {
-        pathname: '/sk',
+        pathname: "/sk",
       },
     },
     a11y: {
-      test: 'todo',
+      test: "todo",
     },
   },
 };

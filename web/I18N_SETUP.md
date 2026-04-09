@@ -11,6 +11,7 @@ This document explains how the multilingual setup works in MediTalk and how to u
 ## Architecture
 
 The project uses **next-intl** for internationalization, which provides:
+
 - Automatic locale detection
 - Cookie-based locale persistence
 - Clean URL structure
@@ -61,6 +62,7 @@ URLs automatically adapt based on the locale:
 - English: `/en` → `https://app.meditalk.com/en`
 
 Example pages:
+
 - Slovak: `/dashboard` (no prefix needed)
 - Czech: `/cs/dashboard`
 - English: `/en/dashboard`
@@ -70,15 +72,15 @@ Example pages:
 ### 1. Using Translations in Server Components
 
 ```tsx
-import { useTranslations } from 'next-intl';
+import { useTranslations } from "next-intl";
 
 export default function ServerComponent() {
-  const t = useTranslations('common');
+  const t = useTranslations("common");
 
   return (
     <div>
-      <h1>{t('appName')}</h1>
-      <p>{t('loading')}</p>
+      <h1>{t("appName")}</h1>
+      <p>{t("loading")}</p>
     </div>
   );
 }
@@ -87,23 +89,21 @@ export default function ServerComponent() {
 ### 2. Using Translations in Client Components
 
 ```tsx
-'use client';
+"use client";
 
-import { useTranslations } from 'next-intl';
+import { useTranslations } from "next-intl";
 
 export default function ClientComponent() {
-  const t = useTranslations('auth');
+  const t = useTranslations("auth");
 
-  return (
-    <button>{t('signIn')}</button>
-  );
+  return <button>{t("signIn")}</button>;
 }
 ```
 
 ### 3. Getting Current Locale
 
 ```tsx
-import { useLocale } from 'next-intl';
+import { useLocale } from "next-intl";
 
 export default function Component() {
   const locale = useLocale(); // 'sk', 'cs', or 'en'
@@ -115,7 +115,7 @@ export default function Component() {
 ### 4. Adding the Language Switcher
 
 ```tsx
-import { LanguageSwitcher } from '@/components/language-switcher';
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 export default function Header() {
   return (
@@ -129,7 +129,7 @@ export default function Header() {
 ### 5. Formatting Dates and Numbers
 
 ```tsx
-import { useFormatter } from 'next-intl';
+import { useFormatter } from "next-intl";
 
 export default function Component() {
   const format = useFormatter();
@@ -137,10 +137,10 @@ export default function Component() {
   return (
     <div>
       {/* Date formatting */}
-      {format.dateTime(new Date(), { dateStyle: 'long' })}
+      {format.dateTime(new Date(), { dateStyle: "long" })}
 
       {/* Number formatting */}
-      {format.number(1234.56, { style: 'currency', currency: 'EUR' })}
+      {format.number(1234.56, { style: "currency", currency: "EUR" })}
     </div>
   );
 }
@@ -153,6 +153,7 @@ export default function Component() {
 Add your new translation key to all three language files:
 
 **messages/sk.json:**
+
 ```json
 {
   "appointments": {
@@ -163,6 +164,7 @@ Add your new translation key to all three language files:
 ```
 
 **messages/cs.json:**
+
 ```json
 {
   "appointments": {
@@ -173,6 +175,7 @@ Add your new translation key to all three language files:
 ```
 
 **messages/en.json:**
+
 ```json
 {
   "appointments": {
@@ -185,15 +188,15 @@ Add your new translation key to all three language files:
 ### Step 2: Use in Your Component
 
 ```tsx
-import { useTranslations } from 'next-intl';
+import { useTranslations } from "next-intl";
 
 export default function AppointmentsPage() {
-  const t = useTranslations('appointments');
+  const t = useTranslations("appointments");
 
   return (
     <div>
-      <h1>{t('title')}</h1>
-      <button>{t('create')}</button>
+      <h1>{t("title")}</h1>
+      <button>{t("create")}</button>
     </div>
   );
 }
@@ -204,6 +207,7 @@ export default function AppointmentsPage() {
 To pass language from your Framer marketing site to the Next.js app:
 
 ### On Framer:
+
 Set your CTA button links to include the `?lang=` parameter:
 
 - Slovak page: `https://app.meditalk.com?lang=sk`
@@ -211,6 +215,7 @@ Set your CTA button links to include the `?lang=` parameter:
 - English page: `https://app.meditalk.com?lang=en`
 
 ### How It Works:
+
 1. User clicks CTA on Framer marketing site
 2. Redirected to app with `?lang=sk` parameter
 3. Middleware detects language, sets cookie, redirects to clean URL
@@ -231,35 +236,38 @@ The app detects locale in this order:
 To add a new language (e.g., Polish):
 
 ### Step 1: Create Translation File
+
 Create `messages/pl.json` with all translations.
 
 ### Step 2: Update Routing Config
+
 Edit `src/i18n/routing.ts`:
 
 ```typescript
 export const routing = defineRouting({
-  locales: ['sk', 'cs', 'en', 'pl'], // Add 'pl'
-  defaultLocale: 'sk',
+  locales: ["sk", "cs", "en", "pl"], // Add 'pl'
+  defaultLocale: "sk",
   // ... rest of config
 });
 ```
 
 ### Step 3: Update Language Switcher
+
 Edit `src/components/language-switcher.tsx`:
 
 ```typescript
 const localeNames: Record<Locale, string> = {
-  sk: 'Slovenčina',
-  cs: 'Čeština',
-  en: 'English',
-  pl: 'Polski', // Add Polish
+  sk: "Slovenčina",
+  cs: "Čeština",
+  en: "English",
+  pl: "Polski", // Add Polish
 };
 
 const localeFlags: Record<Locale, string> = {
-  sk: '🇸🇰',
-  cs: '🇨🇿',
-  en: '🇬🇧',
-  pl: '🇵🇱', // Add Polish
+  sk: "🇸🇰",
+  cs: "🇨🇿",
+  en: "🇬🇧",
+  pl: "🇵🇱", // Add Polish
 };
 ```
 
@@ -290,19 +298,25 @@ Consider consulting medical professionals or translators for critical medical co
 ## Troubleshooting
 
 ### Build Errors
+
 If you get build errors after adding translations:
+
 1. Ensure all translation files have valid JSON syntax
 2. Check that all locale files have the same structure
 3. Verify imports in your components
 
 ### Missing Translations
+
 If translations don't appear:
+
 1. Check that you're using the correct namespace
 2. Verify the translation key exists in all locale files
 3. Ensure the component is wrapped in `NextIntlClientProvider` (automatically done in layout)
 
 ### Language Not Switching
+
 If the language switcher doesn't work:
+
 1. Check browser console for errors
 2. Verify cookies are enabled
 3. Clear browser cache and cookies

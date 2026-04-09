@@ -68,7 +68,8 @@ async function main() {
 
       const truncated = description.substring(0, 40);
       const escaped = description.includes(",")
-        ? `"${description}"` : description;
+        ? `"${description}"`
+        : description;
       outputLines.push(`${escaped},${code}-${truncated}`);
     }
   }

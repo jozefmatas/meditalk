@@ -81,7 +81,7 @@ export async function extractTextFromUpload(
 async function ocrDocumentWithUrl(url: string): Promise<string | null> {
   logger.debug(`[pdf-extract] using URL source (no size limit)`);
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
       {
@@ -106,7 +106,7 @@ async function ocrDocument(
   mediaType: string,
 ): Promise<string | null> {
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
       {
@@ -133,7 +133,7 @@ async function ocrDocument(
 async function ocrImageWithUrl(url: string): Promise<string | null> {
   logger.debug(`[image-extract] using URL source (no size limit)`);
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
       {
@@ -158,7 +158,7 @@ async function ocrImage(
   mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp",
 ): Promise<string | null> {
   const response = await anthropic().messages.create({
-    model: "claude-sonnet-4-5-20250929",
+    model: "claude-sonnet-4-6",
     max_tokens: 8192,
     messages: [
       {

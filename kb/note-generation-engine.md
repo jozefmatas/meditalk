@@ -156,13 +156,13 @@ interface FileMetadata {
 
 [web/src/lib/extraction/extract-file.ts](web/src/lib/extraction/extract-file.ts) is the shared entry point. It dispatches on file type:
 
-| Type              | Method                                      | Model / Library                                                   |
-| ----------------- | ------------------------------------------- | ----------------------------------------------------------------- |
-| `image/*`         | EXIF auto-rotate → Claude Vision            | Claude (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
-| `application/pdf` | 5-min signed URL → Claude document API      | Claude document input                                             |
-| `audio/*`         | Prefer real-time transcript; else Scribe v2 | ElevenLabs                                                        |
+| Type              | Method                                      | Model / Library                                                                                                        |
+| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `image/*`         | EXIF auto-rotate → Claude Vision            | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
+| `application/pdf` | 5-min signed URL → Claude document API      | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (both URL-input and base64-input paths in the same file)   |
+| `audio/*`         | Prefer real-time transcript; else Scribe v2 | ElevenLabs                                                                                                             |
 
-Language is plumbed through so all prompts and transcription hints respect the visit's `language` (`sk` / `cs` / `en`).
+All OCR calls are pinned to `temperature: 0` so the same image/PDF always extracts to the same text — upstream determinism starts here, not at Pass 1. Language is plumbed through so all prompts and transcription hints respect the visit's `language` (`sk` / `cs` / `en`).
 
 ### 2.3 Extraction endpoints
 
@@ -174,6 +174,17 @@ Two routes invoke the extractor:
 ### 2.4 Handoff to generation
 
 Extracted file texts become entries in `FactExtractionInput.files`, and also prepended to `clinicalInputParts` that Pass 1 sees. Each file keeps its own `sourceIndex` so the Pass 1.5 fact extractor can anchor evidence at `[file sourceIndex=N]`.
+
+### 2.5 Upload-in-flight guard
+
+The encounter page and the adjust-drawer both block generation (and regeneration) while any file is still uploading. The helpers live in [files-panel.tsx](web/src/components/encounters/files-panel.tsx):
+
+```ts
+export function isFileUploading(file: EncounterFile): boolean;
+export function hasUploadingFiles(files: EncounterFile[]): boolean;
+```
+
+`isFileUploading` deliberately excludes live-recording files (`source === "recording"`) because the recording flow has its own UX and the generate button explicitly supports starting generation during an active recording. The guard only prevents racing the generate request against in-progress uploads whose text isn't yet in `visits.metadata.files[i].extracted_text`.
 
 ---
 
@@ -755,6 +766,7 @@ Total test suite as of this writing: **566 tests, all passing.**
 
 | Pass                       | Model ID                                                                                                     | Role                                | Why                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------ |
+| File OCR (image / PDF)     | `claude-sonnet-4-6` (`max_tokens: 8192`, `temperature: 0`)                                                   | Image + PDF → text                  | Deterministic, same quality tier as the clinical pass. |
 | Pass 1 — Clinical analysis | `claude-sonnet-4-6`                                                                                          | Concepts, specialty, ICDs, clusters | Haiku couldn't distinguish anatomically-specific ICDs. |
 | Pass 1.5 — Fact extraction | `claude-haiku-4-5-20251001`                                                                                  | Grounded facts with evidence        | Cheap + fast + good enough at strict-rules JSON.       |
 | Pass 2 — Generation        | `claude-opus-4-6` (fallbacks: `claude-sonnet-4-6`, `claude-sonnet-4-5-20250929`, `claude-sonnet-4-20250514`) | Prose note + letter + title         | Opus handles multi-section structured generation best. |

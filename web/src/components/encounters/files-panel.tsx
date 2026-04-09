@@ -29,6 +29,22 @@ export interface EncounterFile extends FileMetadata {
   isRecording?: boolean;
 }
 
+/**
+ * Returns true if a file is currently being uploaded (shows a spinner in the UI).
+ *
+ * Live recording files (`source === "recording"`) are excluded because the
+ * recording flow is a separate UX — the generate button explicitly supports
+ * starting generation during an active recording.
+ */
+export function isFileUploading(file: EncounterFile): boolean {
+  return !!file.pending && file.source !== "recording";
+}
+
+/** Returns true if any file in the list is currently uploading. */
+export function hasUploadingFiles(files: EncounterFile[]): boolean {
+  return files.some(isFileUploading);
+}
+
 interface FilesContentProps {
   visitId: string;
   files: EncounterFile[];

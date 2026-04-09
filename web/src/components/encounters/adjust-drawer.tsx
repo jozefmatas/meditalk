@@ -38,6 +38,7 @@ import {
 } from "@/components/encounters/recording-bar";
 import {
   FilesContent,
+  hasUploadingFiles,
   type EncounterFile,
 } from "@/components/encounters/files-panel";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
@@ -142,6 +143,11 @@ export function AdjustDrawer({
     recordingState !== "idle" ||
     additionalNotes.trim().length > 0;
 
+  // Block regenerate while any new file is still uploading so the request
+  // doesn't race the uploads and miss their extracted content.
+  const newFilesUploading = hasUploadingFiles(newFiles);
+  const regenerateDisabled = isProcessing || !hasContent || newFilesUploading;
+
   return (
     <>
       <Drawer open={open} onOpenChange={handleOpenChange}>
@@ -233,7 +239,7 @@ export function AdjustDrawer({
                 <Button
                   size="lg"
                   onClick={handleRegenerate}
-                  disabled={isProcessing || !hasContent}
+                  disabled={regenerateDisabled}
                   className="flex-1"
                 >
                   <HugeiconsIcon
@@ -250,7 +256,7 @@ export function AdjustDrawer({
                 <Button
                   size="lg"
                   onClick={handleRegenerate}
-                  disabled={isProcessing || !hasContent}
+                  disabled={regenerateDisabled}
                   className="w-full"
                 >
                   <HugeiconsIcon

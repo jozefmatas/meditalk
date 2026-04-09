@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2: Analyze the extracted text with Claude
     const response = await anthropic().messages.create({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       messages: [
         {

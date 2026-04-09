@@ -10,12 +10,13 @@ export function formatTokens(count: number): string {
 }
 
 export const MODEL_LABELS: Record<string, string> = {
-  'claude-opus-4-6': 'Claude Opus 4.6',
-  'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
-  'claude-haiku-4-5-20251001': 'Claude Haiku 4.5',
-  'text-embedding-ada-002': 'Ada Embeddings',
-  'scribe_v2': 'Scribe v2',
-  'whisper-1': 'Whisper (legacy)',
+  "claude-opus-4-6": "Claude Opus 4.6",
+  "claude-sonnet-4-6": "Claude Sonnet 4.6",
+  "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
+  "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
+  "text-embedding-ada-002": "Ada Embeddings",
+  scribe_v2: "Scribe v2",
+  "whisper-1": "Whisper (legacy)",
 };
 
 export function modelLabel(model: string): string {

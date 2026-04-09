@@ -65,6 +65,12 @@ export function useEncounterGeneration({
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  // Tracks the full generation lifecycle — from the moment handleGenerate /
+  // handleAdjustGenerate is invoked until the finally block runs. Used by the
+  // page to keep the processing overlay visible during the pre-streaming
+  // window, so the UI never falls back to DraftView even if visit.status gets
+  // transiently reset by a stray event or stale poll response.
+  const [isGenerating, setIsGenerating] = useState(false);
   const [streamedSections, setStreamedSections] = useState<NoteSection[]>([]);
   // Template section IDs received from streaming_start — used for skeleton rendering
   const [streamingSectionIds, setStreamingSectionIds] = useState<string[]>([]);
@@ -153,6 +159,7 @@ export function useEncounterGeneration({
     async (options?: { sendAsEmail?: boolean }) => {
       if (!visitId || activeGenerations.has(visitId)) return;
       activeGenerations.add(visitId);
+      setIsGenerating(true);
       setIsStreaming(false);
 
       setStreamedSections([]);
@@ -400,6 +407,7 @@ export function useEncounterGeneration({
         activeGenerations.delete(visitId);
 
         setIsStreaming(false);
+        setIsGenerating(false);
 
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
@@ -429,6 +437,7 @@ export function useEncounterGeneration({
     }) => {
       if (!visitId || activeGenerations.has(visitId)) return;
       activeGenerations.add(visitId);
+      setIsGenerating(true);
       setIsStreaming(false);
 
       setStreamedSections([]);
@@ -576,6 +585,7 @@ export function useEncounterGeneration({
       } finally {
         activeGenerations.delete(visitId);
         setIsStreaming(false);
+        setIsGenerating(false);
 
         window.dispatchEvent(
           new CustomEvent("generation-done", { detail: { visitId } }),
@@ -884,6 +894,7 @@ export function useEncounterGeneration({
     generatedNoteHtml,
     setGeneratedNoteHtml,
     isStreaming,
+    isGenerating,
     isRegenerating,
     streamedSections,
     streamingSectionIds,
