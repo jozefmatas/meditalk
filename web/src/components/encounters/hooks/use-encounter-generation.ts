@@ -14,6 +14,7 @@ import { useGenerationTimer } from "@/hooks/use-generation-timer";
 import { parseSSEStream } from "@/lib/api/parse-sse-stream";
 import { useTemplateCache } from "./use-template-cache";
 import { useGenerationPolling } from "./use-generation-polling";
+import { resolveTranscript } from "./transcribe-blob";
 import { logger } from "@/lib/logger";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -188,49 +189,25 @@ export function useEncounterGeneration({
 
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
-      let streamingTranscript = finalized?.transcript ?? null;
+      const streamingCandidate = finalized?.transcript ?? null;
 
       logger.debug(
-        `[generate] Finalized — transcript: ${streamingTranscript ? `${streamingTranscript.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
+        `[generate] Finalized — streaming transcript: ${streamingCandidate ? `${streamingCandidate.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
       );
 
+      // Blob-first transcription. When a blob exists we batch-transcribe
+      // it and use THAT as the source of truth; the Scribe real-time
+      // stream is only used as a fallback because it can silently
+      // truncate on Android screen lock. See `transcribe-blob.ts` for
+      // the full decision table.
+      const finalTranscript = await resolveTranscript({
+        blob: blobToProcess ?? null,
+        streamingCandidate,
+        language: generationLanguage,
+        visitId,
+      });
+
       try {
-        // Fallback: if Scribe real-time gave no transcript but we have a
-        // recorded blob, batch-transcribe it server-side so generation
-        // still has input (common when screen locks kill the WebSocket).
-        if (!streamingTranscript && blobToProcess && blobToProcess.size > 0) {
-          logger.debug(
-            `[generate] No real-time transcript — batch-transcribing ${blobToProcess.size} bytes`,
-          );
-          try {
-            const form = new FormData();
-            form.append("audio", blobToProcess, "recording.webm");
-            form.append("language", generationLanguage);
-            form.append("visitId", visitId);
-
-            const transcribeRes = await fetch("/api/batch-transcribe", {
-              method: "POST",
-              body: form,
-            });
-
-            if (transcribeRes.ok) {
-              const { text } = await transcribeRes.json();
-              if (text) {
-                streamingTranscript = text;
-                logger.debug(
-                  `[generate] Batch transcription succeeded: ${text.length} chars`,
-                );
-              }
-            } else {
-              logger.warn(
-                `[generate] Batch transcription failed: ${transcribeRes.status}`,
-              );
-            }
-          } catch (err) {
-            logger.warn("[generate] Batch transcription error:", err);
-          }
-        }
-
         setAudioBlob(null);
 
         // Generate note via SSE streaming (with client-side retry for transient errors)
@@ -260,7 +237,7 @@ export function useEncounterGeneration({
                 visitId,
                 templateId: capturedTemplateId,
                 doctorNotes: capturedDoctorNotes || undefined,
-                transcriptText: streamingTranscript || undefined,
+                transcriptText: finalTranscript || undefined,
                 sendAsEmail: options?.sendAsEmail || false,
               }),
             });
@@ -322,9 +299,7 @@ export function useEncounterGeneration({
                     encounter_note: event.generatedNote as string,
                     patient_letter: event.letter as string,
                     status: "to_review",
-                    ...(streamingTranscript
-                      ? { raw_text: streamingTranscript }
-                      : {}),
+                    ...(finalTranscript ? { raw_text: finalTranscript } : {}),
                     ...(autoTitle ? { title: autoTitle } : {}),
                     metadata: {
                       ...existingMeta,
@@ -467,10 +442,22 @@ export function useEncounterGeneration({
 
       // Finalize any recording in the adjust drawer
       const finalized = await opts.adjustRecordingBarRef.current?.finalize();
-      const streamingTranscript = finalized?.transcript ?? null;
+      const blobToProcess = finalized?.blob ?? null;
+      const streamingCandidate = finalized?.transcript ?? null;
+
+      logger.debug(
+        `[adjust] Finalized — streaming transcript: ${streamingCandidate ? `${streamingCandidate.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
+      );
+
+      // Blob-first transcription (same rationale as handleGenerate).
+      const finalTranscript = await resolveTranscript({
+        blob: blobToProcess,
+        streamingCandidate,
+        language: generationLanguage,
+        visitId,
+      });
 
       try {
-        // Recording is now handled via real-time transcript - no upload needed
         // Clear template cache — new context invalidates previous outputs
         clearCache();
 
@@ -484,7 +471,7 @@ export function useEncounterGeneration({
             visitId,
             templateId: capturedTemplateId,
             doctorNotes: mergedNotes || undefined,
-            transcriptText: streamingTranscript || undefined,
+            transcriptText: finalTranscript || undefined,
           }),
         });
 
@@ -533,9 +520,7 @@ export function useEncounterGeneration({
                 encounter_note: event.generatedNote as string,
                 patient_letter: event.letter as string,
                 status: "to_review",
-                ...(streamingTranscript
-                  ? { raw_text: streamingTranscript }
-                  : {}),
+                ...(finalTranscript ? { raw_text: finalTranscript } : {}),
                 metadata: {
                   ...existingMeta,
                   ...(event.clinicalAnalysis
@@ -596,6 +581,7 @@ export function useEncounterGeneration({
       visitId,
       selectedTemplateId,
       doctorNotes,
+      generationLanguage,
       setVisit,
       setError,
       clearCache,

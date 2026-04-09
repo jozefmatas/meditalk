@@ -113,20 +113,36 @@ The bar exposes an imperative `finalize()` that stops recording + streaming and 
 
 ### 1.3 Transcription — ElevenLabs Scribe v2
 
-Real-time transcription is **Scribe v2**, not Whisper. The wrapper lives at [web/src/lib/elevenlabs.ts](web/src/lib/elevenlabs.ts):
+Transcription is **Scribe v2**, not Whisper. The wrapper lives at [web/src/lib/elevenlabs.ts](web/src/lib/elevenlabs.ts):
 
 ```ts
 transcribeAudio(file, filename, languageCode?, ctx?) → string
 ```
 
 - Model: `scribe_v2`.
-- Real-time path: the scribe streaming hook opens a WebSocket, sends 16 kHz Int16 base64 chunks, and accumulates partial transcripts into a ref readable via `consumeTranscript()`.
-- Batch fallback: audio files (uploaded _or_ the final blob if streaming was not used) are sent as `multipart/form-data` to `speechToText.convert` with a language hint derived from `visits.language`.
+- **Batch (primary path).** The recorded audio blob is always POSTed to `/api/batch-transcribe` as `multipart/form-data`, which calls `speechToText.convert` with the visit's language. The returned text is what gets sent to `/api/generate` as `transcriptText`. This is the source of truth for every encounter where a blob exists.
+- **Real-time streaming (legacy / fallback).** The Scribe WebSocket is still opened during recording via [use-scribe-streaming.ts](web/src/components/encounters/hooks/use-scribe-streaming.ts) and `consumeTranscript()` still returns a partial transcript on finalize. This value is **only used as a fallback** when batch transcription fails AND we have nothing else. It is never used when a full blob is available — see §1.4 for why.
 - Usage is logged via `logUsage` with provider `"elevenlabs"`, operation `"transcription"`.
 
-### 1.4 Transcript storage
+### 1.4 Blob-first transcript resolution
 
-Real-time transcript text ends up on the visit row itself; chunking for embeddings happens only when we fall back to batch transcription or when Pass 1 needs the transcript split. The legacy [transcript_chunks](web/supabase/migrations/002_visits_schema.sql) table still exists (with `embedding vector`) but is no longer the primary path for new encounters.
+The decision of which transcript to send to `/api/generate` is made by [resolveTranscript](web/src/components/encounters/hooks/transcribe-blob.ts) inside [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts). The rule is: **blob beats streaming, always**.
+
+| blob present? | batch succeeds? | streaming present? | result               |
+| ------------- | --------------- | ------------------ | -------------------- |
+| yes           | yes             | —                  | batch result         |
+| yes           | no              | yes                | streaming (fallback) |
+| yes           | no              | no                 | null                 |
+| no            | —               | yes                | streaming            |
+| no            | —               | no                 | null                 |
+
+**Why blob-first?** The Scribe real-time WebSocket is fragile on Android: when the user locks the screen, the socket dies (close code 1006) and Scribe's VAD commits whatever partial utterance it currently holds as if it were a final turn. The client has no way to distinguish "complete 5 minute transcript" from "truncated-to-2-minutes transcript that happened to look syntactically complete." The native `NativeAudioStreamPlugin` + `@capawesome-team/capacitor-android-foreground-service` keep the microphone alive across backgrounding, so the recorded blob is always the full audio — and re-transcribing it via the batch API gives us a deterministic, complete transcript regardless of WebSocket lifecycle. This is covered by [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts) (11 cases including the Android partial-transcript regression).
+
+The same blob-first policy applies to `handleAdjustGenerate` (regeneration from the review view with additional dictation), not just the initial generate call.
+
+### 1.5 Transcript storage
+
+The resolved transcript text ends up on the visit row itself; chunking for embeddings happens only when Pass 1 needs the transcript split. The legacy [transcript_chunks](web/supabase/migrations/002_visits_schema.sql) table still exists (with `embedding vector`) but is no longer the primary path for new encounters.
 
 **Key field:** `visits.raw_text` holds the full transcript; `visits.metadata.files` holds any uploaded audio as files; chunking for Pass 1 happens in-memory inside the generate route.
 
