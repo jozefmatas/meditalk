@@ -20,6 +20,7 @@ import type { TemplateSection } from "@/lib/templates";
 import { useTemplate } from "@/hooks/use-template";
 import { useCreateEncounter } from "@/hooks/use-create-encounter";
 import { incrementTemplateUsage } from "@/lib/templates/usage";
+import { useIsAdmin } from "@/hooks/use-is-admin";
 
 interface PageProps {
   params: Promise<{ templateId: string }>;
@@ -33,6 +34,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
 
   const { template, isLoading } = useTemplate(templateId);
   const { createEncounter, isCreating } = useCreateEncounter();
+  const isAdmin = useIsAdmin();
 
   const handleUseTemplate = () => {
     incrementTemplateUsage(templateId);
@@ -102,19 +104,32 @@ export default function TemplateDetailPage({ params }: PageProps) {
             )}
           </div>
 
-          {/* Section headers as accordions */}
+          {/* Section headers */}
           <div className="flex flex-col md:px-4">
-            <Accordion type="multiple" className="gap-1">
-              {template.sections.map((section) => (
-                <SectionAccordion
-                  key={section.id}
-                  section={section}
-                  locale={locale}
-                  depth={0}
-                  noContextLabel={t("noContext")}
-                />
-              ))}
-            </Accordion>
+            {isAdmin ? (
+              <Accordion type="multiple" className="gap-1">
+                {template.sections.map((section) => (
+                  <SectionAccordion
+                    key={section.id}
+                    section={section}
+                    locale={locale}
+                    depth={0}
+                    noContextLabel={t("noContext")}
+                  />
+                ))}
+              </Accordion>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {template.sections.map((section) => (
+                  <SectionLabel
+                    key={section.id}
+                    section={section}
+                    locale={locale}
+                    depth={0}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Spacer for mobile bottom bar */}
@@ -185,6 +200,43 @@ function SectionAccordion({
             />
           ))}
         </Accordion>
+      )}
+    </div>
+  );
+}
+
+/** Non-admin view — plain label, no chevron, no expandable content */
+function SectionLabel({
+  section,
+  locale,
+  depth,
+}: {
+  section: TemplateSection;
+  locale: string;
+  depth: number;
+}) {
+  const label = resolveSectionLabel(section, locale);
+  const hasSubsections = section.subsections && section.subsections.length > 0;
+  const isSubheader = depth > 0;
+
+  return (
+    <div className={isSubheader ? "pl-8" : "flex flex-col gap-1"}>
+      <div
+        className={`flex items-center rounded-lg border px-4 py-3 text-sm ${isSubheader ? "text-foreground/65" : "font-medium"}`}
+      >
+        {label}
+      </div>
+      {hasSubsections && (
+        <div className="flex flex-col gap-1">
+          {section.subsections!.map((sub) => (
+            <SectionLabel
+              key={sub.id}
+              section={sub}
+              locale={locale}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

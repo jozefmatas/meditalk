@@ -8,6 +8,7 @@ import { getMessages } from "next-intl/server";
 import { PageTitleProvider } from "@/components/nav/page-title-context";
 import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import { ImpersonationProvider } from "@/components/admin/impersonation-context";
+import { AdminProvider } from "@/hooks/use-is-admin";
 import { ConditionalAnalytics } from "@/components/analytics/conditional-analytics";
 import { Toaster } from "@/components/shared/sonner";
 import { ErudaLoader } from "@/components/debug/eruda-loader";
@@ -67,7 +68,9 @@ export default async function LocaleLayout({
         <NextIntlClientProvider messages={messages}>
           <PageTitleProvider>
             <HeaderActionsProvider>
-              <ImpersonationProvider>{children}</ImpersonationProvider>
+              <ImpersonationProvider>
+                <AdminProvider>{children}</AdminProvider>
+              </ImpersonationProvider>
             </HeaderActionsProvider>
           </PageTitleProvider>
           <Toaster />
