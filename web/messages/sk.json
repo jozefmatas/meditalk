@@ -247,8 +247,21 @@
       "use": "Použiť"
     },
     "specialties": {
+      "general_practice": "Všeobecné lekárstvo",
+      "internal_medicine": "Interné lekárstvo",
       "cardiology": "Kardiológia",
+      "pulmonology": "Pneumológia",
+      "gastroenterology": "Gastroenterológia",
       "neurology": "Neurológia",
+      "orthopedics": "Ortopédia",
+      "dermatology": "Dermatológia",
+      "psychiatry": "Psychiatria",
+      "pediatrics": "Pediatria",
+      "gynecology": "Gynekológia",
+      "urology": "Urológia",
+      "endocrinology": "Endokrinológia",
+      "oncology": "Onkológia",
+      "ent": "ORL",
       "general": "Všeobecné"
     }
   },

@@ -247,8 +247,21 @@
       "use": "Use"
     },
     "specialties": {
+      "general_practice": "General Practice",
+      "internal_medicine": "Internal Medicine",
       "cardiology": "Cardiology",
+      "pulmonology": "Pulmonology",
+      "gastroenterology": "Gastroenterology",
       "neurology": "Neurology",
+      "orthopedics": "Orthopedics",
+      "dermatology": "Dermatology",
+      "psychiatry": "Psychiatry",
+      "pediatrics": "Pediatrics",
+      "gynecology": "Gynecology",
+      "urology": "Urology",
+      "endocrinology": "Endocrinology",
+      "oncology": "Oncology",
+      "ent": "ENT",
       "general": "General"
     }
   },
