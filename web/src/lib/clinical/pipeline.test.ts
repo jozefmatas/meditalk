@@ -140,6 +140,17 @@ describe("buildEnrichedSystemPrompt", () => {
     expect(result).toContain("VERIFIED MEDICATIONS");
   });
 
+  it("includes transcript-faithfulness rules for medications", () => {
+    const analysis = makeAnalysis({
+      mentionedMedications: ["Metformin"],
+    });
+    const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en");
+    expect(result).toContain("Only include medications EXPLICITLY mentioned");
+    expect(result).toContain(
+      'Do NOT add medications that are "commonly prescribed"',
+    );
+  });
+
   it("omits medication section when none mentioned", () => {
     const analysis = makeAnalysis({ mentionedMedications: [] });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en");

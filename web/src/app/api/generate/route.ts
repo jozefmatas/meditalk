@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { retrySupabaseCall } from "@/lib/supabase/retry";
 import { embedText } from "@/lib/openai";
 import {
   generateFromTemplate,
@@ -13,11 +14,24 @@ import {
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { flattenSectionIds } from "@/lib/templates/html";
-import { runClinicalAnalysis } from "@/lib/clinical";
+import {
+  runClinicalAnalysis,
+  runFactExtraction,
+  validateFacts,
+  resolveFacts,
+  countFacts,
+  emptyExtractedFacts,
+  computeFingerprint,
+  filterCertainIcdCandidates,
+} from "@/lib/clinical";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
+import type {
+  ExtractedFacts,
+  FactExtractionInput,
+} from "@/lib/clinical/fact-extraction";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
@@ -377,10 +391,11 @@ export async function POST(request: NextRequest) {
             })
         : Promise.resolve(null);
 
-    const [embeddingResult, clinicalAnalysis] = await Promise.all([
+    const [embeddingResult, rawClinicalAnalysis] = await Promise.all([
       embeddingPromise,
       clinicalPromise,
     ]);
+    let clinicalAnalysis: ClinicalAnalysis | null = rawClinicalAnalysis;
 
     lap("parallel-done");
     chunkContents = embeddingResult.chunkContents;
@@ -393,6 +408,80 @@ export async function POST(request: NextRequest) {
 
     // Use transcriptText if available (real-time streaming), otherwise use chunk contents
     const transcriptChunks = transcriptText ? [transcriptText] : chunkContents;
+
+    // Pass 1.5 — Structured fact extraction.
+    // Runs AFTER Pass 1 (we now know `transcriptChunks`) and BEFORE Opus.
+    // Always executes when there is any source material so Opus receives a
+    // validated factual contract. Failures are non-fatal: we fall back to an
+    // empty fact set and proceed with the current Pass 1 + Opus pipeline.
+    let validatedFacts: ExtractedFacts = emptyExtractedFacts();
+    let factWarnings: string[] = [];
+    let factRemovedCount = 0;
+    let factResolutionDropCount = 0;
+    const factExtractionInput: FactExtractionInput = {
+      chunks: transcriptChunks,
+      doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
+      files: fileTexts.length > 0 ? fileTexts : undefined,
+    };
+    const hasAnyFactSource =
+      factExtractionInput.chunks.length > 0 ||
+      !!factExtractionInput.doctorNotes ||
+      (factExtractionInput.files?.length ?? 0) > 0;
+    if (hasAnyFactSource) {
+      try {
+        const rawFacts = await runFactExtraction(
+          factExtractionInput,
+          language,
+          { userId, visitId },
+        );
+        const validation = validateFacts(rawFacts, factExtractionInput, {
+          pass1: clinicalAnalysis,
+          locale: language,
+        });
+        // Pass 1.6 — deterministic fact resolution. Drops facts that were
+        // contradicted by a self-correction phrase. Rule-based and
+        // deterministic by design so it doesn't reintroduce the LLM
+        // non-determinism we're fighting.
+        const resolution = resolveFacts(
+          validation.validFacts,
+          factExtractionInput,
+          language,
+        );
+        validatedFacts = resolution.resolvedFacts;
+        factWarnings = validation.warnings;
+        factRemovedCount = validation.counts.removed;
+        factResolutionDropCount = resolution.counts.total;
+        logger.debug(
+          `[generate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${factResolutionDropCount} dropped by resolver (${resolution.counts.correctionDrops} correction), ${factWarnings.length} warnings`,
+        );
+        lap("fact-extraction-done");
+      } catch (err) {
+        logger.warn(
+          "[generate] Fact extraction failed, proceeding without fact contract:",
+          err,
+        );
+      }
+    }
+
+    // Pass 1.7 — Diagnosis certainty filter. Drop any candidate ICD code
+    // that isn't lexically grounded in the validated diagnosis/history facts.
+    // This is the deterministic gate that eliminates run-to-run drift in
+    // the final Záver: Opus only sees codes that survived this filter, and
+    // the system prompt forbids it from inventing new ones.
+    if (clinicalAnalysis && clinicalAnalysis.candidateIcdCodes.length > 0) {
+      const certainty = filterCertainIcdCandidates(
+        clinicalAnalysis.candidateIcdCodes,
+        validatedFacts,
+      );
+      logger.debug(
+        `[generate] ICD certainty — kept ${certainty.counts.kept}/${certainty.counts.total}`,
+        certainty.dropped.slice(0, 5),
+      );
+      clinicalAnalysis = {
+        ...clinicalAnalysis,
+        candidateIcdCodes: certainty.kept,
+      };
+    }
 
     if (
       transcriptChunks.length === 0 &&
@@ -429,6 +518,22 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Phase 2 — notify client that fact extraction is complete
+      const factCount = countFacts(validatedFacts);
+      if (
+        factCount > 0 ||
+        factRemovedCount > 0 ||
+        factResolutionDropCount > 0
+      ) {
+        sendEvent({
+          type: "facts_extracted",
+          factCount,
+          removedCount: factRemovedCount,
+          warningCount: factWarnings.length,
+          resolvedCount: factResolutionDropCount,
+        });
+      }
+
       // Notify client that generation is starting
       sendEvent({
         type: "streaming_start",
@@ -438,23 +543,58 @@ export async function POST(request: NextRequest) {
 
       try {
         // Call generateFromTemplate with streaming section extraction
-        const { generatedNote, letter, suggestedTitle } =
-          await generateFromTemplate(
-            transcriptChunks,
-            template,
-            language,
-            sectionLabels,
-            doctorNotes,
-            fileTexts,
-            { userId, visitId },
-            clinicalAnalysis ?? undefined,
-            sectionContexts,
-            (id, title, content) => {
-              sendEvent({ type: "section", id, title, content });
-            },
-          );
+        const {
+          generatedNote,
+          letter,
+          suggestedTitle,
+          extractedIcdCodes,
+          systemPrompt,
+          userMessage,
+        } = await generateFromTemplate(
+          transcriptChunks,
+          template,
+          language,
+          sectionLabels,
+          doctorNotes,
+          fileTexts,
+          { userId, visitId },
+          clinicalAnalysis ?? undefined,
+          sectionContexts,
+          (id, title, content) => {
+            sendEvent({ type: "section", id, title, content });
+          },
+          factCount > 0 ? validatedFacts : undefined,
+        );
 
         lap("generation-done");
+
+        // Determinism audit — fingerprint every logical input to the
+        // generator. Compare fingerprints across runs to tell upstream
+        // divergence (inputs differ) from downstream variance (same inputs,
+        // different LLM output). Appended to metadata.generation_history so
+        // a visit keeps the history of all its generations.
+        const fingerprint = computeFingerprint({
+          templateId: template.id,
+          language,
+          transcriptChunks,
+          doctorNotes,
+          files: fileTexts,
+          clinicalAnalysis,
+          facts: validatedFacts,
+          systemPrompt,
+          userMessage,
+        });
+        logger.info(
+          `[generate] fingerprint visit=${visitId} composite=${fingerprint.composite}`,
+        );
+
+        // Override the Pass-1 Haiku candidate ICD list with the codes that
+        // actually appear in the generated report. This keeps the sidebar,
+        // DB metadata, and the Záver in lock-step. Defensive copy so we never
+        // mutate the clinicalAnalysis reference held elsewhere.
+        const finalAnalysis = clinicalAnalysis
+          ? { ...clinicalAnalysis, candidateIcdCodes: extractedIcdCodes }
+          : null;
 
         // Save to DB (must complete before sending complete event,
         // so the email API can read the latest encounter_note)
@@ -463,35 +603,70 @@ export async function POST(request: NextRequest) {
         const autoTitle =
           suggestedTitle && !visit.title ? suggestedTitle : undefined;
 
-        const { error: saveError } = await supabase
-          .from("visits")
-          .update({
-            encounter_note: generatedNote,
-            patient_letter: letter,
-            status: "to_review",
-            ...(autoTitle ? { title: autoTitle } : {}),
-            metadata: {
-              ...refreshedMetadata,
-              template_id: template.id,
-              ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-              ...(clinicalAnalysis
-                ? {
-                    clinical_analysis: {
-                      inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                      secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                      matchedConcepts: clinicalAnalysis.matchedConcepts,
-                      candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                      problemClusters: clinicalAnalysis.problemClusters,
-                      mentionedMedications:
-                        clinicalAnalysis.mentionedMedications,
-                    },
-                  }
-                : {}),
-            },
-          })
-          .eq("id", visitId);
+        // Append this run to generation_history for determinism audit.
+        // Keep the most recent 10 runs so the JSONB doesn't grow unbounded.
+        const priorHistory = Array.isArray(
+          (refreshedMetadata as Record<string, unknown>).generation_history,
+        )
+          ? ((refreshedMetadata as Record<string, unknown>)
+              .generation_history as unknown[])
+          : [];
+        const historyEntry = {
+          at: new Date().toISOString(),
+          operation: "generate" as const,
+          fingerprint,
+        };
+        const generationHistory = [...priorHistory, historyEntry].slice(-10);
+
+        const savePayload = {
+          encounter_note: generatedNote,
+          patient_letter: letter,
+          status: "to_review",
+          ...(autoTitle ? { title: autoTitle } : {}),
+          metadata: {
+            ...refreshedMetadata,
+            template_id: template.id,
+            ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+            ...(finalAnalysis
+              ? {
+                  clinical_analysis: {
+                    inferredSpecialty: finalAnalysis.inferredSpecialty,
+                    secondarySpecialty: finalAnalysis.secondarySpecialty,
+                    matchedConcepts: finalAnalysis.matchedConcepts,
+                    candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                    problemClusters: finalAnalysis.problemClusters,
+                    mentionedMedications: finalAnalysis.mentionedMedications,
+                  },
+                }
+              : {}),
+            generation_fingerprint: fingerprint,
+            generation_history: generationHistory,
+          },
+        };
+        // Retry transient fetch failures — long Opus runs leave the Supabase
+        // keepalive connection idle past Cloudflare's 100s timeout, causing
+        // undici to reuse a dead socket. See lib/supabase/retry.ts.
+        const { error: saveError } = await retrySupabaseCall(
+          () =>
+            supabase
+              .from("visits")
+              .update(savePayload)
+              .eq("id", visitId) as unknown as Promise<{
+              data: null;
+              error: unknown;
+            }>,
+          { label: "generate-save" },
+        );
         if (saveError) {
           logger.error("Failed to save generated content:", saveError);
+          // Last-ditch recovery log — the generated note is otherwise lost
+          // to the user. Dump it so it can be rescued from server logs.
+          logger.error(
+            `[generate] LOST NOTE visit=${visitId} letter_len=${letter.length} note_len=${generatedNote.length}`,
+          );
+          logger.error(
+            `[generate] LOST NOTE BODY visit=${visitId}:\n${generatedNote}`,
+          );
           sendEvent({ type: "error", error: "save_failed" });
           safeClose();
           return;
@@ -507,15 +682,15 @@ export async function POST(request: NextRequest) {
           suggestedTitle,
           usedChunks,
           templateId: template.id,
-          ...(clinicalAnalysis
+          ...(finalAnalysis
             ? {
                 clinicalAnalysis: {
-                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                  matchedConcepts: clinicalAnalysis.matchedConcepts,
-                  problemClusters: clinicalAnalysis.problemClusters,
-                  mentionedMedications: clinicalAnalysis.mentionedMedications,
+                  inferredSpecialty: finalAnalysis.inferredSpecialty,
+                  secondarySpecialty: finalAnalysis.secondarySpecialty,
+                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  matchedConcepts: finalAnalysis.matchedConcepts,
+                  problemClusters: finalAnalysis.problemClusters,
+                  mentionedMedications: finalAnalysis.mentionedMedications,
                 },
               }
             : {}),

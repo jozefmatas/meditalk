@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 
 const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-6": { input: 15.0, output: 75.0 },
+  "claude-sonnet-4-6": { input: 3.0, output: 15.0 },
   "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
   "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
   "text-embedding-ada-002": { input: 0.1, output: 0 },
@@ -17,8 +18,10 @@ type Operation =
   | "generate_template"
   | "generate_template_draft"
   | "generate_template_refine"
+  | "generate_title"
   | "reformat_template"
   | "clinical_analysis"
+  | "fact_extraction"
   | "embed"
   | "transcribe"
   | "ocr_image"

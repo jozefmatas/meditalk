@@ -10,7 +10,11 @@ import { searchMedications } from "./medication-index";
 import { buildPass1SystemPrompt, buildPass1UserMessage } from "./prompts";
 import { extractJson } from "./json-repair";
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+// Pass 1 uses Sonnet 4.6 — Haiku 4.5 was unreliable at distinguishing
+// anatomically-specific ICD codes (e.g. I21.0 anterior wall vs I21.2
+// other sites including lateral wall MI). Sonnet 4.6 handles anatomy
+// and reads the expanded ICD reference window far more reliably.
+const PASS1_MODEL = "claude-sonnet-4-6";
 
 /**
  * Build regional terms reference filtered by language.
@@ -34,7 +38,7 @@ function buildConceptTriggersReference(language: SupportedLanguage): string {
 }
 
 /**
- * Run Pass 1: Clinical Analysis via Claude Haiku.
+ * Run Pass 1: Clinical Analysis via Claude Sonnet 4.6.
  *
  * Analyzes transcript chunks to extract normalized text, matched concepts,
  * inferred specialty, problem clusters, and candidate ICD-10 codes.
@@ -50,7 +54,10 @@ export async function runClinicalAnalysis(
   const allIcdHints = [
     ...new Set(CLINICAL_CONCEPTS.flatMap((c) => c.icdHints)),
   ];
-  const icdReference = buildIcdReferenceForConcepts(allIcdHints, 5, language);
+  // Use a wider window (15 per category) so Pass 1 sees all the
+  // anatomically-specific variants (e.g. I21.0/.1/.2/.3/.4) rather
+  // than being forced to guess from a truncated list.
+  const icdReference = buildIcdReferenceForConcepts(allIcdHints, 15, language);
 
   const regionalRef = buildRegionalTermsReference(language);
   const conceptRef = buildConceptTriggersReference(language);
@@ -64,8 +71,9 @@ export async function runClinicalAnalysis(
   const userMessage = buildPass1UserMessage(transcriptText, language);
 
   const response = await anthropic().messages.create({
-    model: HAIKU_MODEL,
+    model: PASS1_MODEL,
     max_tokens: 4096,
+    temperature: 0,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
@@ -75,7 +83,7 @@ export async function runClinicalAnalysis(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: HAIKU_MODEL,
+      model: PASS1_MODEL,
       operation: "clinical_analysis",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
@@ -149,8 +157,10 @@ export function buildEnrichedSystemPrompt(
     parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
 ${resolvedMeds.join("\n")}
 RULES:
-- Use the EXACT medication names from the list above when documenting
+- Only include medications EXPLICITLY mentioned in the transcript or documents
+- Use the EXACT medication names from the VERIFIED MEDICATIONS list above when documenting
 - Include both brand name and active ingredient
+- Do NOT add medications that are "commonly prescribed" for a condition unless they are explicitly mentioned in the source material
 - If a medication is marked [not found in approved list], write the name as mentioned and note it needs verification`);
   }
 
@@ -160,7 +170,7 @@ RULES:
       .map((c) => `  ${c.code}: ${c.description} (confidence: ${c.confidence})`)
       .join("\n");
     parts.push(
-      `\nCANDIDATE ICD-10 CODES — use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions:\n${icdList}`,
+      `\nCANDIDATE ICD-10 CODES — these are the ONLY codes you may emit in this report. Use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions. Do NOT add any other ICD codes, even if labs, vital signs, or symptoms suggest them — any code not in this list has already been judged insufficiently grounded by a deterministic certainty filter and MUST NOT appear anywhere in your output:\n${icdList}`,
     );
   }
 

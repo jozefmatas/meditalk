@@ -21,36 +21,63 @@ export function extractJson<T = unknown>(text: string): T {
     .replace(/^```(?:json)?\s*\n?/gm, "")
     .replace(/\n?```\s*$/gm, "");
 
-  // Try direct match + parse first (fast path)
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[0]) as T;
-    } catch {
-      // Fall through to repair
+  // Find the JSON payload. If we have a complete "{...}" block, use it.
+  // Otherwise (truncated output — no trailing brace), take everything from
+  // the first `{` to the end of the text and let the truncation-recovery
+  // stage close it for us.
+  const fullMatch = cleaned.match(/\{[\s\S]*\}/);
+  let jsonStr: string;
+  if (fullMatch) {
+    jsonStr = fullMatch[0];
+  } else {
+    const start = cleaned.indexOf("{");
+    if (start < 0) {
+      throw new Error("No JSON object found in response");
     }
-
-    // Attempt repair on the extracted block
-    const repaired = repairJsonString(jsonMatch[0]);
-    try {
-      return JSON.parse(repaired) as T;
-    } catch {
-      // Fall through to aggressive repair
-    }
-
-    // Aggressive: try to fix unescaped content inside string values
-    const aggressive = aggressiveRepair(jsonMatch[0]);
-    try {
-      return JSON.parse(aggressive) as T;
-    } catch (err) {
-      throw new Error(
-        `JSON repair failed: ${err instanceof Error ? err.message : "Unknown error"}. ` +
-          `First 200 chars: ${jsonMatch[0].slice(0, 200)}`,
-      );
-    }
+    jsonStr = cleaned.slice(start);
   }
 
-  throw new Error("No JSON object found in response");
+  // Stage 1 — direct parse (fast path for clean JSON)
+  try {
+    return JSON.parse(jsonStr) as T;
+  } catch {
+    // Fall through
+  }
+
+  // Stage 2 — light repair (smart quotes, trailing commas, unescaped newlines)
+  try {
+    return JSON.parse(repairJsonString(jsonStr)) as T;
+  } catch {
+    // Fall through
+  }
+
+  // Stage 3 — aggressive repair (escape stray quotes inside string values)
+  try {
+    return JSON.parse(aggressiveRepair(jsonStr)) as T;
+  } catch {
+    // Fall through
+  }
+
+  // Stage 4 — truncation recovery. When the LLM hits its max_tokens cap the
+  // output stops mid-token; close any open strings/arrays/objects at the
+  // last known-safe cut point so we recover the partial facts instead of
+  // losing the entire response.
+  try {
+    return JSON.parse(closeTruncatedJson(jsonStr)) as T;
+  } catch {
+    // Fall through
+  }
+
+  // Stage 5 — truncation recovery on top of aggressive repair (handles both
+  // at once, e.g. an unescaped quote inside a truncated string)
+  try {
+    return JSON.parse(closeTruncatedJson(aggressiveRepair(jsonStr))) as T;
+  } catch (err) {
+    throw new Error(
+      `JSON repair failed: ${err instanceof Error ? err.message : "Unknown error"}. ` +
+        `First 200 chars: ${jsonStr.slice(0, 200)}`,
+    );
+  }
 }
 
 /**
@@ -225,4 +252,148 @@ function fixUnescapedQuotes(json: string): string {
   }
 
   return result.join("");
+}
+
+/**
+ * Recover from a truncated JSON payload (LLM hit its max_tokens cap
+ * mid-output). We walk the string forward, tracking open containers and
+ * string state, and remember the position after each completed *value*
+ * (string, number, boolean, null, closed inner object/array) while still
+ * inside at least one outer container. When the walk finishes with open
+ * containers or an unterminated string, we truncate back to the last such
+ * "safe" position, drop any trailing comma, and close the remaining open
+ * containers LIFO.
+ *
+ * Exported for testing.
+ */
+export function closeTruncatedJson(json: string): string {
+  type Closer = "}" | "]";
+  const stack: Closer[] = [];
+  const snapshots: { pos: number; stack: Closer[] }[] = [];
+
+  let inString = false;
+  let escaped = false;
+  let i = 0;
+  const len = json.length;
+
+  const snapshot = (pos: number) => {
+    if (stack.length > 0) {
+      snapshots.push({ pos, stack: [...stack] });
+    }
+  };
+
+  while (i < len) {
+    const ch = json[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        i++;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+        // Distinguish "key" from "value" by lookahead: a key is followed by
+        // `:` (optionally preceded by whitespace). We only snapshot when we
+        // can see a non-`:` delimiter after the closing quote — if the
+        // input ended right at the closing quote we can't tell key from
+        // value, so we skip the snapshot.
+        let j = i + 1;
+        while (j < len && /\s/.test(json[j])) j++;
+        if (j < len && json[j] !== ":") {
+          snapshot(i + 1);
+        }
+        i++;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      i++;
+      continue;
+    }
+
+    if (ch === "{") {
+      stack.push("}");
+      i++;
+      continue;
+    }
+
+    if (ch === "[") {
+      stack.push("]");
+      i++;
+      continue;
+    }
+
+    if (ch === "}" || ch === "]") {
+      if (stack.length > 0 && stack[stack.length - 1] === ch) {
+        stack.pop();
+        snapshot(i + 1);
+      }
+      i++;
+      continue;
+    }
+
+    // Numbers (including negatives, decimals, exponents).
+    if (ch === "-" || (ch >= "0" && ch <= "9")) {
+      const start = i;
+      while (i < len && /[-+0-9.eE]/.test(json[i])) i++;
+      // Only count as a completed value if the number was followed by a
+      // delimiter within the input (otherwise it may still be truncated).
+      if (i < len && i > start) {
+        snapshot(i);
+      }
+      continue;
+    }
+
+    // Literals: true / false / null.
+    if (ch === "t" && json.slice(i, i + 4) === "true") {
+      i += 4;
+      snapshot(i);
+      continue;
+    }
+    if (ch === "f" && json.slice(i, i + 5) === "false") {
+      i += 5;
+      snapshot(i);
+      continue;
+    }
+    if (ch === "n" && json.slice(i, i + 4) === "null") {
+      i += 4;
+      snapshot(i);
+      continue;
+    }
+
+    // Whitespace, commas, colons — skip.
+    i++;
+  }
+
+  // If the walk finished cleanly, nothing to recover.
+  if (!inString && stack.length === 0) {
+    return json;
+  }
+
+  if (snapshots.length === 0) {
+    // Nothing salvageable — return the input unchanged and let the outer
+    // JSON.parse fail so the caller sees a meaningful error rather than a
+    // silent empty object.
+    return json;
+  }
+
+  const snap = snapshots[snapshots.length - 1];
+  let truncated = json.slice(0, snap.pos);
+  // Drop any trailing comma/whitespace left dangling by the cut.
+  truncated = truncated.replace(/[,\s]+$/, "");
+  // Close remaining open containers in LIFO order.
+  for (let k = snap.stack.length - 1; k >= 0; k--) {
+    truncated += snap.stack[k];
+  }
+  return truncated;
 }

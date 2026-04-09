@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import type { IcdEntry } from "./types";
+import type { IcdEntry, CandidateIcdCode } from "./types";
 
 interface IcdIndex {
   byCode: Map<string, string>;
@@ -256,6 +256,49 @@ export function validateIcdDescriptions(text: string, locale = "en"): string {
       return match;
     },
   );
+}
+
+/**
+ * Extract ICD-10 codes that actually appear in the generated report sections.
+ *
+ * Reuses the same line-anchored regex as `validateIcdDescriptions()` — codes must
+ * appear at the start of a line (optionally after a bullet marker) followed by a
+ * description, matching the format our generation prompt enforces.
+ *
+ * Resolves every matched code through the CSV for the given locale, drops codes
+ * that don't exist, and deduplicates by canonical code (first appearance wins)
+ * so `I210` and `I21.0` collapse into a single entry.
+ *
+ * IMPORTANT: must be called AFTER `validateIcdDescriptions()` so the descriptions
+ * passed on to the sidebar are canonical CSV text.
+ */
+export function extractIcdCodesFromSections(
+  sectionContents: Record<string, string>,
+  locale = "en",
+): CandidateIcdCode[] {
+  const seen = new Set<string>();
+  const extracted: CandidateIcdCode[] = [];
+  const regex = /^(\s*[-•*]?\s*)([A-Z]\d{2}(?:\.\d{1,4})?)\s+([^\n]+)/gm;
+
+  for (const text of Object.values(sectionContents)) {
+    if (!text) continue;
+    // `matchAll` on a /g regex yields every match without manual exec loops
+    for (const match of text.matchAll(regex)) {
+      const rawCode = match[2];
+      const [resolved] = resolveIcdCodes([rawCode], locale);
+      if (!resolved || !resolved.found) continue;
+      if (seen.has(resolved.code)) continue;
+      seen.add(resolved.code);
+      extracted.push({
+        code: resolved.code,
+        description: resolved.description,
+        confidence: "high",
+        sourceConceptIds: [],
+      });
+    }
+  }
+
+  return extracted;
 }
 
 /**

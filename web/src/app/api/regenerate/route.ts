@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
+import { retrySupabaseCall } from "@/lib/supabase/retry";
 import {
   anthropic,
   GENERATION_MODELS,
   MODEL_FALLBACK_DELAY,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
+  generateEncounterTitle,
 } from "@/lib/anthropic";
 import {
   DEFAULT_TEMPLATE_ID,
@@ -20,7 +22,22 @@ import {
   runClinicalAnalysis,
   buildEnrichedSystemPrompt,
   extractJson,
+  runFactExtraction,
+  validateFacts,
+  resolveFacts,
+  countFacts,
+  emptyExtractedFacts,
+  computeFingerprint,
+  filterCertainIcdCandidates,
 } from "@/lib/clinical";
+import type {
+  ExtractedFacts,
+  FactExtractionInput,
+} from "@/lib/clinical/fact-extraction";
+import {
+  validateIcdDescriptions,
+  extractIcdCodesFromSections,
+} from "@/lib/clinical/icd-index";
 import {
   createSSEStream,
   sseResponse,
@@ -151,6 +168,10 @@ export async function POST(request: NextRequest) {
     let systemPrompt: string;
     let userMessage: string;
     let reuseLetterFromVisit = false;
+    let validatedFacts: ExtractedFacts = emptyExtractedFacts();
+    let factWarnings: string[] = [];
+    let factRemovedCount = 0;
+    let factResolutionDropCount = 0;
 
     if (existingNote && oldTemplate && oldTemplateId !== template.id) {
       // ─── FAST PATH: Reformat existing note with Haiku ───
@@ -217,6 +238,67 @@ Rules:
         }
       }
 
+      // Pass 1.5 — Structured fact extraction (same contract as /api/generate).
+      // Non-fatal: on failure we fall through with an empty fact set.
+      const factExtractionInput: FactExtractionInput = {
+        chunks: chunkContents,
+        doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
+        files: fileTexts.length > 0 ? fileTexts : undefined,
+      };
+      const hasAnyFactSource =
+        factExtractionInput.chunks.length > 0 ||
+        !!factExtractionInput.doctorNotes ||
+        (factExtractionInput.files?.length ?? 0) > 0;
+      if (hasAnyFactSource) {
+        try {
+          const rawFacts = await runFactExtraction(
+            factExtractionInput,
+            language,
+            { userId, visitId },
+          );
+          const validation = validateFacts(rawFacts, factExtractionInput, {
+            pass1: clinicalAnalysis,
+            locale: language,
+          });
+          // Pass 1.6 — deterministic fact resolution (see fact-resolver.ts).
+          const resolution = resolveFacts(
+            validation.validFacts,
+            factExtractionInput,
+            language,
+          );
+          validatedFacts = resolution.resolvedFacts;
+          factWarnings = validation.warnings;
+          factRemovedCount = validation.counts.removed;
+          factResolutionDropCount = resolution.counts.total;
+          logger.debug(
+            `[regenerate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${factResolutionDropCount} dropped by resolver (${resolution.counts.correctionDrops} correction), ${factWarnings.length} warnings`,
+          );
+        } catch (err) {
+          logger.warn(
+            "[regenerate] Fact extraction failed, proceeding without fact contract:",
+            err,
+          );
+        }
+      }
+
+      // Pass 1.7 — Diagnosis certainty filter. See generate route for details.
+      // Drops candidate ICD codes that are not lexically grounded in the
+      // validated diagnosis/history facts so Opus only sees the certain set.
+      if (clinicalAnalysis && clinicalAnalysis.candidateIcdCodes.length > 0) {
+        const certainty = filterCertainIcdCandidates(
+          clinicalAnalysis.candidateIcdCodes,
+          validatedFacts,
+        );
+        logger.debug(
+          `[regenerate] ICD certainty — kept ${certainty.counts.kept}/${certainty.counts.total}`,
+          certainty.dropped.slice(0, 5),
+        );
+        clinicalAnalysis = {
+          ...clinicalAnalysis,
+          candidateIcdCodes: certainty.kept,
+        };
+      }
+
       const baseSystemPrompt = buildTemplateSystemPrompt(
         template,
         language,
@@ -235,6 +317,7 @@ Rules:
         template,
         doctorNotes,
         fileTexts,
+        countFacts(validatedFacts) > 0 ? validatedFacts : undefined,
       );
     }
 
@@ -253,6 +336,24 @@ Rules:
           specialty: clinicalAnalysis.inferredSpecialty,
           icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
           conceptCount: clinicalAnalysis.matchedConcepts.length,
+        });
+      }
+
+      // Phase 2 — notify client that fact extraction is complete (full path only;
+      // the fast reformat path doesn't run extraction because it reshuffles the
+      // existing note rather than re-grounding from source material).
+      const factCount = countFacts(validatedFacts);
+      if (
+        factCount > 0 ||
+        factRemovedCount > 0 ||
+        factResolutionDropCount > 0
+      ) {
+        sendEvent({
+          type: "facts_extracted",
+          factCount,
+          removedCount: factRemovedCount,
+          warningCount: factWarnings.length,
+          resolvedCount: factResolutionDropCount,
         });
       }
 
@@ -280,6 +381,7 @@ Rules:
           const stream = anthropic().messages.stream({
             model,
             max_tokens: 8192,
+            temperature: 0,
             system: systemPrompt,
             messages: [{ role: "user", content: userMessage }],
           });
@@ -356,8 +458,41 @@ Rules:
         const sectionContents: Record<string, string> = {};
         for (const id of allIds) {
           const value = parsed[id];
-          sectionContents[id] = typeof value === "string" ? value : "";
+          const rawText = typeof value === "string" ? value : "";
+          // Phase 1.8: validate ICD descriptions (replace hallucinated text with
+          // canonical CSV descriptions). Must run before extraction.
+          sectionContents[id] = rawText
+            ? validateIcdDescriptions(rawText, language)
+            : "";
         }
+
+        // Phase 1.7: extract ICD codes that actually appear in the generated
+        // report. These override the Pass 1 candidates so the sidebar stays
+        // in lock-step with the report's Záver.
+        const extractedIcdCodes = extractIcdCodesFromSections(
+          sectionContents,
+          language,
+        );
+
+        // Dedicated title generation — temperature 0, grounded ONLY in the
+        // extracted ICDs. This overrides the title from the main Opus call,
+        // which was prone to hallucinating details not present in the
+        // primary diagnosis. Skipped on the reformat path (we keep the
+        // existing title there).
+        if (!reuseLetterFromVisit) {
+          const titleFromIcd = await generateEncounterTitle(
+            extractedIcdCodes,
+            language,
+            { userId, visitId },
+          );
+          suggestedTitle =
+            titleFromIcd || extractedIcdCodes[0]?.description || suggestedTitle;
+        }
+
+        // Defensive copy — never mutate cachedAnalysis or clinicalAnalysis.
+        const finalAnalysis: ClinicalAnalysis | null = clinicalAnalysis
+          ? { ...clinicalAnalysis, candidateIcdCodes: extractedIcdCodes }
+          : null;
 
         const generatedNote = buildTemplateHtml(
           template,
@@ -369,31 +504,79 @@ Rules:
         // so the email API can read the latest encounter_note)
         const existingMetadata =
           (visit.metadata as Record<string, unknown>) || {};
-        const { error: saveError } = await supabase
-          .from("visits")
-          .update({
-            encounter_note: generatedNote,
-            patient_letter: letter,
-            metadata: {
-              ...existingMetadata,
-              template_id: template.id,
-              ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-              ...(clinicalAnalysis
-                ? {
-                    clinical_analysis: {
-                      inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                      secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                      matchedConcepts: clinicalAnalysis.matchedConcepts,
-                      candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                      problemClusters: clinicalAnalysis.problemClusters,
-                    },
-                  }
-                : {}),
-            },
-          })
-          .eq("id", visitId);
+
+        // Determinism audit — fingerprint the exact inputs sent to the
+        // generator so divergent outputs can be traced to either upstream
+        // input drift or downstream LLM sampling variance. See
+        // lib/clinical/fingerprint.ts for details.
+        const fingerprint = computeFingerprint({
+          templateId: template.id,
+          language,
+          transcriptChunks: chunkContents,
+          doctorNotes,
+          files: fileTexts,
+          clinicalAnalysis,
+          facts: validatedFacts,
+          systemPrompt,
+          userMessage,
+        });
+        logger.info(
+          `[regenerate] fingerprint visit=${visitId} composite=${fingerprint.composite}`,
+        );
+        const priorHistory = Array.isArray(existingMetadata.generation_history)
+          ? (existingMetadata.generation_history as unknown[])
+          : [];
+        const historyEntry = {
+          at: new Date().toISOString(),
+          operation: reuseLetterFromVisit
+            ? ("reformat" as const)
+            : ("regenerate" as const),
+          fingerprint,
+        };
+        const generationHistory = [...priorHistory, historyEntry].slice(-10);
+
+        const savePayload = {
+          encounter_note: generatedNote,
+          patient_letter: letter,
+          metadata: {
+            ...existingMetadata,
+            template_id: template.id,
+            ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+            ...(finalAnalysis
+              ? {
+                  clinical_analysis: {
+                    inferredSpecialty: finalAnalysis.inferredSpecialty,
+                    secondarySpecialty: finalAnalysis.secondarySpecialty,
+                    matchedConcepts: finalAnalysis.matchedConcepts,
+                    candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                    problemClusters: finalAnalysis.problemClusters,
+                  },
+                }
+              : {}),
+            generation_fingerprint: fingerprint,
+            generation_history: generationHistory,
+          },
+        };
+        // Retry transient fetch failures — see lib/supabase/retry.ts.
+        const { error: saveError } = await retrySupabaseCall(
+          () =>
+            supabase
+              .from("visits")
+              .update(savePayload)
+              .eq("id", visitId) as unknown as Promise<{
+              data: null;
+              error: unknown;
+            }>,
+          { label: "regenerate-save" },
+        );
         if (saveError) {
           logger.error("Failed to save regenerated content:", saveError);
+          logger.error(
+            `[regenerate] LOST NOTE visit=${visitId} letter_len=${letter.length} note_len=${generatedNote.length}`,
+          );
+          logger.error(
+            `[regenerate] LOST NOTE BODY visit=${visitId}:\n${generatedNote}`,
+          );
           sendEvent({ type: "error", error: "save_failed" });
           safeClose();
           return;
@@ -420,14 +603,14 @@ Rules:
           suggestedTitle,
           usedChunks: usedChunkIds,
           templateId: template.id,
-          ...(clinicalAnalysis
+          ...(finalAnalysis
             ? {
                 clinicalAnalysis: {
-                  inferredSpecialty: clinicalAnalysis.inferredSpecialty,
-                  secondarySpecialty: clinicalAnalysis.secondarySpecialty,
-                  candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
-                  matchedConcepts: clinicalAnalysis.matchedConcepts,
-                  problemClusters: clinicalAnalysis.problemClusters,
+                  inferredSpecialty: finalAnalysis.inferredSpecialty,
+                  secondarySpecialty: finalAnalysis.secondarySpecialty,
+                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  matchedConcepts: finalAnalysis.matchedConcepts,
+                  problemClusters: finalAnalysis.problemClusters,
                 },
               }
             : {}),

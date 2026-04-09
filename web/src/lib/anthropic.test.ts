@@ -16,13 +16,18 @@ vi.mock("@/lib/env/client", () => ({
 import {
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
+  buildTitleSystemPrompt,
+  buildTitleUserMessage,
+  sanitizeGeneratedTitle,
   InsufficientContextError,
   NOT_STATED,
   GENERATION_MODELS,
   GENERATION_MODEL,
   MODEL_FALLBACK_DELAY,
+  TITLE_GENERATION_MODEL,
 } from "./anthropic";
 import type { Template } from "./templates/types";
+import type { CandidateIcdCode } from "./clinical/types";
 
 // ── Test fixtures ──
 
@@ -253,6 +258,208 @@ describe("buildTemplateSystemPrompt", () => {
       SECTION_LABELS,
     );
     expect(prompt).toContain("Czech");
+  });
+
+  it("includes grounding rule covering symptoms, findings, and diagnoses", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("symptom, finding, diagnosis, procedure");
+  });
+
+  it("includes anti-severity-escalation instruction", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("Do NOT upgrade diagnosis severity");
+    expect(prompt).toContain("STEMI");
+  });
+
+  it("includes NO ASSUMPTION MODE rule forbidding unit fabrication", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("NO ASSUMPTION MODE");
+    expect(prompt).toContain("NEVER FABRICATE MISSING CLINICAL DIMENSIONS");
+    // Concrete smoking counter-example from the failure analysis
+    expect(prompt).toContain("fajčím 15");
+    expect(prompt).toContain("15 cigariet denne");
+    expect(prompt).toContain("fajčí 15 rokov");
+    // Explicit "correctness > completeness" principle
+    expect(prompt).toMatch(/correctness > completeness/i);
+  });
+
+  it("lists every clinical dimension that must not be fabricated", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toMatch(/frequency/i);
+    expect(prompt).toMatch(/duration/i);
+    expect(prompt).toMatch(/laterality/i);
+    expect(prompt).toMatch(/dosage strength/i);
+    expect(prompt).toMatch(/route of administration/i);
+  });
+
+  it("provides localized ambiguity markers for sk/cs/en", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("(bližšie nešpecifikované)");
+    expect(prompt).toContain("(blíže nespecifikováno)");
+    expect(prompt).toContain("(not further specified)");
+  });
+
+  it("includes source-priority hierarchy", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("SOURCE PRIORITY");
+    expect(prompt).toContain("Actual spoken transcript");
+    expect(prompt).toContain("Doctor's additional notes");
+    expect(prompt).toContain("Uploaded documents");
+  });
+
+  it("includes TITLE RULES that bind title to primary diagnosis", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("TITLE RULES");
+    expect(prompt).toContain("consistent with the primary diagnosis");
+    expect(prompt).toContain("Do NOT include severity qualifiers");
+    expect(prompt).toContain("Do NOT include anatomical localisation");
+    // Concrete STEMI counter-example proves the rule is spelled out
+    expect(prompt).toContain("Akútny infarkt myokardu");
+    expect(prompt).toContain("Akútny STEMI laterálnej steny");
+  });
+});
+
+describe("title generation helpers", () => {
+  const icd = (
+    code: string,
+    description: string,
+    confidence: "high" | "medium" | "low" = "high",
+  ): CandidateIcdCode => ({
+    code,
+    description,
+    confidence,
+    sourceConceptIds: [],
+  });
+
+  describe("TITLE_GENERATION_MODEL", () => {
+    it("targets a Haiku 4.5 model for cheap, deterministic title calls", () => {
+      expect(TITLE_GENERATION_MODEL).toBe("claude-haiku-4-5-20251001");
+    });
+  });
+
+  describe("buildTitleSystemPrompt", () => {
+    it("includes the language label", () => {
+      expect(buildTitleSystemPrompt("en")).toContain("English");
+      expect(buildTitleSystemPrompt("sk")).toContain("Slovak");
+      expect(buildTitleSystemPrompt("cs")).toContain("Czech");
+    });
+
+    it("forbids inventing anatomical, severity, and laterality details", () => {
+      const prompt = buildTitleSystemPrompt("sk");
+      expect(prompt).toContain("anatomical localisation");
+      expect(prompt).toContain("laterality");
+      expect(prompt).toContain("severity qualifier");
+    });
+
+    it("enforces the 6-word limit and plain-text output", () => {
+      const prompt = buildTitleSystemPrompt("en");
+      expect(prompt).toContain("Maximum 6 words");
+      expect(prompt).toContain("no JSON");
+    });
+
+    it("binds the title to the primary diagnosis and ignores R codes", () => {
+      const prompt = buildTitleSystemPrompt("en");
+      expect(prompt).toContain("FIRST (primary) diagnosis");
+      expect(prompt).toContain("R00–R99");
+    });
+
+    it("spells out the STEMI counter-example to prevent regressions", () => {
+      const prompt = buildTitleSystemPrompt("sk");
+      expect(prompt).toContain("STEMI laterálnej steny");
+      expect(prompt).toContain("Akútny transmurálny infarkt myokardu prednej");
+    });
+  });
+
+  describe("buildTitleUserMessage", () => {
+    it("lists each ICD code with its description on its own line", () => {
+      const msg = buildTitleUserMessage([
+        icd("I21.0", "Akútny transmurálny infarkt myokardu prednej steny"),
+        icd("I10", "Primárna [esenciálna] artériová hypertenzia"),
+        icd("R07.2", "Prekordiálna bolesť"),
+      ]);
+      expect(msg).toContain(
+        "I21.0 Akútny transmurálny infarkt myokardu prednej steny",
+      );
+      expect(msg).toContain("I10 Primárna [esenciálna] artériová hypertenzia");
+      expect(msg).toContain("R07.2 Prekordiálna bolesť");
+    });
+
+    it("marks the first ICD as the primary diagnosis", () => {
+      const msg = buildTitleUserMessage([
+        icd("J18.9", "Zápal pľúc, nešpecifikovaný"),
+      ]);
+      expect(msg).toContain("primary first");
+    });
+
+    it("instructs the model to output only the title", () => {
+      const msg = buildTitleUserMessage([icd("I10", "Hypertenzia")]);
+      expect(msg).toContain("Output only the title");
+    });
+  });
+
+  describe("sanitizeGeneratedTitle", () => {
+    it("trims whitespace", () => {
+      expect(sanitizeGeneratedTitle("  Hypertenzia  ")).toBe("Hypertenzia");
+    });
+
+    it("strips straight and smart quotes", () => {
+      expect(sanitizeGeneratedTitle('"Hypertenzia"')).toBe("Hypertenzia");
+      expect(sanitizeGeneratedTitle("'Hypertenzia'")).toBe("Hypertenzia");
+      expect(sanitizeGeneratedTitle("“Hypertenzia”")).toBe("Hypertenzia");
+      expect(sanitizeGeneratedTitle("‘Hypertenzia’")).toBe("Hypertenzia");
+    });
+
+    it("strips trailing punctuation", () => {
+      expect(sanitizeGeneratedTitle("Hypertenzia.")).toBe("Hypertenzia");
+      expect(sanitizeGeneratedTitle("Akútny infarkt myokardu!")).toBe(
+        "Akútny infarkt myokardu",
+      );
+    });
+
+    it("collapses runs of whitespace", () => {
+      expect(sanitizeGeneratedTitle("Akútny   infarkt\nmyokardu")).toBe(
+        "Akútny infarkt myokardu",
+      );
+    });
+
+    it("returns an empty string for empty input", () => {
+      expect(sanitizeGeneratedTitle("")).toBe("");
+      expect(sanitizeGeneratedTitle("   ")).toBe("");
+    });
+
+    it("handles a realistic primary-diagnosis title", () => {
+      expect(
+        sanitizeGeneratedTitle('  "Akútny infarkt myokardu prednej steny."  '),
+      ).toBe("Akútny infarkt myokardu prednej steny");
+    });
   });
 });
 
