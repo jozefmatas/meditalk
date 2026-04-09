@@ -69,14 +69,16 @@ export default async function LocaleLayout({
           <PageTitleProvider>
             <HeaderActionsProvider>
               <ImpersonationProvider>
-                <AdminProvider>{children}</AdminProvider>
+                <AdminProvider>
+                  {children}
+                  <ErudaLoader />
+                </AdminProvider>
               </ImpersonationProvider>
             </HeaderActionsProvider>
           </PageTitleProvider>
           <Toaster />
         </NextIntlClientProvider>
         <ConditionalAnalytics />
-        <ErudaLoader />
         <NativeLifecycle />
       </body>
     </html>
