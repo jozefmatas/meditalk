@@ -1010,8 +1010,17 @@ export function useEncounterGeneration({
         });
       }
 
-      // Detect interrupted generation — generation_pending exists but no note
-      if (meta?.generation_pending && !data.encounter_note) {
+      // Detect interrupted generation — generation_pending exists but no note.
+      // IMPORTANT: Only auto-resume when status is NOT "processing". When the
+      // status is "processing", the server is still actively generating (the
+      // user just navigated away and came back). In that case, let
+      // ProcessingOverlay + useGenerationPolling handle it — do NOT reset the
+      // state or try to start a second generation.
+      if (
+        meta?.generation_pending &&
+        !data.encounter_note &&
+        data.status !== "processing"
+      ) {
         logger.debug(
           "[generate] Detected interrupted generation — will auto-resume",
         );
@@ -1028,6 +1037,17 @@ export function useEncounterGeneration({
   useEffect(() => {
     if (!pendingResume || resumeCheckedRef.current) return;
     if (!visit || isGenerating || isStreaming) return;
+
+    // Safety: if the visit is still "processing", the server is actively
+    // generating. Don't auto-resume (which would start a SECOND generation)
+    // — just let polling detect completion. initFromVisit should have
+    // already prevented pendingResume from being set, but belt-and-braces.
+    if (visit.status === "processing") {
+      resumeCheckedRef.current = true;
+      setPendingResume(false);
+      return;
+    }
+
     const meta = (visit.metadata ?? {}) as Record<string, unknown>;
     const pending = meta?.generation_pending as
       | { audioPath?: string }

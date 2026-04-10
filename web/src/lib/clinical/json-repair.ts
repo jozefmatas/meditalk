@@ -72,12 +72,29 @@ export function extractJson<T = unknown>(text: string): T {
   // at once, e.g. an unescaped quote inside a truncated string)
   try {
     return JSON.parse(closeTruncatedJson(aggressiveRepair(jsonStr))) as T;
-  } catch (err) {
-    throw new Error(
-      `JSON repair failed: ${err instanceof Error ? err.message : "Unknown error"}. ` +
-        `First 200 chars: ${jsonStr.slice(0, 200)}`,
-    );
+  } catch {
+    // Fall through
   }
+
+  // Stage 6 — flat-object reconstruction. When the JSON is a flat
+  // `{ "key": "value", ... }` object (the most common shape from our
+  // generation pipeline) and all other stages failed, locate keys by regex
+  // and collect everything between them as the value text. This handles
+  // arbitrarily broken value content because we never try to parse the
+  // values — we just collect raw text between key boundaries.
+  try {
+    const reconstructed = reconstructFlatObject(jsonStr);
+    if (reconstructed) {
+      return JSON.parse(reconstructed) as T;
+    }
+  } catch {
+    // Fall through
+  }
+
+  throw new Error(
+    `JSON repair failed after all 6 stages. ` +
+      `First 200 chars: ${jsonStr.slice(0, 200)}`,
+  );
 }
 
 /**
@@ -99,8 +116,14 @@ function repairJsonString(json: string): string {
   return s;
 }
 
+/** Characters that form a valid JSON escape when preceded by `\`. */
+const VALID_ESCAPES = new Set(['"', "\\", "/", "b", "f", "n", "r", "t", "u"]);
+
 /**
- * Walk through JSON and escape literal newlines found inside string values.
+ * Walk through JSON and fix illegal characters inside string values:
+ *   - Literal newlines / carriage returns / tabs → escape sequences
+ *   - Other control characters (U+0000–U+001F) → `\\uXXXX`
+ *   - Invalid escape sequences (e.g. `\q`, `\:`) → double the backslash
  */
 function fixUnescapedNewlines(json: string): string {
   const chars: string[] = [];
@@ -112,13 +135,16 @@ function fixUnescapedNewlines(json: string): string {
 
     if (inString) {
       if (ch === "\\") {
-        // Escaped character — pass through both chars
-        chars.push(ch);
-        i++;
-        if (i < json.length) {
-          chars.push(json[i]);
+        const next = i + 1 < json.length ? json[i + 1] : "";
+        if (VALID_ESCAPES.has(next)) {
+          // Valid escape sequence — pass through both chars
+          chars.push(ch, next);
+          i += 2;
+        } else {
+          // Invalid escape (e.g. `\:`, `\q`) — escape the backslash itself
+          chars.push("\\\\");
+          i++;
         }
-        i++;
         continue;
       }
 
@@ -129,7 +155,8 @@ function fixUnescapedNewlines(json: string): string {
         continue;
       }
 
-      // Replace literal newline/tab inside strings with escape sequences
+      // Replace literal control characters inside strings
+      const code = ch.charCodeAt(0);
       if (ch === "\n") {
         chars.push("\\n");
         i++;
@@ -142,6 +169,12 @@ function fixUnescapedNewlines(json: string): string {
       }
       if (ch === "\t") {
         chars.push("\\t");
+        i++;
+        continue;
+      }
+      if (code < 0x20) {
+        // Other control characters (U+0000–U+001F) → unicode escape
+        chars.push("\\u" + code.toString(16).padStart(4, "0"));
         i++;
         continue;
       }
@@ -183,22 +216,60 @@ function aggressiveRepair(json: string): string {
 }
 
 /**
- * Attempt to fix unescaped quotes inside JSON string values.
- * Uses heuristics: if we encounter a " that doesn't look like a
- * key-value separator or structural element, escape it.
+ * Fix unescaped quotes inside JSON string values.
+ *
+ * Tracks whether the current string is a **key** or a **value** so that the
+ * "is this quote structural?" heuristic is context-aware:
+ *
+ *   - Key-closing quote:   must be followed by `:`
+ *   - Value-closing quote:  must be followed by `,`, `}`, `]`, or EOF
+ *
+ * The old heuristic treated any `"` followed by `:` as structural, which
+ * broke on Slovak/Czech medical text where colons are frequent inside values
+ * (e.g. "Diagnóza: Artériová hypertenzia").
  */
 function fixUnescapedQuotes(json: string): string {
   const result: string[] = [];
   let i = 0;
   let inString = false;
+
+  // Context tracking: is the current string a key or a value?
+  // After `{` or `,` (in an object) the next string is a key.
+  // After `:` the next string is a value.
+  type Container = "object" | "array";
+  const containerStack: Container[] = [];
+  let expectKey = true; // true → next string is a key; false → next string is a value
+  let currentIsKey = true; // applies to the currently-open string
+
   while (i < json.length) {
     const ch = json[i];
 
     if (!inString) {
       result.push(ch);
-      if (ch === '"') inString = true;
+
+      if (ch === '"') {
+        inString = true;
+        currentIsKey = expectKey;
+      } else if (ch === "{") {
+        containerStack.push("object");
+        expectKey = true;
+      } else if (ch === "[") {
+        containerStack.push("array");
+        expectKey = false; // array elements are values
+      } else if (ch === "}" || ch === "]") {
+        containerStack.pop();
+        // After closing a container the parent decides what comes next
+        // (will be set by the next `,` or `:` we see).
+      } else if (ch === ":") {
+        expectKey = false; // next string is a value
+      } else if (ch === ",") {
+        const top = containerStack[containerStack.length - 1];
+        expectKey = top === "object"; // key in objects, value in arrays
+      }
+
       i++;
     } else {
+      // Inside a string
       if (ch === "\\") {
         result.push(ch);
         i++;
@@ -210,26 +281,34 @@ function fixUnescapedQuotes(json: string): string {
       }
 
       if (ch === '"') {
-        // Check if this quote ends the string or is embedded
         const after = json.slice(i + 1).trimStart();
-        if (
-          after.startsWith(":") ||
-          after.startsWith(",") ||
-          after.startsWith("}") ||
-          after.startsWith("]") ||
-          after.length === 0
-        ) {
-          // This is a structural closing quote
+
+        // Determine if this quote is a structural close based on context
+        let isStructural: boolean;
+        if (currentIsKey) {
+          // A key-closing quote must be followed by `:`
+          isStructural = after.startsWith(":");
+        } else {
+          // A value-closing quote must be followed by `,` `}` `]` or EOF
+          isStructural =
+            after.startsWith(",") ||
+            after.startsWith("}") ||
+            after.startsWith("]") ||
+            after.length === 0;
+        }
+
+        if (isStructural) {
           inString = false;
           result.push(ch);
         } else {
-          // Likely an unescaped quote inside a value — escape it
+          // Embedded quote — escape it
           result.push('\\"');
         }
         i++;
         continue;
       }
 
+      // Escape literal control characters inside strings
       if (ch === "\n") {
         result.push("\\n");
         i++;
@@ -396,4 +475,86 @@ export function closeTruncatedJson(json: string): string {
     truncated += snap.stack[k];
   }
   return truncated;
+}
+
+/**
+ * Last-resort reconstruction for flat `{ "key": "value", ... }` objects.
+ *
+ * Locates keys by scanning for `"<identifier>"\s*:` patterns outside of
+ * value strings, then collects the raw text between successive keys as the
+ * value. Because we never parse the value content itself — only escape it
+ * before re-assembling — this tolerates arbitrarily broken inner text
+ * (unescaped quotes, control chars, truncation).
+ *
+ * Returns `null` if fewer than 2 key-value pairs are found (not enough to
+ * justify the heuristic).
+ */
+function reconstructFlatObject(json: string): string | null {
+  // Find all `"key" :` positions. Keys are identifiers: letters, digits,
+  // underscores, hyphens (covers section IDs like `s_C-by_DTvyO`, plus
+  // `title`, `letter`, `insufficient_context`).
+  const keyPattern = /"([a-zA-Z_][\w-]*)"\s*:/g;
+  const keys: { key: string; valueStart: number }[] = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = keyPattern.exec(json)) !== null) {
+    // valueStart points to the first char after the `:`
+    const colonEnd = m.index + m[0].length;
+    keys.push({ key: m[1], valueStart: colonEnd });
+  }
+
+  if (keys.length < 2) return null;
+
+  const entries: [string, string][] = [];
+  for (let k = 0; k < keys.length; k++) {
+    const start = keys[k].valueStart;
+    // Value extends to just before the next key's `"` (or end of JSON)
+    const end =
+      k + 1 < keys.length
+        ? json.lastIndexOf('"', keys[k + 1].valueStart - 1)
+        : json.length;
+
+    let raw = json.slice(start, end).trim();
+
+    // Strip leading/trailing quotes and commas from the raw value slice
+    raw = raw.replace(/^[\s,"]+/, "").replace(/[\s,}"]+$/, "");
+
+    // If the value looks like a boolean literal, keep it; otherwise treat as string
+    if (raw === "true" || raw === "false") {
+      entries.push([keys[k].key, raw]);
+      continue;
+    }
+
+    // Remove surrounding quotes if present
+    if (raw.startsWith('"')) raw = raw.slice(1);
+    if (raw.endsWith('"')) raw = raw.slice(0, -1);
+
+    // Escape the raw text so it's valid inside a JSON string
+    const escaped = raw
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t")
+      .replace(
+        /[\x00-\x1f]/g,
+        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+      );
+
+    entries.push([keys[k].key, `"${escaped}"`]);
+  }
+
+  if (entries.length < 2) return null;
+
+  const obj =
+    "{\n" +
+    entries
+      .map(([k, v]) => {
+        // Booleans are unquoted values, strings are already quoted
+        return `  "${k}": ${v}`;
+      })
+      .join(",\n") +
+    "\n}";
+
+  return obj;
 }

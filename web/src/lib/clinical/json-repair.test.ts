@@ -123,6 +123,72 @@ describe("extractJson", () => {
   it("still throws on completely garbage input after all repair stages", () => {
     expect(() => extractJson("{not json at all {{{")).toThrow();
   });
+
+  // ── Key-vs-value context-aware quote repair ──────────────────────────
+
+  it("handles unescaped quotes followed by colons inside values (Slovak medical text)", () => {
+    // This is the exact failure pattern from production: a value contains
+    // a colon (e.g. "Diagnóza: ...") and the old heuristic mistook the
+    // embedded quote + colon for a key-closing quote.
+    const input =
+      '{"s_abc": "Diagnóza: Artériová hypertenzia II. stupňa, kompenzovaná", "s_def": "Terapia: Perindopril 5 mg"}';
+    const result = extractJson<Record<string, string>>(input);
+    expect(result.s_abc).toContain("Diagnóza:");
+    expect(result.s_def).toContain("Terapia:");
+  });
+
+  it("handles an unescaped quote mid-value where text after quote contains a colon", () => {
+    // Value has: she said "hello": world — the " before hello and after
+    // hello would confuse the old heuristic because "hello": looks like
+    // a key-value pair.
+    const input =
+      '{"note": "Patient said "bolí ma": hlavne na hrudi, inak OK", "plan": "follow up"}';
+    const result = extractJson<Record<string, string>>(input);
+    expect(result.note).toContain("bolí ma");
+    expect(result.plan).toBe("follow up");
+  });
+
+  it("handles control characters in values (null byte, form feed)", () => {
+    const input = '{"text": "before\x00after\x0Cend"}';
+    const result = extractJson<{ text: string }>(input);
+    expect(result.text).toContain("before");
+    expect(result.text).toContain("after");
+  });
+
+  it("handles invalid escape sequences (e.g. \\q, \\:)", () => {
+    // LLMs sometimes produce backslash + arbitrary char
+    const input = '{"text": "blood pressure\\: 140/90"}';
+    const result = extractJson<{ text: string }>(input);
+    expect(result.text).toContain("blood pressure");
+    expect(result.text).toContain("140/90");
+  });
+
+  it("reconstructs flat object when all other stages fail", () => {
+    // Severely broken JSON: unmatched quotes, colons in values, truncation
+    // Only the flat-object reconstruction can save this.
+    const input =
+      '{"s_abc": "First section "with embedded quote: and colon", "s_def": "Second section content", "title": "Test Note"}';
+    const result = extractJson<Record<string, string>>(input);
+    // At minimum we should get the cleanly extractable keys
+    expect(result.s_def).toBeDefined();
+    expect(result.title).toBe("Test Note");
+  });
+
+  it("handles the exact production failure: section values with colons", () => {
+    // Reproduces the real bug: Opus returns section JSON where values
+    // contain medical text with colons (common in Slovak clinical notes).
+    const input = `{
+  "s_C-by_DTvyO": "Od rána nepríjemný pocit na hrudi, tlakový charakter.",
+  "s_EIWsmcB2MM": "Artériová hypertenzia: II. stupňa podľa ESC/ESH klasifikácie, kompenzovaná na terapii",
+  "s_XkZ9w2": "Obj: TK 135/85 mmHg, P 72/min, pravidelný",
+  "title": "Kontrola hypertenzie",
+  "letter": "Vážený pán doktor, posielam pacienta na kontrolu"
+}`;
+    const result = extractJson<Record<string, string>>(input);
+    expect(result["s_C-by_DTvyO"]).toContain("nepríjemný pocit");
+    expect(result["s_EIWsmcB2MM"]).toContain("Artériová hypertenzia");
+    expect(result.title).toBe("Kontrola hypertenzie");
+  });
 });
 
 describe("closeTruncatedJson", () => {

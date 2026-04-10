@@ -79,6 +79,15 @@ export function useEncounterData({
           }
           // else: server is still generating — keep "processing", generation hook will poll
         }
+        // Started but note exists: auto-resume bug corrupted the status — auto-correct
+        if (data.status === "started" && data.encounter_note) {
+          data.status = "to_review";
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "to_review" }),
+          }).catch(() => {});
+        }
         setVisit(data);
 
         const meta = data.metadata as Record<string, unknown>;
