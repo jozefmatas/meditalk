@@ -14,7 +14,7 @@ import { useGenerationTimer } from "@/hooks/use-generation-timer";
 import { parseSSEStream } from "@/lib/api/parse-sse-stream";
 import { useTemplateCache } from "./use-template-cache";
 import { useGenerationPolling } from "./use-generation-polling";
-import { resolveTranscript } from "./transcribe-blob";
+import { transcribeBlob } from "./transcribe-blob";
 import { logger } from "@/lib/logger";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -189,23 +189,15 @@ export function useEncounterGeneration({
 
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
-      const streamingCandidate = finalized?.transcript ?? null;
 
       logger.debug(
-        `[generate] Finalized — streaming transcript: ${streamingCandidate ? `${streamingCandidate.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
+        `[generate] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Blob-first transcription. When a blob exists we batch-transcribe
-      // it and use THAT as the source of truth; the Scribe real-time
-      // stream is only used as a fallback because it can silently
-      // truncate on Android screen lock. See `transcribe-blob.ts` for
-      // the full decision table.
-      const finalTranscript = await resolveTranscript({
-        blob: blobToProcess ?? null,
-        streamingCandidate,
-        language: generationLanguage,
-        visitId,
-      });
+      // Batch-transcribe the recorded blob via /api/batch-transcribe.
+      const finalTranscript = blobToProcess
+        ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
+        : null;
 
       try {
         setAudioBlob(null);
@@ -443,19 +435,15 @@ export function useEncounterGeneration({
       // Finalize any recording in the adjust drawer
       const finalized = await opts.adjustRecordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? null;
-      const streamingCandidate = finalized?.transcript ?? null;
 
       logger.debug(
-        `[adjust] Finalized — streaming transcript: ${streamingCandidate ? `${streamingCandidate.length} chars` : "NONE"}, blob: ${blobToProcess?.size || 0} bytes`,
+        `[adjust] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Blob-first transcription (same rationale as handleGenerate).
-      const finalTranscript = await resolveTranscript({
-        blob: blobToProcess,
-        streamingCandidate,
-        language: generationLanguage,
-        visitId,
-      });
+      // Batch-transcribe the recorded blob (same as handleGenerate).
+      const finalTranscript = blobToProcess
+        ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
+        : null;
 
       try {
         // Clear template cache — new context invalidates previous outputs

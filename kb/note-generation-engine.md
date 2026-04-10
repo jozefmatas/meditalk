@@ -96,49 +96,37 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 
 All recording happens inside [web/src/components/encounters/hooks/use-audio-recorder.ts](web/src/components/encounters/hooks/use-audio-recorder.ts), a single hook that abstracts web and native paths behind one interface.
 
-- **Web path.** Uses the browser `MediaRecorder` API. Preferred MIME types, in order: `audio/webm`, `audio/ogg`, `audio/mp4`. Chunks are buffered on the audio thread via an `AudioWorklet` which also downsamples to 16 kHz and pushes base64 Int16 PCM chunks into [use-scribe-streaming.ts](web/src/components/encounters/hooks/use-scribe-streaming.ts) for real-time transcription.
-- **Native path.** On iOS/Android the Capacitor `NativeAudioStreamPlugin` captures 16 kHz PCM directly and pushes chunks into the scribe hook via `sendChunk(base64)`. The same chunks are accumulated into a WAV file through [wav-builder.ts](web/src/lib/wav-builder.ts) for persistence and any fallback batch transcription.
+- **Web path.** Uses the browser `MediaRecorder` API. Preferred MIME types, in order: `audio/webm`, `audio/ogg`, `audio/mp4`. The full recording blob is batch-transcribed via `/api/batch-transcribe` at generation time.
+- **Native path.** On iOS/Android the Capacitor `NativeAudioStreamPlugin` captures 16 kHz PCM directly. Chunks are accumulated into a WAV file through [wav-builder.ts](web/src/lib/wav-builder.ts). The resulting blob is batch-transcribed at generation time.
 - **State model.** `"idle" | "recording" | "paused"`, plus `duration`, `micError`, `nativeLevel`. Recording is **never auto-reset** — the caller must explicitly `reset()` after consuming the blob. Background mic is enabled through `UIBackgroundModes: audio` on iOS and `@capawesome-team/capacitor-android-foreground-service` on Android; see [web/src/lib/native-guards.ts](web/src/lib/native-guards.ts).
 
 ### 1.2 Recording UI
 
-[web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) wires recording, scribe streaming, template selection, and consent:
+[web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) wires recording, template selection, and consent:
 
 - `useRecordingConsent` — shows a one-time data-processing notice.
 - `useAudioDevices` — mic picker.
 - `useRecordingGuards` — platform permission + state guards.
-- `useScribeStreaming` — opens the ElevenLabs Scribe v2 WebSocket.
 
-The bar exposes an imperative `finalize()` that stops recording + streaming and returns `{ blob, transcript }` to the caller.
+The bar exposes an imperative `finalize()` that stops recording and returns `{ blob }` to the caller. There is no real-time streaming — all transcription is batch-only.
 
 ### 1.3 Transcription — ElevenLabs Scribe v2
 
-Transcription is **Scribe v2**, not Whisper. The wrapper lives at [web/src/lib/elevenlabs.ts](web/src/lib/elevenlabs.ts):
+Transcription is **Scribe v2 batch**, not Whisper. The server-side wrapper lives at [web/src/lib/elevenlabs.ts](web/src/lib/elevenlabs.ts):
 
 ```ts
 transcribeAudio(file, filename, languageCode?, ctx?) → string
 ```
 
 - Model: `scribe_v2`.
-- **Batch (primary path).** The recorded audio blob is always POSTed to `/api/batch-transcribe` as `multipart/form-data`, which calls `speechToText.convert` with the visit's language. The returned text is what gets sent to `/api/generate` as `transcriptText`. This is the source of truth for every encounter where a blob exists.
-- **Real-time streaming (legacy / fallback).** The Scribe WebSocket is still opened during recording via [use-scribe-streaming.ts](web/src/components/encounters/hooks/use-scribe-streaming.ts) and `consumeTranscript()` still returns a partial transcript on finalize. This value is **only used as a fallback** when batch transcription fails AND we have nothing else. It is never used when a full blob is available — see §1.4 for why.
+- The recorded audio blob is POSTed to `/api/batch-transcribe` as `multipart/form-data`, which calls `speechToText.convert` with the visit's language. The returned text is sent to `/api/generate` as `transcriptText`.
+- The client-side helper is [transcribeBlob](web/src/components/encounters/hooks/transcribe-blob.ts), called from [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) in both `handleGenerate` and `handleAdjustGenerate`.
 - Usage is logged via `logUsage` with provider `"elevenlabs"`, operation `"transcription"`.
+- Tests: [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts) (4 cases covering success, server error, empty response, network failure).
 
-### 1.4 Blob-first transcript resolution
+### 1.4 Transcript flow
 
-The decision of which transcript to send to `/api/generate` is made by [resolveTranscript](web/src/components/encounters/hooks/transcribe-blob.ts) inside [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts). The rule is: **blob beats streaming, always**.
-
-| blob present? | batch succeeds? | streaming present? | result               |
-| ------------- | --------------- | ------------------ | -------------------- |
-| yes           | yes             | —                  | batch result         |
-| yes           | no              | yes                | streaming (fallback) |
-| yes           | no              | no                 | null                 |
-| no            | —               | yes                | streaming            |
-| no            | —               | no                 | null                 |
-
-**Why blob-first?** The Scribe real-time WebSocket is fragile on Android: when the user locks the screen, the socket dies (close code 1006) and Scribe's VAD commits whatever partial utterance it currently holds as if it were a final turn. The client has no way to distinguish "complete 5 minute transcript" from "truncated-to-2-minutes transcript that happened to look syntactically complete." The native `NativeAudioStreamPlugin` + `@capawesome-team/capacitor-android-foreground-service` keep the microphone alive across backgrounding, so the recorded blob is always the full audio — and re-transcribing it via the batch API gives us a deterministic, complete transcript regardless of WebSocket lifecycle. This is covered by [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts) (11 cases including the Android partial-transcript regression).
-
-The same blob-first policy applies to `handleAdjustGenerate` (regeneration from the review view with additional dictation), not just the initial generate call.
+Simple: blob → `transcribeBlob()` → text → `/api/generate`. If there is no blob (doctor-notes-only encounter), `transcriptText` is null and the pipeline relies on doctor notes and uploaded files alone.
 
 ### 1.5 Transcript storage
 
@@ -172,11 +160,11 @@ interface FileMetadata {
 
 [web/src/lib/extraction/extract-file.ts](web/src/lib/extraction/extract-file.ts) is the shared entry point. It dispatches on file type:
 
-| Type              | Method                                      | Model / Library                                                                                                        |
-| ----------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `image/*`         | EXIF auto-rotate → Claude Vision            | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
-| `application/pdf` | 5-min signed URL → Claude document API      | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (both URL-input and base64-input paths in the same file)   |
-| `audio/*`         | Prefer real-time transcript; else Scribe v2 | ElevenLabs                                                                                                             |
+| Type              | Method                                 | Model / Library                                                                                                        |
+| ----------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `image/*`         | EXIF auto-rotate → Claude Vision       | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
+| `application/pdf` | 5-min signed URL → Claude document API | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (both URL-input and base64-input paths in the same file)   |
+| `audio/*`         | Scribe v2 batch transcription          | ElevenLabs                                                                                                             |
 
 All OCR calls are pinned to `temperature: 0` so the same image/PDF always extracts to the same text — upstream determinism starts here, not at Pass 1. Language is plumbed through so all prompts and transcription hints respect the visit's `language` (`sk` / `cs` / `en`).
 

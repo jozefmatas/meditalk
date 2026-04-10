@@ -1,5 +1,4 @@
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
-import { serverEnv } from "@/lib/env/server";
 import { logUsage, type UsageContext } from "./usage";
 
 let _client: ElevenLabsClient | null = null;
@@ -63,27 +62,4 @@ export async function transcribeAudio(
   }
 
   return result.text;
-}
-
-/**
- * Generate a single-use token for client-side Scribe v2 Realtime streaming.
- * Token expires after 15 minutes and can only be used once.
- */
-export async function generateScribeToken(): Promise<string> {
-  const response = await fetch(
-    "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": serverEnv.ELEVENLABS_API_KEY,
-      },
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Failed to generate Scribe token: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.token;
 }
