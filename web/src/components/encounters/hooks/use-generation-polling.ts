@@ -4,7 +4,7 @@ import { useEffect, useCallback, useRef } from "react";
 import type { Encounter } from "@/lib/types";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 
-const POLL_TIMEOUT_MS = 90_000;
+const POLL_TIMEOUT_MS = 300_000; // 5 min — generations can take 60-240s
 const POLL_INTERVAL_MS = 3_000;
 
 interface UseGenerationPollingOptions {
@@ -12,6 +12,7 @@ interface UseGenerationPollingOptions {
   visit: Encounter | null;
   setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
   isStreaming: boolean;
+  setIsGenerating: (v: boolean) => void;
   updateTitleRef: React.RefObject<(title: string) => void>;
   setGeneratedNoteHtml: (html: string) => void;
   setCachedTemplate: (
@@ -33,6 +34,7 @@ export function useGenerationPolling({
   visit,
   setVisit,
   isStreaming,
+  setIsGenerating,
   updateTitleRef,
   setGeneratedNoteHtml,
   setCachedTemplate,
@@ -61,6 +63,7 @@ export function useGenerationPolling({
           if (!res.ok) return;
           const data: Encounter = await res.json();
           setVisit(data);
+          setIsGenerating(false);
           if (data.title) updateTitleRef.current(data.title);
           if (data.encounter_note) setGeneratedNoteHtml(data.encounter_note);
         } catch {
@@ -70,7 +73,13 @@ export function useGenerationPolling({
     };
     window.addEventListener("generation-done", handler);
     return () => window.removeEventListener("generation-done", handler);
-  }, [visitId, setVisit, updateTitleRef, setGeneratedNoteHtml]);
+  }, [
+    visitId,
+    setVisit,
+    setIsGenerating,
+    updateTitleRef,
+    setGeneratedNoteHtml,
+  ]);
 
   // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
   useEffect(() => {
@@ -83,6 +92,7 @@ export function useGenerationPolling({
       // Timeout — server likely failed; reset to "started" so user can retry
       if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
         stopPolling();
+        setIsGenerating(false);
         setVisit((prev) =>
           prev ? { ...prev, status: "started" as const } : prev,
         );
@@ -104,6 +114,7 @@ export function useGenerationPolling({
         const updated: Encounter = await res.json();
         if (updated.encounter_note || updated.status !== "processing") {
           stopPolling();
+          setIsGenerating(false);
           setVisit(updated);
           if (updated.encounter_note) {
             setGeneratedNoteHtml(updated.encounter_note);
@@ -136,6 +147,7 @@ export function useGenerationPolling({
     isStreaming,
     visitId,
     setVisit,
+    setIsGenerating,
     stopPolling,
     setGeneratedNoteHtml,
     setCachedTemplate,

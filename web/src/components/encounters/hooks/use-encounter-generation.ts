@@ -979,6 +979,7 @@ export function useEncounterGeneration({
     visit,
     setVisit,
     isStreaming,
+    setIsGenerating,
     updateTitleRef,
     setGeneratedNoteHtml,
     setCachedTemplate,
@@ -1010,6 +1011,14 @@ export function useEncounterGeneration({
         });
       }
 
+      // If the server is still generating (status "processing") OR we have an
+      // active generation async function from a previous mount (SPA navigation),
+      // show ProcessingOverlay immediately. The old SSE reader's stale setState
+      // calls won't update this component, but polling will detect completion.
+      if (data.status === "processing" || activeGenerations.has(visitId)) {
+        setIsGenerating(true);
+      }
+
       // Detect interrupted generation — generation_pending exists but no note.
       // IMPORTANT: Only auto-resume when status is NOT "processing". When the
       // status is "processing", the server is still actively generating (the
@@ -1027,7 +1036,7 @@ export function useEncounterGeneration({
         setPendingResume(true);
       }
     },
-    [setCachedTemplate],
+    [setCachedTemplate, visitId],
   );
 
   // Auto-resume interrupted generation. Fires once after initFromVisit
