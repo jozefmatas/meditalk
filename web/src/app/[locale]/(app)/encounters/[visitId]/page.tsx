@@ -32,6 +32,7 @@ import { AlertCircleIcon } from "@hugeicons/core-free-icons";
 import { buildSectionLabelsFromTemplate } from "@/lib/templates";
 import { useTemplate } from "@/hooks/use-template";
 import type { Encounter, EncounterType } from "@/lib/types";
+import { getTranscript } from "@/lib/encounters/sources";
 
 import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
@@ -134,6 +135,16 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return () => setPageTitle(null);
   }, [setPageTitle]);
 
+  // Refresh encounter data when file extraction completes in the background
+  const { refreshEncounter } = data;
+  useEffect(() => {
+    const handler = () => {
+      refreshEncounter();
+    };
+    window.addEventListener("extraction-complete", handler);
+    return () => window.removeEventListener("extraction-complete", handler);
+  }, [refreshEncounter]);
+
   // --- Generation hook ---
   const generation = useEncounterGeneration({
     visitId,
@@ -182,7 +193,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const filesUploading = hasUploadingFiles(data.files);
   const canGenerate =
     !!(
-      data.visit?.raw_text ||
+      getTranscript(data.visit?.metadata as Record<string, unknown> | null) ||
       generation.audioBlob ||
       generation.doctorNotes.trim() ||
       data.files.length > 0 ||
@@ -364,11 +375,13 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 selectedTemplateId={generation.selectedTemplateId}
                 onTemplateChange={generation.handleTemplateChange}
                 template={template}
+                generationLanguage={generation.generationLanguage}
                 doctorNotes={generation.doctorNotes}
                 onDoctorNotesChange={generation.setDoctorNotes}
                 visitId={visitId}
                 files={data.files}
                 onFilesChange={data.setFiles}
+                saveStatus={generation.saveStatus}
                 onRetry={handleRetry}
                 t={t}
               />

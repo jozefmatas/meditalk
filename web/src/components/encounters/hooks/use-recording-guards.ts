@@ -17,7 +17,7 @@ export interface UseRecordingGuardsReturn {
   // Navigation guard
   navDialogOpen: boolean;
   closeNavDialog: () => void;
-  confirmLeave: () => void;
+  confirmLeave: () => Promise<void>;
 
   // Wake lock / foreground service
   acquireWakeLock: () => Promise<void>;
@@ -39,11 +39,16 @@ export interface UseRecordingGuardsReturn {
  * - Android notifications (web): Prevents tab suspension when screen locks
  * - Audio interruption detection: Auto-detects phone call interruptions
  *
- * @param isRecording - Whether recording is currently active (not idle)
+ * @param shouldBlockNavigation - Whether navigation should be intercepted.
+ *   Typically `true` only when actively recording, NOT when paused (session
+ *   is already persisted when paused, so no data loss on navigation).
+ * @param onBeforeLeave - Optional async callback invoked before confirming
+ *   navigation (e.g. auto-pause + persist session).
  * @returns Guard management functions and navigation dialog state
  */
 export function useRecordingGuards(
-  isRecording: boolean,
+  shouldBlockNavigation: boolean,
+  onBeforeLeave?: () => Promise<void>,
 ): UseRecordingGuardsReturn {
   const t = useTranslations("encounters.detail");
   const router = useRouter();
@@ -57,6 +62,13 @@ export function useRecordingGuards(
 
   // Android notification ref (web only)
   const notificationRef = useRef<Notification | null>(null);
+
+  // Keep onBeforeLeave in a ref so the beforeunload handler always has the
+  // latest closure (with fresh duration, upload state, etc.)
+  const onBeforeLeaveRef = useRef(onBeforeLeave);
+  useEffect(() => {
+    onBeforeLeaveRef.current = onBeforeLeave;
+  });
 
   // Audio interruption state (phone call detection)
   const [audioInterrupted, setAudioInterrupted] = useState(false);
@@ -148,12 +160,14 @@ export function useRecordingGuards(
     pendingNavUrlRef.current = null;
   }, []);
 
-  const confirmLeave = useCallback(() => {
+  const confirmLeave = useCallback(async () => {
     setNavDialogOpen(false);
     const url = pendingNavUrlRef.current;
     pendingNavUrlRef.current = null;
+    // Auto-pause + persist before navigating (e.g. pause recorder, upload segment)
+    if (onBeforeLeave) await onBeforeLeave();
     if (url) router.push(url);
-  }, [router]);
+  }, [router, onBeforeLeave]);
 
   // Re-acquire wake lock when page becomes visible (web only — OS releases it on hide)
   // Native: UIBackgroundModes (iOS) + foreground service (Android) persist
@@ -163,7 +177,7 @@ export function useRecordingGuards(
     const handleVisibility = () => {
       if (
         document.visibilityState === "visible" &&
-        isRecording &&
+        shouldBlockNavigation &&
         !wakeLockRef.current
       ) {
         acquireWakeLock();
@@ -172,14 +186,14 @@ export function useRecordingGuards(
     document.addEventListener("visibilitychange", handleVisibility);
     return () =>
       document.removeEventListener("visibilitychange", handleVisibility);
-  }, [isRecording, acquireWakeLock]);
+  }, [shouldBlockNavigation, acquireWakeLock]);
 
   // Detect phone call interruptions via AudioContext state changes.
   // iOS: AudioContext transitions to "interrupted" → "running" after call.
   // Android: AudioContext transitions to "suspended" → "running".
   useEffect(() => {
     const ctx = audioContextRef.current;
-    if (!ctx || !isRecording) return;
+    if (!ctx || !shouldBlockNavigation) return;
 
     const handleStateChange = () => {
       if (ctx.state === "interrupted" || ctx.state === "suspended") {
@@ -193,15 +207,22 @@ export function useRecordingGuards(
 
     ctx.addEventListener("statechange", handleStateChange);
     return () => ctx.removeEventListener("statechange", handleStateChange);
-  }, [isRecording]);
+  }, [shouldBlockNavigation]);
 
   // Prevent accidental navigation while recording is active
   useEffect(() => {
-    if (!isRecording) return;
+    if (!shouldBlockNavigation) return;
 
-    // Tab close / page refresh — browser shows native "Leave site?" dialog
+    // Tab close / page refresh — browser shows native "Leave site?" dialog.
+    // Also fire auto-pause + persist (with keepalive fetch) so the session
+    // survives even if the user clicks "Reload". If they click "Cancel",
+    // the recorder will be paused — they can resume.
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
+      // Fire-and-forget: pause recorder + persist session.
+      // The persist fetch uses keepalive:true, so it completes even if
+      // the page unloads before the response arrives.
+      onBeforeLeaveRef.current?.();
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
 
@@ -232,7 +253,7 @@ export function useRecordingGuards(
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [isRecording]);
+  }, [shouldBlockNavigation]);
 
   return {
     navDialogOpen,

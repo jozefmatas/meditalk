@@ -13,6 +13,7 @@ import {
   Image01Icon,
 } from "@hugeicons/core-free-icons";
 import type { Encounter } from "@/lib/types";
+import { getTranscript } from "@/lib/encounters/sources";
 import { useIsAdmin } from "@/hooks/use-is-admin";
 
 interface ResourcesPanelProps {
@@ -47,7 +48,7 @@ export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   const files = ((meta?.files as EncounterFile[]) || []).filter((f) =>
     f.extracted_text?.trim(),
   );
-  const transcript = visit.raw_text || "";
+  const transcript = getTranscript(meta ?? null) || "";
 
   const hasTranscript = transcript.trim().length > 0;
   const hasDoctorNotes = doctorNotes.trim().length > 0;

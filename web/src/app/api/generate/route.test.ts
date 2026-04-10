@@ -90,6 +90,7 @@ describe("POST /api/generate - validation", () => {
     eq: vi.fn().mockReturnThis(),
     single: vi.fn(),
     update: vi.fn().mockReturnThis(),
+    rpc: vi.fn().mockResolvedValue({ data: {}, error: null }),
     storage: {
       from: vi.fn().mockReturnThis(),
       remove: vi.fn().mockResolvedValue({ data: null, error: null }),
@@ -160,9 +161,9 @@ describe("POST /api/generate - validation", () => {
     expect(response.status).toBe(404);
   });
 
-  it("updates raw_text when transcriptText provided", async () => {
+  it("saves transcript to metadata when transcriptText provided", async () => {
     // This test will fail during generation, but we're just testing that
-    // the raw_text update happens before generation
+    // the transcript metadata update happens before generation
     const request = new NextRequest("http://localhost/api/generate", {
       method: "POST",
       body: JSON.stringify({
@@ -174,10 +175,16 @@ describe("POST /api/generate - validation", () => {
     // Will throw during generation due to incomplete mocks, but that's ok
     await POST(request).catch(() => {});
 
-    // Verify raw_text was updated
-    expect(mockSupabase.update).toHaveBeenCalledWith({
-      raw_text: "Patient has a headache",
-    });
+    // Verify transcript was saved via atomic metadata merge RPC
+    expect(mockSupabase.rpc).toHaveBeenCalledWith(
+      "merge_visit_metadata",
+      expect.objectContaining({
+        p_visit_id: "visit-123",
+        p_partial: expect.objectContaining({
+          transcript: "Patient has a headache",
+        }),
+      }),
+    );
   });
 });
 

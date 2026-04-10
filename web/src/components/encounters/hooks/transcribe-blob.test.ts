@@ -60,8 +60,8 @@ describe("transcribeBlob", () => {
     expect(body.get("audio")).toBeInstanceOf(Blob);
   });
 
-  it("returns null on a non-OK response", async () => {
-    const fetchStub = errorFetch(500);
+  it("returns null on a permanent non-OK response (no retry)", async () => {
+    const fetchStub = errorFetch(400);
     const blob = makeBlob(1024);
 
     const result = await transcribeBlob(blob, "sk", "visit-abc", {
@@ -69,6 +69,40 @@ describe("transcribeBlob", () => {
     });
 
     expect(result).toBeNull();
+    // 400 is not transient — no retry
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once on a transient HTTP error (502) then returns null", async () => {
+    const fetchStub = errorFetch(502);
+    const blob = makeBlob(1024);
+
+    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+      fetch: fetchStub,
+    });
+
+    expect(result).toBeNull();
+    // 502 is transient — retried once
+    expect(fetchStub).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on a transient HTTP error then succeeds", async () => {
+    const fetchStub = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: "recovered" }),
+      }) as unknown as typeof fetch;
+    const blob = makeBlob(1024);
+
+    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+      fetch: fetchStub,
+    });
+
+    expect(result).toBe("recovered");
+    expect(fetchStub).toHaveBeenCalledTimes(2);
   });
 
   it("returns null when the response body has no text", async () => {
@@ -86,7 +120,7 @@ describe("transcribeBlob", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when fetch throws (network failure)", async () => {
+  it("retries once on TypeError (network failure) then returns null", async () => {
     const fetchStub = throwingFetch();
     const blob = makeBlob(1024);
 
@@ -95,5 +129,26 @@ describe("transcribeBlob", () => {
     });
 
     expect(result).toBeNull();
+    // TypeError is transient — retried once
+    expect(fetchStub).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on TypeError then succeeds", async () => {
+    const fetchStub = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: "after retry" }),
+      }) as unknown as typeof fetch;
+    const blob = makeBlob(1024);
+
+    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+      fetch: fetchStub,
+    });
+
+    expect(result).toBe("after retry");
+    expect(fetchStub).toHaveBeenCalledTimes(2);
   });
 });

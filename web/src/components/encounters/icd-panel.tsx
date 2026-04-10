@@ -132,24 +132,28 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     (codes: IcdCode[]) => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(async () => {
-        const meta = (visit.metadata || {}) as Record<string, unknown>;
-        const newMetadata = { ...meta, selected_icd_codes: codes };
+        const partial = { selected_icd_codes: codes };
 
         try {
           await fetch(`/api/encounters/${visit.id}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ metadata: newMetadata }),
+            body: JSON.stringify({ metadata: partial }),
           });
-          setVisit((prev) =>
-            prev ? { ...prev, metadata: newMetadata } : prev,
-          );
+          setVisit((prev) => {
+            if (!prev) return prev;
+            const current = (prev.metadata || {}) as Record<string, unknown>;
+            return {
+              ...prev,
+              metadata: { ...current, ...partial },
+            } as typeof prev;
+          });
         } catch {
           // Silent fail
         }
       }, 500);
     },
-    [visit.id, visit.metadata, setVisit],
+    [visit.id, setVisit],
   );
 
   const removeCode = useCallback(

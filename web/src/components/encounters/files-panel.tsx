@@ -153,29 +153,83 @@ export function FilesContent({
           return [...withoutTheseUploads, ...(data.files as EncounterFile[])];
         });
 
-        // Trigger immediate extraction for each uploaded file (background, fire-and-forget)
-        // This saves 15-50s per file during generation by pre-caching extracted text
-        // NOTE: Always extract audio files even if recording is active — generate will
-        // prefer real-time transcript if available, but fall back to extracted text
+        // Trigger immediate extraction for each uploaded file (background).
+        // Track completion so we can update file state and notify other components.
+        // Includes a single retry (2s delay) for transient failures.
         const uploadedFiles = data.files as EncounterFile[];
         uploadedFiles.forEach((file) => {
-          // Extract in background (don't await, don't block UI)
-          fetch(`/api/encounters/${visitId}/extract`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileId: file.id }),
-          })
-            .then((extractRes) => {
+          const tryExtract = async (attempt: number): Promise<void> => {
+            try {
+              const extractRes = await fetch(
+                `/api/encounters/${visitId}/extract`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ fileId: file.id }),
+                },
+              );
+
               if (extractRes.ok) {
-                logger.debug(`[extract] Started extraction for ${file.name}`);
+                const result = await extractRes.json();
+                logger.debug(`[extract] Completed extraction for ${file.name}`);
+                onFilesChange((prev) =>
+                  prev.map((f) =>
+                    f.id === file.id
+                      ? {
+                          ...f,
+                          extraction_status: "completed" as const,
+                          extracted_text: result.text ?? f.extracted_text,
+                        }
+                      : f,
+                  ),
+                );
+                window.dispatchEvent(
+                  new CustomEvent("extraction-complete", {
+                    detail: { visitId, fileId: file.id },
+                  }),
+                );
+              } else if (attempt === 0) {
+                logger.warn(
+                  `[extract] Extraction failed for ${file.name}: ${extractRes.status}, retrying...`,
+                );
+                await new Promise((r) => setTimeout(r, 2000));
+                return tryExtract(1);
+              } else {
+                logger.warn(
+                  `[extract] Extraction failed for ${file.name} after retry: ${extractRes.status}`,
+                );
+                onFilesChange((prev) =>
+                  prev.map((f) =>
+                    f.id === file.id
+                      ? { ...f, extraction_status: "failed" as const }
+                      : f,
+                  ),
+                );
               }
-            })
-            .catch((extractErr) => {
+            } catch (extractErr) {
+              if (attempt === 0) {
+                logger.warn(
+                  `[extract] Extraction error for ${file.name}, retrying...`,
+                  extractErr,
+                );
+                await new Promise((r) => setTimeout(r, 2000));
+                return tryExtract(1);
+              }
               logger.warn(
-                `[extract] Failed to trigger extraction for ${file.name}:`,
+                `[extract] Extraction failed for ${file.name} after retry:`,
                 extractErr,
               );
-            });
+              onFilesChange((prev) =>
+                prev.map((f) =>
+                  f.id === file.id
+                    ? { ...f, extraction_status: "failed" as const }
+                    : f,
+                ),
+              );
+            }
+          };
+
+          tryExtract(0);
         });
       } catch (err) {
         logger.error("File upload error:", err);

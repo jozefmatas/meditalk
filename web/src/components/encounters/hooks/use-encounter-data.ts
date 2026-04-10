@@ -126,5 +126,30 @@ export function useEncounterData({
     };
   }, [visitId, router, locale]);
 
-  return { visit, setVisit, isLoading, error, setError, files, setFiles };
+  /** Re-fetch the encounter from the API and update both visit and files state. */
+  const refreshEncounter = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/encounters/${visitId}`);
+      if (!res.ok) return;
+      const data: Encounter = await res.json();
+      setVisit(data);
+      const meta = data.metadata as Record<string, unknown>;
+      if (meta?.files) {
+        setFilesState(meta.files as EncounterFile[]);
+      }
+    } catch {
+      // Silent fail — refresh is best-effort
+    }
+  }, [visitId]);
+
+  return {
+    visit,
+    setVisit,
+    isLoading,
+    error,
+    setError,
+    files,
+    setFiles,
+    refreshEncounter,
+  };
 }

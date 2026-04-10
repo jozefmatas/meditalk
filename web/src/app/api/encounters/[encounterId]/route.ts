@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { Encounter, UpdateEncounterRequest } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
+import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
 import { logger } from "@/lib/logger";
 
 interface RouteParams {
@@ -11,7 +12,7 @@ interface RouteParams {
 
 /**
  * GET /api/encounters/[encounterId]
- * Get a single visit with its chunks
+ * Get a single visit
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
@@ -31,12 +32,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
-    // Get chunks count
-    const { count: chunkCount } = await supabase
-      .from("transcript_chunks")
-      .select("*", { count: "exact", head: true })
-      .eq("visit_id", visitId);
-
     logAudit({
       ...createAuditContext(auth, request),
       action: "encounter.view",
@@ -47,8 +42,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     return NextResponse.json({
       ...visit,
       status: normalizeStatus(visit.status),
-      chunkCount: chunkCount || 0,
-    } as Encounter & { chunkCount: number });
+    } as Encounter);
   } catch (err) {
     if (err instanceof Response) return err;
     logger.error("Visit fetch error:", err);
@@ -85,45 +79,72 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updateData.encounter_note = body.encounter_note;
     if (body.patient_letter !== undefined)
       updateData.patient_letter = body.patient_letter;
-
-    // Merge metadata instead of replacing to prevent race conditions
-    if (body.metadata !== undefined) {
-      // Fetch current metadata to merge with
-      const { data: current } = await supabase
-        .from("visits")
-        .select("metadata")
-        .eq("id", visitId)
-        .eq("user_id", userId)
-        .single();
-
-      const currentMeta = (current?.metadata ?? {}) as Record<string, unknown>;
-      updateData.metadata = { ...currentMeta, ...body.metadata };
+    // Metadata is merged atomically via a PostgreSQL RPC to prevent
+    // concurrent writers (auto-save, recording, generation) from clobbering
+    // each other. Handle it separately from the regular column update.
+    const hasMetadata = body.metadata !== undefined;
+    if (hasMetadata) {
+      await mergeVisitMetadata(
+        supabase,
+        visitId,
+        body.metadata as Record<string, unknown>,
+      );
     }
 
-    if (Object.keys(updateData).length === 0) {
+    if (Object.keys(updateData).length === 0 && !hasMetadata) {
       return NextResponse.json(
         { error: "No fields to update" },
         { status: 400 },
       );
     }
 
-    const { data: visit, error } = await supabase
-      .from("visits")
-      .update(updateData)
-      .eq("id", visitId)
-      .eq("user_id", userId)
-      .select()
-      .single();
+    // Update non-metadata columns if any were provided
+    if (Object.keys(updateData).length > 0) {
+      const { data: visit, error } = await supabase
+        .from("visits")
+        .update(updateData)
+        .eq("id", visitId)
+        .eq("user_id", userId)
+        .select()
+        .single();
 
-    if (error) {
-      logger.error("Error updating visit:", error);
-      return NextResponse.json(
-        { error: "Failed to update visit" },
-        { status: 500 },
-      );
+      if (error) {
+        logger.error("Error updating visit:", error);
+        return NextResponse.json(
+          { error: "Failed to update visit" },
+          { status: 500 },
+        );
+      }
+
+      if (!visit) {
+        return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+      }
+
+      logAudit({
+        ...createAuditContext(auth, request),
+        action: "encounter.update",
+        resourceType: "encounter",
+        resourceId: visitId,
+        metadata: {
+          fields: [
+            ...Object.keys(updateData),
+            ...(hasMetadata ? ["metadata"] : []),
+          ],
+        },
+      });
+
+      return NextResponse.json(visit as Encounter);
     }
 
-    if (!visit) {
+    // Metadata-only update: fetch the updated visit to return
+    const { data: visit, error } = await supabase
+      .from("visits")
+      .select("*")
+      .eq("id", visitId)
+      .eq("user_id", userId)
+      .single();
+
+    if (error || !visit) {
       return NextResponse.json({ error: "Visit not found" }, { status: 404 });
     }
 
@@ -132,7 +153,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       action: "encounter.update",
       resourceType: "encounter",
       resourceId: visitId,
-      metadata: { fields: Object.keys(updateData) },
+      metadata: { fields: ["metadata"] },
     });
 
     return NextResponse.json(visit as Encounter);

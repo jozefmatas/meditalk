@@ -22,7 +22,6 @@ export interface Encounter {
   user_id: string;
   title: string | null;
   audio_path: string | null;
-  raw_text: string | null;
   language: string;
   visit_date: string;
   patient_name: string | null;
@@ -137,6 +136,7 @@ export interface FileMetadata {
   source?: string;
   extracted_text?: string | null;
   extraction_status?: ExtractionStatus | null;
+  extraction_started_at?: string | null;
   extracted_at?: string | null;
 }
 

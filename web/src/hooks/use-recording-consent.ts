@@ -37,7 +37,6 @@ export function useRecordingConsent(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         metadata: {
-          ...metadata,
           recording_consent: true,
           recording_consent_date: new Date().toISOString(),
         },
@@ -50,7 +49,7 @@ export function useRecordingConsent(
 
     setHasConsent(true);
     setShowConsentDialog(false);
-  }, [visitId, metadata]);
+  }, [visitId]);
 
   return {
     showConsentDialog,

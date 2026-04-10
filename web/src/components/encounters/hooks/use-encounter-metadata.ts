@@ -55,7 +55,6 @@ export function useEncounterMetadata({
     const storedPersonalId = (meta.patient_personal_id as string) || "";
     if (patientId !== storedPersonalId) {
       updates.metadata = {
-        ...meta,
         patient_personal_id: patientId.trim() || null,
       };
     }
@@ -68,9 +67,16 @@ export function useEncounterMetadata({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates),
       });
-      setVisit((prev) =>
-        prev ? ({ ...prev, ...updates } as Encounter) : prev,
-      );
+      setVisit((prev) => {
+        if (!prev) return prev;
+        // Merge metadata partial instead of replacing the whole object
+        const merged = { ...prev, ...updates } as Encounter;
+        if (updates.metadata) {
+          const current = (prev.metadata || {}) as Record<string, unknown>;
+          merged.metadata = { ...current, ...updates.metadata };
+        }
+        return merged;
+      });
     } catch {
       // Silent fail
     }

@@ -56,10 +56,7 @@ interface AdjustDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   visitId: string;
-  metadata?: {
-    recording_consent?: boolean;
-    recording_consent_date?: string;
-  };
+  metadata?: Record<string, unknown>;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
   generationLanguage: SupportedLanguage;
@@ -186,10 +183,10 @@ export function AdjustDrawer({
                       <RecordingBar
                         ref={adjustRecordingBarRef}
                         visitId={visitId}
-                        language={generationLanguage}
                         metadata={metadata}
                         onRecordingComplete={handleRecordingComplete}
                         onRecordingStateChange={setRecordingState}
+                        language={generationLanguage}
                       />
                     </div>
                     <Separator />

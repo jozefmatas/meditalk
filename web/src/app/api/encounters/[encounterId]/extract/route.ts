@@ -169,21 +169,42 @@ export async function POST(
       );
     }
 
-    // Atomic update: set status=completed + extracted_text in one RPC call
-    const { error: rpcError } = await supabase.rpc(
-      "update_file_extraction_status",
-      {
+    // Atomic update: set status=completed + extracted_text in one RPC call.
+    // Retry with backoff — losing the extracted text after a successful OCR
+    // call is expensive, so we try hard to persist it.
+    const RETRY_DELAYS = [500, 1000, 2000];
+    let rpcError: unknown = null;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+      const { error } = await supabase.rpc("update_file_extraction_status", {
         p_visit_id: visitId,
         p_file_id: fileId,
         p_status: "completed",
         p_extracted_text: extractedText,
-      },
-    );
+      });
+
+      if (!error) {
+        rpcError = null;
+        break;
+      }
+
+      rpcError = error;
+      if (attempt < RETRY_DELAYS.length) {
+        logger.warn(
+          `[extract] RPC save retry ${attempt + 1}/${RETRY_DELAYS.length} for ${file.name}:`,
+          error,
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      }
+    }
 
     if (rpcError) {
       logger.error(
-        `[extract] Atomic update failed for ${file.name}:`,
+        `[extract] Atomic update failed after ${RETRY_DELAYS.length + 1} attempts for ${file.name}:`,
         rpcError,
+      );
+      logger.error(
+        `[extract] LOST TEXT file=${fileId} visit=${visitId} len=${extractedText.length}`,
       );
       return NextResponse.json(
         { error: "Failed to save extracted text" },

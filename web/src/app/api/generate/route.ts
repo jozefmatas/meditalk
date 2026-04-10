@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
+import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
 import { embedText } from "@/lib/openai";
 import {
   generateFromTemplate,
   InsufficientContextError,
 } from "@/lib/anthropic";
 import { extractFileText } from "@/lib/extraction/extract-file";
+import { transcribeAudio } from "@/lib/elevenlabs";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
@@ -33,6 +35,7 @@ import type {
   FactExtractionInput,
 } from "@/lib/clinical/fact-extraction";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import { getTranscript } from "@/lib/encounters/sources";
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
@@ -70,7 +73,10 @@ export async function POST(request: NextRequest) {
     const templateId: string | undefined = body.templateId;
     const doctorNotes: string | undefined = body.doctorNotes;
     // Scribe real-time transcript (used for recording files instead of Whisper)
-    const transcriptText: string | undefined = body.transcriptText;
+    let transcriptText: string | undefined = body.transcriptText;
+    // Recovery: path to stored audio blob in Supabase storage (uploaded at
+    // generate time so the recording survives app kill/refresh).
+    const audioPath: string | undefined = body.audioPath;
     const sendAsEmail: boolean = body.sendAsEmail === true;
     logger.debug("[generate] sendAsEmail:", sendAsEmail);
 
@@ -93,7 +99,9 @@ export async function POST(request: NextRequest) {
       metadata: { templateId },
     });
 
-    // Fetch the visit to get its language and existing metadata (RLS enforces ownership)
+    // Fetch the visit to get its language and existing metadata.
+    // The transcript is stored in metadata.transcript (set during pause-time
+    // transcription); used as fallback when client-side transcription fails.
     const { data: visit, error: visitError } = await supabase
       .from("visits")
       .select("id, title, language, metadata")
@@ -106,11 +114,96 @@ export async function POST(request: NextRequest) {
 
     const language = (visit.language as SupportedLanguage) || "en";
 
+    // Recovery / resume: if stored audio exists, download and transcribe.
+    // When both audioPath and transcriptText are present (resume + generate:
+    // prior recording in storage + new recording transcribed client-side),
+    // prepend the prior recording's transcript to the new one.
+    if (audioPath) {
+      lap("recovery-download-start");
+      try {
+        const { data: audioData, error: dlError } = await supabase.storage
+          .from("encounter-files")
+          .download(audioPath);
+
+        if (dlError || !audioData) {
+          logger.error(
+            "[generate] Failed to download recovery audio:",
+            dlError,
+          );
+          // Fall through — may still have chunks or file content below
+        } else {
+          const buffer = Buffer.from(await audioData.arrayBuffer());
+          const ext = audioPath.substring(audioPath.lastIndexOf("."));
+          const recovered = await transcribeAudio(
+            buffer,
+            `recovery${ext}`,
+            language,
+            { userId, visitId },
+          );
+          if (recovered) {
+            // Prepend prior recording transcript to new recording transcript
+            transcriptText = transcriptText
+              ? `${recovered}\n\n${transcriptText}`
+              : recovered;
+            logger.debug(
+              `[generate] Recovery transcription: ${recovered.length} chars (total: ${transcriptText.length} chars)`,
+            );
+          } else {
+            logger.warn(
+              "[generate] Recovery transcription returned empty text",
+            );
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          "[generate] Recovery audio transcription failed, using fallback:",
+          err,
+        );
+        // Falls through to existing chunks/files/transcriptText if any
+      }
+      lap("recovery-download-done");
+    }
+
     // Process uploaded files — extract text from any that haven't been processed yet
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+
+    // Fallback: if client-side transcription failed (transcriptText is empty)
+    // but the visit has a transcript from pause-time transcription, use that.
+    // This prevents losing the transcript when the generate-time batch
+    // transcription fails (network error, timeout, etc.).
+    if (!transcriptText) {
+      const existingTranscript = getTranscript(visitMeta);
+      if (existingTranscript) {
+        transcriptText = existingTranscript;
+        logger.debug(
+          `[generate] Using metadata.transcript fallback: ${transcriptText.length} chars`,
+        );
+      }
+    }
     let uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
 
-    // Wait for any in-progress or pending extractions (with timeout)
+    // Stuck extraction recovery: if a file has been "extracting" for over 5
+    // minutes, it's likely stuck (server died mid-extraction, network timeout,
+    // etc.). Reset it to "failed" so it naturally enters the retry path below.
+    const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+    const now = Date.now();
+    for (const file of uploadedFiles) {
+      if (file.extraction_status !== "extracting") continue;
+      if (!file.extraction_started_at) continue;
+      const elapsed = now - new Date(file.extraction_started_at).getTime();
+      if (elapsed > STUCK_THRESHOLD_MS) {
+        logger.warn(
+          `[generate] Resetting stuck extraction: file=${file.id} elapsed=${Math.round(elapsed / 1000)}s`,
+        );
+        await supabase.rpc("update_file_extraction_status", {
+          p_visit_id: visitId,
+          p_file_id: file.id,
+          p_status: "failed",
+        });
+        file.extraction_status = "failed";
+      }
+    }
+
     // Wait for any in-progress or pending extractions (poll until resolved)
     const pendingIds = new Set(
       uploadedFiles
@@ -247,18 +340,17 @@ export async function POST(request: NextRequest) {
 
       lap("extraction-done");
 
-      // Set raw_text on visit from recording transcript (for ResourcesPanel)
-      // NOTE: Do NOT update metadata.files here - the extract route already saved
+      // Persist recording transcript to metadata.transcript (for ResourcesPanel).
+      // NOTE: Do NOT update metadata.files here — the extract route already saved
       // extracted_text and extraction_status atomically. Writing the files array
       // here would overwrite those atomic updates with stale data.
       const recordingText = uploadedFiles.find(
         (f) => f.source === "recording" && f.extracted_text,
       )?.extracted_text;
       if (recordingText) {
-        await supabase
-          .from("visits")
-          .update({ raw_text: recordingText })
-          .eq("id", visitId);
+        await mergeVisitMetadata(supabase, visitId, {
+          transcript: recordingText,
+        });
       }
     }
 
@@ -275,11 +367,10 @@ export async function POST(request: NextRequest) {
         text: transcriptText,
       });
 
-      // Also persist raw_text for ResourcesPanel
-      await supabase
-        .from("visits")
-        .update({ raw_text: transcriptText })
-        .eq("id", visitId);
+      // Also persist transcript to metadata for ResourcesPanel
+      await mergeVisitMetadata(supabase, visitId, {
+        transcript: transcriptText,
+      });
     }
 
     // Re-read visit metadata after file extraction to include cached extracted_text
@@ -314,8 +405,10 @@ export async function POST(request: NextRequest) {
       clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
     }
 
-    // Run embedding search and clinical analysis in parallel
-    // Skip embedding entirely when transcriptText is provided (modern Scribe flow)
+    // Run embedding search and clinical analysis in parallel.
+    // @deprecated transcript_chunks — new encounters store transcript in
+    // metadata.transcript; this legacy path only fires for old encounters
+    // created before the batch-only migration.
     lap("parallel-start");
     const embeddingPromise = transcriptText
       ? Promise.resolve({
@@ -618,45 +711,64 @@ export async function POST(request: NextRequest) {
         };
         const generationHistory = [...priorHistory, historyEntry].slice(-10);
 
-        const savePayload = {
+        // Save non-metadata columns (encounter_note, patient_letter, etc.)
+        // and metadata atomically via separate operations:
+        // 1. Regular .update() for non-JSONB columns (last-writer-wins, safe)
+        // 2. mergeVisitMetadata RPC for JSONB merge (atomic, no race)
+        const columnPayload: Record<string, unknown> = {
           encounter_note: generatedNote,
           patient_letter: letter,
           status: "to_review",
           ...(autoTitle ? { title: autoTitle } : {}),
-          metadata: {
-            ...refreshedMetadata,
-            template_id: template.id,
-            ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-            ...(finalAnalysis
-              ? {
-                  clinical_analysis: {
-                    inferredSpecialty: finalAnalysis.inferredSpecialty,
-                    secondarySpecialty: finalAnalysis.secondarySpecialty,
-                    matchedConcepts: finalAnalysis.matchedConcepts,
-                    candidateIcdCodes: finalAnalysis.candidateIcdCodes,
-                    problemClusters: finalAnalysis.problemClusters,
-                    mentionedMedications: finalAnalysis.mentionedMedications,
-                  },
-                }
-              : {}),
-            generation_fingerprint: fingerprint,
-            generation_history: generationHistory,
-          },
         };
         // Retry transient fetch failures — long Opus runs leave the Supabase
         // keepalive connection idle past Cloudflare's 100s timeout, causing
         // undici to reuse a dead socket. See lib/supabase/retry.ts.
-        const { error: saveError } = await retrySupabaseCall(
+        const { error: columnError } = await retrySupabaseCall(
           () =>
             supabase
               .from("visits")
-              .update(savePayload)
+              .update(columnPayload)
               .eq("id", visitId) as unknown as Promise<{
               data: null;
               error: unknown;
             }>,
-          { label: "generate-save" },
+          { label: "generate-save-columns" },
         );
+
+        // Atomic metadata merge — sets new keys and deletes transient ones
+        // (generation_pending, recording_session) in one database operation.
+        const metadataPartial: Record<string, unknown> = {
+          template_id: template.id,
+          generation_fingerprint: fingerprint,
+          generation_history: generationHistory,
+          // Delete transient keys (null → deleted by the RPC)
+          generation_pending: null,
+          recording_session: null,
+          ...(transcriptText ? { transcript: transcriptText } : {}),
+          ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          ...(finalAnalysis
+            ? {
+                clinical_analysis: {
+                  inferredSpecialty: finalAnalysis.inferredSpecialty,
+                  secondarySpecialty: finalAnalysis.secondarySpecialty,
+                  matchedConcepts: finalAnalysis.matchedConcepts,
+                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  problemClusters: finalAnalysis.problemClusters,
+                  mentionedMedications: finalAnalysis.mentionedMedications,
+                },
+              }
+            : {}),
+        };
+
+        let metadataError: unknown = null;
+        try {
+          await mergeVisitMetadata(supabase, visitId, metadataPartial);
+        } catch (err) {
+          metadataError = err;
+        }
+
+        const saveError = columnError || metadataError;
         if (saveError) {
           logger.error("Failed to save generated content:", saveError);
           // Last-ditch recovery log — the generated note is otherwise lost
@@ -713,6 +825,29 @@ export async function POST(request: NextRequest) {
           } catch (err) {
             logger.error("[email] Failed to send note email:", err);
           }
+        }
+
+        // Clean up recovery audio blob from storage (fire-and-forget).
+        // Check both the request audioPath and metadata for the path.
+        const pendingAudioPath =
+          audioPath ||
+          (
+            (refreshedMetadata as Record<string, unknown>)
+              ?.generation_pending as { audioPath?: string } | undefined
+          )?.audioPath;
+        if (pendingAudioPath) {
+          supabase.storage
+            .from("encounter-files")
+            .remove([pendingAudioPath])
+            .then(({ error: rmErr }) => {
+              if (rmErr)
+                logger.warn("[generate] Recovery audio cleanup failed:", rmErr);
+              else
+                logger.debug(
+                  "[generate] Recovery audio cleaned up:",
+                  pendingAudioPath,
+                );
+            });
         }
 
         lap("total");

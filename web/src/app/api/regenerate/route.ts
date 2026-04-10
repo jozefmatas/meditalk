@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
+import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
 import {
   anthropic,
   GENERATION_MODELS,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/api/sse";
 import type { ClinicalAnalysis } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
+import { getTranscript } from "@/lib/encounters/sources";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 import { logger } from "@/lib/logger";
 
@@ -92,7 +94,9 @@ export async function POST(request: NextRequest) {
       metadata: { templateId },
     });
 
-    // Fetch visit metadata (RLS enforces ownership)
+    // Fetch visit metadata (RLS enforces ownership).
+    // The transcript is in metadata.transcript (batch-only encounters);
+    // legacy transcript_chunks are kept as fallback for old encounters.
     const { data: visit, error: visitError } = await supabase
       .from("visits")
       .select("id, language, metadata, encounter_note, patient_letter")
@@ -106,13 +110,6 @@ export async function POST(request: NextRequest) {
     const language =
       ((visit.language as string)?.trim() as SupportedLanguage) || "en";
 
-    // Fetch chunks directly by visit_id — skip embedding + vector search
-    const { data: chunks, error: chunksError } = await supabase
-      .from("transcript_chunks")
-      .select("id, content")
-      .eq("visit_id", visitId)
-      .order("chunk_index", { ascending: true });
-
     // Collect already-extracted file texts from metadata
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
     const uploadedFiles = (visitMeta.files ?? []) as {
@@ -124,8 +121,31 @@ export async function POST(request: NextRequest) {
       .filter((f) => f.extracted_text)
       .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));
 
-    const chunkContents = chunks?.map((c) => c.content) ?? [];
-    const usedChunkIds = chunks?.map((c) => c.id as string) ?? [];
+    // Transcript resolution: prefer metadata.transcript, then fall back to
+    // legacy transcript_chunks for old encounters created before the batch-only
+    // migration. New encounters always have metadata.transcript.
+    const transcript = getTranscript(visitMeta);
+    let chunkContents: string[];
+    let usedChunkIds: string[];
+
+    if (transcript) {
+      chunkContents = [transcript];
+      usedChunkIds = [];
+    } else {
+      // @deprecated — legacy transcript_chunks path for old encounters only.
+      const { data: chunks, error: chunksError } = await supabase
+        .from("transcript_chunks")
+        .select("id, content")
+        .eq("visit_id", visitId)
+        .order("chunk_index", { ascending: true });
+
+      if (chunksError) {
+        logger.error("Chunk fetch error:", chunksError);
+      }
+
+      chunkContents = chunks?.map((c) => c.content) ?? [];
+      usedChunkIds = chunks?.map((c) => c.id as string) ?? [];
+    }
 
     if (
       chunkContents.length === 0 &&
@@ -138,10 +158,6 @@ export async function POST(request: NextRequest) {
         },
         { status: 404 },
       );
-    }
-
-    if (chunksError) {
-      logger.error("Chunk fetch error:", chunksError);
     }
 
     // Resolve template from DB
@@ -535,40 +551,57 @@ Rules:
         };
         const generationHistory = [...priorHistory, historyEntry].slice(-10);
 
-        const savePayload = {
+        // Save columns (non-JSONB) separately from metadata (JSONB).
+        // Columns use last-writer-wins which is safe; metadata uses the
+        // atomic merge RPC to prevent concurrent writers clobbering each other.
+        const columnPayload: Record<string, unknown> = {
           encounter_note: generatedNote,
           patient_letter: letter,
-          metadata: {
-            ...existingMetadata,
-            template_id: template.id,
-            ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-            ...(finalAnalysis
-              ? {
-                  clinical_analysis: {
-                    inferredSpecialty: finalAnalysis.inferredSpecialty,
-                    secondarySpecialty: finalAnalysis.secondarySpecialty,
-                    matchedConcepts: finalAnalysis.matchedConcepts,
-                    candidateIcdCodes: finalAnalysis.candidateIcdCodes,
-                    problemClusters: finalAnalysis.problemClusters,
-                  },
-                }
-              : {}),
-            generation_fingerprint: fingerprint,
-            generation_history: generationHistory,
-          },
         };
         // Retry transient fetch failures — see lib/supabase/retry.ts.
-        const { error: saveError } = await retrySupabaseCall(
+        const { error: columnError } = await retrySupabaseCall(
           () =>
             supabase
               .from("visits")
-              .update(savePayload)
+              .update(columnPayload)
               .eq("id", visitId) as unknown as Promise<{
               data: null;
               error: unknown;
             }>,
-          { label: "regenerate-save" },
+          { label: "regenerate-save-columns" },
         );
+
+        // Atomic metadata merge — sets new keys and deletes transient ones
+        // (generation_pending, recording_session) in one database operation.
+        const metadataPartial: Record<string, unknown> = {
+          template_id: template.id,
+          generation_fingerprint: fingerprint,
+          generation_history: generationHistory,
+          // Delete transient keys (null → deleted by the RPC)
+          generation_pending: null,
+          recording_session: null,
+          ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          ...(finalAnalysis
+            ? {
+                clinical_analysis: {
+                  inferredSpecialty: finalAnalysis.inferredSpecialty,
+                  secondarySpecialty: finalAnalysis.secondarySpecialty,
+                  matchedConcepts: finalAnalysis.matchedConcepts,
+                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  problemClusters: finalAnalysis.problemClusters,
+                },
+              }
+            : {}),
+        };
+
+        let metadataError: unknown = null;
+        try {
+          await mergeVisitMetadata(supabase, visitId, metadataPartial);
+        } catch (err) {
+          metadataError = err;
+        }
+
+        const saveError = columnError || metadataError;
         if (saveError) {
           logger.error("Failed to save regenerated content:", saveError);
           logger.error(

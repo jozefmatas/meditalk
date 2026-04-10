@@ -11,7 +11,6 @@ const makeVisit = (overrides: Partial<Encounter> = {}): Encounter => ({
   user_id: "user-1",
   title: "Test visit",
   audio_path: null,
-  raw_text: null,
   language: "sk",
   visit_date: "2025-01-15",
   patient_name: null,

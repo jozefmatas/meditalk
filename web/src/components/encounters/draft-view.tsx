@@ -30,7 +30,8 @@ import {
   resolveSectionLabel,
   type Template,
 } from "@/lib/templates";
-import type { Encounter } from "@/lib/types";
+import type { Encounter, SupportedLanguage } from "@/lib/types";
+import type { SaveStatus } from "@/hooks/use-save-status";
 
 interface DraftViewProps {
   visit: Encounter;
@@ -47,6 +48,8 @@ interface DraftViewProps {
   selectedTemplateId: string;
   onTemplateChange: (id: string) => void;
   template: Template | undefined;
+  /** Language for pause-time transcription. */
+  generationLanguage: SupportedLanguage;
   // Editor
   doctorNotes: string;
   onDoctorNotesChange: (value: string) => void;
@@ -56,6 +59,8 @@ interface DraftViewProps {
   onFilesChange: (
     files: EncounterFile[] | ((prev: EncounterFile[]) => EncounterFile[]),
   ) => void;
+  // Save status
+  saveStatus?: SaveStatus;
   // Retry
   onRetry?: () => void;
   // i18n
@@ -75,11 +80,13 @@ export function DraftView({
   selectedTemplateId,
   onTemplateChange,
   template,
+  generationLanguage,
   doctorNotes,
   onDoctorNotesChange,
   visitId,
   files,
   onFilesChange,
+  saveStatus,
   onRetry,
   t,
 }: DraftViewProps) {
@@ -264,17 +271,32 @@ export function DraftView({
             <Badge variant={`status-${visit.status}` as "status-started"}>
               {t(`status.${visit.status}`)}
             </Badge>
+            {saveStatus === "saving" && (
+              <span className="text-xs text-muted-foreground animate-pulse">
+                {t("detail.saving")}
+              </span>
+            )}
+            {saveStatus === "saved" && (
+              <span className="text-xs text-muted-foreground animate-in fade-in duration-300">
+                {t("detail.saved")}
+              </span>
+            )}
+            {saveStatus === "error" && (
+              <span className="text-xs text-destructive">
+                {t("detail.saveFailed")}
+              </span>
+            )}
           </div>
         </div>
         <RecordingBar
           ref={recordingBarRef}
           visitId={visitId}
-          language={visit.language}
           metadata={visit.metadata}
           onRecordingComplete={onRecordingComplete}
           onRecordingStateChange={onRecordingStateChange}
           templateId={selectedTemplateId}
           onTemplateChange={onTemplateChange}
+          language={generationLanguage}
         />
       </div>
 

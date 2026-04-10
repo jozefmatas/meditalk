@@ -18,9 +18,6 @@ export function audioMimeToExt(mime: string): string {
 }
 
 function getSupportedMimeType(): string {
-  // Prefer WebM — handles chunked recording (timeslice) correctly.
-  // MP4 (Safari-only) fragments don't concatenate into valid files,
-  // so we use it only as a last resort and skip timeslice for it.
   const types = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -50,18 +47,23 @@ export interface UseAudioRecorderReturn {
   /** Native only: current audio level (0–1) computed from PCM chunks. */
   nativeLevel: number;
 
-  /** Start recording. Returns MediaStream on web (for Scribe), null on native. */
+  /** Start recording. Returns MediaStream on web, null on native. */
   start: (options?: StartOptions) => Promise<MediaStream | null>;
 
-  /** Pause current recording (keeps resources alive for resume). */
-  pause: () => void;
+  /**
+   * Pause current recording. Uses native MediaRecorder.pause() on web
+   * so the recording stays in a single container. Resolves after data
+   * is flushed via requestData().
+   */
+  pause: () => Promise<void>;
 
   /** Resume paused recording. */
   resume: () => void;
 
   /**
    * Stop active recorder and return audio blob.
-   * Web: merged MediaRecorder segments. Native: WAV from accumulated chunks.
+   * Web: single valid blob from all chunks (one container across pauses).
+   * Native: WAV from accumulated chunks.
    * Does NOT release resources or reset state — call `reset()` after.
    */
   stop: () => Promise<Blob | null>;
@@ -71,12 +73,22 @@ export interface UseAudioRecorderReturn {
 
   /** Emergency cleanup for unmount. */
   cleanupOnUnmount: () => void;
+
+  /**
+   * Non-destructive snapshot of the current recording as a blob.
+   * Call after pause() to get the accumulated audio for upload to storage.
+   * Web: all chunks so far (truncated but decodable). Native: WAV from PCM chunks.
+   */
+  getSnapshotBlob: () => Blob | null;
 }
 
 /**
  * Hook for managing audio recording.
  *
- * On **web**: Uses MediaRecorder for blob capture + returns MediaStream for Scribe.
+ * On **web**: Uses MediaRecorder with native pause()/resume() to maintain
+ * a single container across pause/resume cycles. This ensures stop()
+ * produces one valid file containing all audio.
+ *
  * On **native** (iOS/Android): Uses NativeAudioStream Capacitor plugin for native
  * recording that works with the screen locked. Streams PCM chunks to JS via events.
  */
@@ -97,7 +109,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   // ── Web-only refs ──
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const segmentsRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef<string>("audio/webm");
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -142,29 +153,11 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     return new Blob(chunksRef.current, { type: mimeTypeRef.current });
   }, []);
 
-  const mergeSegments = useCallback((finalSegment: Blob | null) => {
-    const allSegments = [...segmentsRef.current];
-    if (finalSegment) allSegments.push(finalSegment);
-    if (allSegments.length === 0) return null;
-    if (allSegments.length === 1) return allSegments[0];
-    return new Blob(allSegments, { type: mimeTypeRef.current });
-  }, []);
-
   const onDataAvailable = useCallback((e: BlobEvent) => {
     if (e.data.size > 0) {
       chunksRef.current.push(e.data);
     }
   }, []);
-
-  const createSegmentOnStop = useCallback(() => {
-    return () => {
-      const blob = buildBlob();
-      chunksRef.current = [];
-      if (blob) {
-        segmentsRef.current.push(blob);
-      }
-    };
-  }, [buildBlob]);
 
   // ── Public API ──
 
@@ -232,7 +225,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       }
 
       // ── Web path ──
-      segmentsRef.current = [];
       const mimeType = getSupportedMimeType();
 
       try {
@@ -284,10 +276,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           );
           onDataAvailable(e);
         };
-        recorder.onstop = () => {
-          logger.info("[rec-diag] MediaRecorder onstop fired");
-          createSegmentOnStop()();
-        };
         recorder.onerror = (e) =>
           logger.error("[rec-diag] MediaRecorder ERROR:", e);
 
@@ -305,25 +293,45 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         return null;
       }
     },
-    [onDataAvailable, createSegmentOnStop, startTimer],
+    [onDataAvailable, startTimer],
   );
 
-  const pause = useCallback(() => {
+  const pause = useCallback((): Promise<void> => {
     logger.info(`[rec-diag] pause() called, isNative=${isNative}`);
+    pauseTimer();
+
     if (isNative) {
       nativePluginRef.current
         ?.pause()
         .catch((e) => logger.warn("[recording] Native pause failed:", e));
-    } else {
-      const recorder = mediaRecorderRef.current;
-      logger.info(`[rec-diag] pause: recorder=${recorder?.state}`);
-      if (recorder?.state === "recording") {
-        recorder.stop(); // triggers onstop → blob saved to segments array
-      }
+      setState("paused");
+      return Promise.resolve();
     }
-    pauseTimer();
-    setState("paused");
-  }, [pauseTimer]);
+
+    const recorder = mediaRecorderRef.current;
+    logger.info(`[rec-diag] pause: recorder=${recorder?.state}`);
+
+    if (!recorder || recorder.state !== "recording") {
+      setState("paused");
+      return Promise.resolve();
+    }
+
+    // Flush accumulated data via requestData(), then use native pause().
+    // This keeps a single WebM container so stop() produces one valid file
+    // containing all audio across pause/resume cycles.
+    return new Promise<void>((resolve) => {
+      recorder.ondataavailable = (e: BlobEvent) => {
+        onDataAvailable(e);
+        // Restore normal handler for future events (after resume)
+        recorder.ondataavailable = (ev: BlobEvent) => onDataAvailable(ev);
+        recorder.pause();
+        logger.info("[rec-diag] MediaRecorder paused (native pause)");
+        setState("paused");
+        resolve();
+      };
+      recorder.requestData();
+    });
+  }, [pauseTimer, onDataAvailable]);
 
   const resume = useCallback(() => {
     if (isNative) {
@@ -331,22 +339,15 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         ?.resume()
         .catch((e) => logger.warn("[recording] Native resume failed:", e));
     } else {
-      const stream = streamRef.current;
-      if (!stream) return;
-
-      const mimeType = mimeTypeRef.current;
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = onDataAvailable;
-      recorder.onstop = createSegmentOnStop();
-      recorder.start();
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state !== "paused") return;
+      recorder.resume();
+      logger.info("[rec-diag] MediaRecorder resumed");
     }
 
     startTimer();
     setState("recording");
-  }, [onDataAvailable, createSegmentOnStop, startTimer]);
+  }, [startTimer]);
 
   const stop = useCallback(async (): Promise<Blob | null> => {
     // ── Native path ──
@@ -375,30 +376,26 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     const recorder = mediaRecorderRef.current;
     const track = streamRef.current?.getAudioTracks()[0];
     logger.info(
-      `[rec-diag] stop(): recorder=${recorder?.state}, track=${track?.readyState ?? "gone"}, chunks=${chunksRef.current.length}, segments=${segmentsRef.current.length}`,
+      `[rec-diag] stop(): recorder=${recorder?.state}, track=${track?.readyState ?? "gone"}, chunks=${chunksRef.current.length}`,
     );
 
     if (!recorder || recorder.state === "inactive") {
       const blob = buildBlob();
       chunksRef.current = [];
-      const mergedBlob = mergeSegments(blob);
-      segmentsRef.current = [];
-      logger.info(`[rec-diag] stop() merged: ${mergedBlob?.size ?? 0} bytes`);
-      return mergedBlob;
+      logger.info(`[rec-diag] stop() blob: ${blob?.size ?? 0} bytes`);
+      return blob;
     }
 
     return new Promise((resolve) => {
       recorder.onstop = () => {
         const blob = buildBlob();
         chunksRef.current = [];
-        const mergedBlob = mergeSegments(blob);
-        segmentsRef.current = [];
-        logger.info(`[rec-diag] stop() merged: ${mergedBlob?.size ?? 0} bytes`);
-        resolve(mergedBlob);
+        logger.info(`[rec-diag] stop() blob: ${blob?.size ?? 0} bytes`);
+        resolve(blob);
       };
       recorder.stop();
     });
-  }, [buildBlob, mergeSegments]);
+  }, [buildBlob]);
 
   const reset = useCallback(() => {
     if (isNative) {
@@ -453,6 +450,17 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
   }, []);
 
+  const getSnapshotBlob = useCallback((): Blob | null => {
+    if (isNative) {
+      return wavBuilderRef.current?.toBlob() ?? null;
+    }
+    // Web: after pause(), chunksRef contains all data from this recording
+    // session (single container). The blob is truncated (no end marker)
+    // but decodable by most transcription services.
+    if (chunksRef.current.length === 0) return null;
+    return new Blob(chunksRef.current, { type: mimeTypeRef.current });
+  }, []);
+
   return {
     state,
     duration,
@@ -465,5 +473,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     stop,
     reset,
     cleanupOnUnmount,
+    getSnapshotBlob,
   };
 }

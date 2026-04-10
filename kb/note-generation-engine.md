@@ -1,6 +1,6 @@
 # MediTalk Note-Generation Engine
 
-_Last updated: 2026-04-09_
+_Last updated: 2026-04-11_
 
 This document is the **canonical reference** for how a medical encounter turns into a finalized clinical note in MediTalk. It exists so we can refine, refactor, and debug the pipeline without having to re-derive its shape from source code every time.
 
@@ -13,12 +13,16 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 ```
 ┌────────────────────────── INTAKE ──────────────────────────┐
 │                                                             │
-│  🎙  Audio recording  ─────► ElevenLabs Scribe v2          │
-│      (Web: MediaRecorder +                  (real-time      │
-│       AudioWorklet;                          streaming or   │
-│       Native: Capacitor                      batch)         │
-│       PCM plugin)                             │             │
-│                                               ▼             │
+│  🎙  Audio recording  ──► Pause: upload snapshot blob +     │
+│      (Web: MediaRecorder        fire-and-forget batch       │
+│       pause/resume;         transcribe → metadata.transcript│
+│       Native: Capacitor    Generate: full-blob batch        │
+│       PCM plugin)              transcribe (Scribe v2)       │
+│                                     │                       │
+│                                     ▼                       │
+│                            transcriptText sent to           │
+│                            /api/generate                    │
+│                                                             │
 │  📎  File uploads  ─────► Claude Vision / PDF / Scribe     │
 │      (images, PDFs,        (extractFileText)               │
 │       audio files)             │                            │
@@ -96,19 +100,37 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 
 All recording happens inside [web/src/components/encounters/hooks/use-audio-recorder.ts](web/src/components/encounters/hooks/use-audio-recorder.ts), a single hook that abstracts web and native paths behind one interface.
 
-- **Web path.** Uses the browser `MediaRecorder` API. Preferred MIME types, in order: `audio/webm`, `audio/ogg`, `audio/mp4`. The full recording blob is batch-transcribed via `/api/batch-transcribe` at generation time.
-- **Native path.** On iOS/Android the Capacitor `NativeAudioStreamPlugin` captures 16 kHz PCM directly. Chunks are accumulated into a WAV file through [wav-builder.ts](web/src/lib/wav-builder.ts). The resulting blob is batch-transcribed at generation time.
+- **Web path.** Uses the browser `MediaRecorder` API with native `pause()`/`resume()` to maintain a single container across pause/resume cycles — `stop()` produces one valid file containing all audio. Preferred MIME types, in order: `audio/webm;codecs=opus`, `audio/webm`, `audio/ogg;codecs=opus`, `audio/ogg`, `audio/mp4`. At pause time, `requestData()` flushes accumulated chunks before pausing. `getSnapshotBlob()` returns the accumulated audio without stopping the recorder.
+- **Native path.** On iOS/Android the Capacitor `NativeAudioStreamPlugin` captures 16 kHz PCM directly. Chunks are accumulated into a WAV file through [wav-builder.ts](web/src/lib/wav-builder.ts). `getSnapshotBlob()` returns a WAV from accumulated chunks.
 - **State model.** `"idle" | "recording" | "paused"`, plus `duration`, `micError`, `nativeLevel`. Recording is **never auto-reset** — the caller must explicitly `reset()` after consuming the blob. Background mic is enabled through `UIBackgroundModes: audio` on iOS and `@capawesome-team/capacitor-android-foreground-service` on Android; see [web/src/lib/native-guards.ts](web/src/lib/native-guards.ts).
 
-### 1.2 Recording UI
+### 1.2 Recording UI & Pause-Time Upload
 
-[web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) wires recording, template selection, and consent:
+[web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) wires recording, template selection, consent, and pause-time blob upload:
 
 - `useRecordingConsent` — shows a one-time data-processing notice.
 - `useAudioDevices` — mic picker.
-- `useRecordingGuards` — platform permission + state guards.
+- `useRecordingGuards` — platform permission + state guards (navigation blocking, wake lock, notifications, audio interruption auto-pause/resume).
 
-The bar exposes an imperative `finalize()` that stops recording and returns `{ blob }` to the caller. There is no real-time streaming — all transcription is batch-only.
+**Batch-only architecture:** There is no progressive/VAD-based transcription. The recording runs continuously. When the doctor pauses, `persistBlobAtPause()` does two things:
+
+1. **Uploads a snapshot blob** to Supabase storage (`encounter-files` bucket) — this is the cumulative audio so far (single container via native pause/resume on web).
+2. **Fire-and-forget batch transcription** — calls `transcribeBlob(snapshot, language, visitId)` then PATCHes the result to `visits.metadata.transcript` (via the atomic metadata merge endpoint). This gives the Sources panel a live transcript preview even before generation. Failures surface a toast error via `sonner`.
+
+**Session persistence:** Recording session state is persisted to `visits.metadata.recording_session` so it survives page refresh/navigation. When the user returns to a paused encounter, the recording bar restores the paused UI with duration and resume button. The `RecordingSession` shape:
+
+```ts
+/** Persisted to visits.metadata.recording_session */
+interface RecordingSession {
+  state: "recording" | "paused";
+  durationAtPause: number;
+  audioPath?: string; // storage path to the snapshot blob from last pause
+}
+```
+
+**Session restoration:** On resume after a page refresh, `handleResume` starts a **fresh** MediaRecorder (the previous one was destroyed by the refresh). It sets `durationOffset = restoredDuration` so the timer continues where it left off. The pre-refresh audio lives at `recording_session.audioPath` in storage — it's NOT in the new recorder's buffer.
+
+The bar exposes an imperative `finalize()` via ref that stops the recorder and returns `{ blob, isRestoredSession }`. `isRestoredSession` is `true` when `durationOffset > 0` (i.e., the session was resumed after a page refresh). This flag tells `handleGenerate` to send the pre-refresh `audioPath` to the server for recovery concatenation.
 
 ### 1.3 Transcription — ElevenLabs Scribe v2
 
@@ -119,20 +141,29 @@ transcribeAudio(file, filename, languageCode?, ctx?) → string
 ```
 
 - Model: `scribe_v2`.
-- The recorded audio blob is POSTed to `/api/batch-transcribe` as `multipart/form-data`, which calls `speechToText.convert` with the visit's language. The returned text is sent to `/api/generate` as `transcriptText`.
-- The client-side helper is [transcribeBlob](web/src/components/encounters/hooks/transcribe-blob.ts), called from [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) in both `handleGenerate` and `handleAdjustGenerate`.
+- Full blobs are POSTed to `/api/batch-transcribe` as `multipart/form-data`, which calls `speechToText.convert` with the visit's language.
+- The client-side helper is [transcribeBlob](web/src/components/encounters/hooks/transcribe-blob.ts) — the primary transcription path for all recordings. Includes a **single retry** with 2s delay for transient HTTP errors (408, 429, 502, 503, 504) and `TypeError` (network failure).
 - Usage is logged via `logUsage` with provider `"elevenlabs"`, operation `"transcription"`.
-- Tests: [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts) (4 cases covering success, server error, empty response, network failure).
+- Tests: [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts) (7 cases: happy path, permanent error, transient retry+fail, transient retry+succeed, empty text, network retry+fail, network retry+succeed).
 
 ### 1.4 Transcript flow
 
-Simple: blob → `transcribeBlob()` → text → `/api/generate`. If there is no blob (doctor-notes-only encounter), `transcriptText` is null and the pipeline relies on doctor notes and uploaded files alone.
+**Normal path (single session):** User records → pauses/generates → `finalize()` stops recorder → full blob → `transcribeBlob()` → text (20-60s batch) → sent as `transcriptText` to `/api/generate`.
+
+**Restored session (page refresh mid-recording):** After a page refresh the recorder starts fresh, so the blob at generate time only contains post-refresh audio. The pre-refresh audio is at `recording_session.audioPath` in storage. `handleGenerate` in [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) detects `isRestoredSession` and sends both:
+
+- `transcriptText` — post-refresh blob transcribed client-side
+- `audioPath` — pre-refresh blob path from `visit.metadata.recording_session`
+
+The server downloads and transcribes `audioPath`, then **prepends** it to `transcriptText` so the final transcript contains all segments in order.
+
+**No blob path:** If there is no blob (doctor-notes-only encounter, or restored session with no new recording), `transcriptText` is null. The generate route then falls back to `metadata.transcript` (saved from pause-time transcription) via `getTranscript()` from [encounters/sources.ts](web/src/lib/encounters/sources.ts). If neither `transcriptText` nor `metadata.transcript` exist, the pipeline relies on doctor notes and uploaded files alone.
 
 ### 1.5 Transcript storage
 
-The resolved transcript text ends up on the visit row itself; chunking for embeddings happens only when Pass 1 needs the transcript split. The legacy [transcript_chunks](web/supabase/migrations/002_visits_schema.sql) table still exists (with `embedding vector`) but is no longer the primary path for new encounters.
+The resolved transcript text is stored in `visits.metadata.transcript` (JSONB). The legacy [transcript_chunks](web/supabase/migrations/002_visits_schema.sql) table still exists (with `embedding vector`) but is deprecated and only read as a fallback for old encounters in the regenerate route.
 
-**Key field:** `visits.raw_text` holds the full transcript; `visits.metadata.files` holds any uploaded audio as files; chunking for Pass 1 happens in-memory inside the generate route.
+**Key field:** `visits.metadata.transcript` holds the full transcript text. Access it via `getTranscript()` from [encounters/sources.ts](web/src/lib/encounters/sources.ts). `visits.metadata.files` holds uploaded file metadata with extracted text. Chunking for Pass 1 happens in-memory inside the generate route.
 
 ---
 
@@ -152,6 +183,7 @@ interface FileMetadata {
   source: "upload" | "recording";
   extracted_text: string | null;
   extraction_status: "pending" | "extracting" | "completed" | "failed";
+  extraction_started_at: string | null; // ISO timestamp, set when status flips to "extracting"
   extracted_at: string | null; // ISO timestamp
 }
 ```
@@ -172,8 +204,8 @@ All OCR calls are pinned to `temperature: 0` so the same image/PDF always extrac
 
 Two routes invoke the extractor:
 
-1. **Background extraction** at [web/src/app/api/encounters/[encounterId]/extract/route.ts](web/src/app/api/encounters/[encounterId]/extract/route.ts). Triggered right after upload. Atomically flips `extraction_status` to `"extracting"` before the expensive call so concurrent requests can't double-extract. Uses the RPC in [20260401120753_atomic_file_status_update.sql](web/supabase/migrations/20260401120753_atomic_file_status_update.sql).
-2. **On-demand inside generate** at [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts). If a file arrives at generate-time with `extraction_status !== "completed"`, it's extracted inline. Failures are collected into `extractionErrors` and reported alongside the generation response — they do _not_ kill the pipeline.
+1. **Background extraction** at [web/src/app/api/encounters/[encounterId]/extract/route.ts](web/src/app/api/encounters/[encounterId]/extract/route.ts). Triggered right after upload (with a single client-side retry after 2s on failure). Atomically flips `extraction_status` to `"extracting"` (and sets `extraction_started_at`) before the expensive call so concurrent requests can't double-extract. Uses the RPC in [20260401120753_atomic_file_status_update.sql](web/supabase/migrations/20260401120753_atomic_file_status_update.sql). The final status-update RPC is wrapped in a **3-attempt retry with backoff** (500ms/1s/2s) — losing extracted text after a successful OCR call is expensive, so we try hard to persist it. On total failure, the text length is logged at error level for audit recovery. On success, the client dispatches an `extraction-complete` CustomEvent so other components can refresh state.
+2. **On-demand inside generate** at [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts). If a file arrives at generate-time with `extraction_status !== "completed"`, it's extracted inline. **Stuck extraction recovery:** before the extraction wait loop, any file with `extraction_status === "extracting"` and `extraction_started_at` older than 5 minutes is reset to `"failed"` so it enters the retry path. Failures are collected into `extractionErrors` and reported alongside the generation response — they do _not_ kill the pipeline.
 
 ### 2.4 Handoff to generation
 
@@ -200,7 +232,9 @@ Doctor notes are entered inside the encounter page at [web/src/app/[locale]/(app
 
 ### 3.2 Autosave
 
-Two-second debounce: the text is saved to `visits.metadata.doctor_notes` (JSONB string) after the doctor stops typing. Focus-out also triggers a save. There is **no** separate `doctor_notes` table.
+Two-second debounce: the text is saved to `visits.metadata.doctor_notes` (JSONB string) via the atomic metadata merge endpoint after the doctor stops typing. Focus-out also triggers a save. There is **no** separate `doctor_notes` table.
+
+**Save status feedback:** The [useSaveStatus](web/src/hooks/use-save-status.ts) hook tracks `"idle" | "saving" | "saved" | "error"` state. On failure, a single retry fires after 3s. The status is rendered in DraftView as a subtle inline indicator next to the date/status badge. Tests: [use-save-status.test.ts](web/src/hooks/use-save-status.test.ts) (5 cases).
 
 ### 3.3 Downstream
 
@@ -616,21 +650,30 @@ The suggested title is sanity-checked (≤6 words, must mention the primary diag
 
 File: [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — save block around line 649.
 
-Fields written back to `visits`:
+**Split save pattern:** The final save is split into two operations to keep metadata writes atomic:
 
-```
-encounter_note           (HTML)
-patient_letter           (HTML)
-title                    (if not already titled)
-status                   = "to_review"
-metadata.template_id
-metadata.doctor_notes
-metadata.clinical_analysis   (specialty + filtered ICDs + medications)
-metadata.generation_fingerprint
-metadata.generation_history  (rolling last 10 runs)
-```
+1. **Column update** via `.update()` — for non-JSONB columns:
+   ```
+   encounter_note           (HTML)
+   patient_letter           (HTML)
+   title                    (if not already titled)
+   status                   = "to_review"
+   ```
 
-The save goes through `retrySupabaseCall` from [web/src/lib/supabase/retry.ts](web/src/lib/supabase/retry.ts) — long Opus runs keep a Supabase keepalive connection idle past the Cloudflare 100s edge timeout, and the retry helper re-runs transient fetch failures.
+2. **Atomic metadata merge** via `mergeVisitMetadata()` — for JSONB metadata:
+   ```
+   metadata.template_id
+   metadata.doctor_notes
+   metadata.clinical_analysis   (specialty + filtered ICDs + medications)
+   metadata.generation_fingerprint
+   metadata.generation_history  (rolling last 10 runs)
+   metadata.generation_pending  = null  (deleted)
+   metadata.recording_session   = null  (deleted)
+   ```
+
+The column update goes through `retrySupabaseCall` from [web/src/lib/supabase/retry.ts](web/src/lib/supabase/retry.ts) — long Opus runs keep a Supabase keepalive connection idle past the Cloudflare 100s edge timeout, and the retry helper re-runs transient fetch failures. The metadata merge uses `mergeVisitMetadata` which also wraps `retrySupabaseCall` internally.
+
+The same split save pattern is used in the regenerate route ([web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)).
 
 ---
 
@@ -649,6 +692,8 @@ The save goes through `retrySupabaseCall` from [web/src/lib/supabase/retry.ts](w
 ### 12.2 Regenerate — two paths
 
 File: [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)
+
+**Transcript source:** The regenerate endpoint reads `metadata.transcript` via `getTranscript()` from [encounters/sources.ts](web/src/lib/encounters/sources.ts). If that field is populated (all new encounters), it is used directly. For legacy encounters where `metadata.transcript` is absent, the endpoint falls back to the deprecated `transcript_chunks` table.
 
 1. **Fast reformat path** — triggered when the only change is a new template selection. Uses Haiku to reformat the existing note into the new template layout while preserving content. Doesn't re-run Pass 1 / Pass 1.5. Much cheaper.
 2. **Full path** — used when content has changed, or no prior note exists. Identical pipeline to `/api/generate`:
@@ -669,6 +714,8 @@ File: [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)
 | Logger             | [web/src/lib/logger.ts](web/src/lib/logger.ts)                             | Levels: debug, info, warn, error. Prefixes like `[generate]`, `[fact-extraction]`, `[icd-certainty]`. |
 | SSE helpers        | [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts)                           | `createSSEStream`, `sseResponse`, `extractSectionsFromStream`.                                        |
 | Supabase retry     | [web/src/lib/supabase/retry.ts](web/src/lib/supabase/retry.ts)             | Wraps writes that might hit Cloudflare idle timeout.                                                  |
+| Metadata merge     | [web/src/lib/supabase/merge-metadata.ts](web/src/lib/supabase/merge-metadata.ts) | Atomic JSONB merge via `merge_visit_metadata` RPC. Falls back to non-atomic if RPC not deployed. |
+| Save status        | [web/src/hooks/use-save-status.ts](web/src/hooks/use-save-status.ts)       | `useSaveStatus` hook — idle/saving/saved/error state machine for auto-save feedback.                  |
 | Audit log          | [web/src/lib/audit.ts](web/src/lib/audit.ts)                               | `logAudit`, `createAuditContext`. Writes to `audit_logs`.                                             |
 | Fingerprint        | [web/src/lib/clinical/fingerprint.ts](web/src/lib/clinical/fingerprint.ts) | SHA-256 stable-stringify of every pipeline component.                                                 |
 | JSON repair        | [web/src/lib/clinical/json-repair.ts](web/src/lib/clinical/json-repair.ts) | `extractJson` — tolerant parser with heuristics for code fences, trailing commas, truncation.         |
@@ -698,7 +745,6 @@ user_id             uuid (FK auth.users)
 title               text
 language            text (sk | cs | en)
 status              text (draft | to_review | finalized | archived)
-raw_text            text     -- final transcript
 encounter_note      text     -- HTML note
 patient_letter      text     -- HTML letter
 metadata            jsonb    -- see below
@@ -706,13 +752,19 @@ created_at          timestamptz
 updated_at          timestamptz
 ```
 
-**`metadata` JSONB shape:**
+**`metadata` JSONB shape** (all writes go through `merge_visit_metadata` RPC for atomicity):
 
 ```jsonc
 {
+  "transcript": "...",                // full recording transcript (was visits.raw_text before migration)
   "files": [ /* FileMetadata[] */ ],
   "template_id": "soap_v1",
   "doctor_notes": "...",
+  "recording_session": {              // present only during active/paused recording
+    "state": "paused",                // "recording" | "paused"
+    "durationAtPause": 127,           // seconds elapsed when paused
+    "audioPath": "enc_xxx/recording.webm"  // snapshot blob uploaded at pause time
+  },
   "clinical_analysis": {
     "inferredSpecialty": "cardiology",
     "matchedConcepts": [...],
@@ -738,7 +790,8 @@ updated_at          timestamptz
 ### 14.4 RPC / functions
 
 - `match_chunks(query_embedding, match_count, p_visit_id)` — vector similarity search over `transcript_chunks`.
-- Atomic file status update RPC from [20260401120753_atomic_file_status_update.sql](web/supabase/migrations/20260401120753_atomic_file_status_update.sql) to prevent duplicate extraction.
+- `update_file_extraction_status(p_visit_id, p_file_id, p_status, p_extracted_text?)` — atomic file status + text update. Also sets `extraction_started_at` when status is `"extracting"`. From [20260401120753_atomic_file_status_update.sql](web/supabase/migrations/20260401120753_atomic_file_status_update.sql), updated in [20260411_merge_visit_metadata.sql](web/supabase/migrations/20260411_merge_visit_metadata.sql).
+- `merge_visit_metadata(p_visit_id, p_partial)` — atomic JSONB shallow merge using the `||` operator. Keys set to JSON `null` in `p_partial` are deleted from the result. Used by all metadata writers (auto-save, recording session, transcript, generation save). From [20260411_merge_visit_metadata.sql](web/supabase/migrations/20260411_merge_visit_metadata.sql).
 
 ---
 
@@ -746,23 +799,28 @@ updated_at          timestamptz
 
 Everything in the clinical pipeline has unit tests in [web/src/lib/clinical/](web/src/lib/clinical/):
 
-| File                                                                    | Coverage                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [fact-extraction.test.ts](web/src/lib/clinical/fact-extraction.test.ts) | Prompt building, `coerceFact` defensive parsing, empty-input short-circuit.                                                                                                                                                                                                                                           |
-| [fact-validator.test.ts](web/src/lib/clinical/fact-validator.test.ts)   | `normalizeForMatch`, `evidenceAppearsInSource`, cross-source fallback, dedup, medication warnings.                                                                                                                                                                                                                    |
-| [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)     | Correction phrase detection (sk/cs/en), punctuation-bracketed negation regex, preservation of legitimate time-series.                                                                                                                                                                                                 |
-| [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)     | 27 tests including the user's EMS regression: candidates `[I21.2, I10, R07.2, E11.91, E78.5]` with diagnosis facts `["akútny infarkt myokardu", "artériová hypertenzia"]` → keeps exactly `[I21.2, I10]`. Also covers short-word whitelist, bidirectional stem matching, chapter strictness, determinism, and purity. |
-| [icd-validation.test.ts](web/src/lib/clinical/icd-validation.test.ts)   | Canonical description replacement for hallucinated ICDs.                                                                                                                                                                                                                                                              |
-| [json-repair.test.ts](web/src/lib/clinical/json-repair.test.ts)         | `extractJson` robust fallback parsing.                                                                                                                                                                                                                                                                                |
-| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)               | `buildEnrichedSystemPrompt` — specialty, ICD, concepts, medications blocks.                                                                                                                                                                                                                                           |
-| [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)         | SHA-256 stability, stable stringify, `diffFingerprints` component-level diff.                                                                                                                                                                                                                                         |
+| File                                                                                          | Coverage                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [fact-extraction.test.ts](web/src/lib/clinical/fact-extraction.test.ts)                       | Prompt building, `coerceFact` defensive parsing, empty-input short-circuit.                                                                                                                                                                                                                                           |
+| [fact-validator.test.ts](web/src/lib/clinical/fact-validator.test.ts)                         | `normalizeForMatch`, `evidenceAppearsInSource`, cross-source fallback, dedup, medication warnings.                                                                                                                                                                                                                    |
+| [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)                           | Correction phrase detection (sk/cs/en), punctuation-bracketed negation regex, preservation of legitimate time-series.                                                                                                                                                                                                 |
+| [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                           | 27 tests including the user's EMS regression: candidates `[I21.2, I10, R07.2, E11.91, E78.5]` with diagnosis facts `["akútny infarkt myokardu", "artériová hypertenzia"]` → keeps exactly `[I21.2, I10]`. Also covers short-word whitelist, bidirectional stem matching, chapter strictness, determinism, and purity. |
+| [icd-validation.test.ts](web/src/lib/clinical/icd-validation.test.ts)                         | Canonical description replacement for hallucinated ICDs.                                                                                                                                                                                                                                                              |
+| [json-repair.test.ts](web/src/lib/clinical/json-repair.test.ts)                               | `extractJson` robust fallback parsing.                                                                                                                                                                                                                                                                                |
+| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                                     | `buildEnrichedSystemPrompt` — specialty, ICD, concepts, medications blocks.                                                                                                                                                                                                                                           |
+| [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                               | SHA-256 stability, stable stringify, `diffFingerprints` component-level diff.                                                                                                                                                                                                                                         |
+| [wav-builder.test.ts](web/src/lib/wav-builder.test.ts)                                        | WAV header construction, PCM accumulation, `extractNewChunks` partial extraction, `resetExtraction`, `reset`.                                                                                                                                                                                                         |
+| [sources.test.ts](web/src/lib/encounters/sources.test.ts)                                         | `getTranscript`, `getDoctorNotes`, `getFileTexts` — null/empty/happy-path, recording file exclusion.                                                                                                                                                                                                                 |
+| [transcribe-blob.test.ts](web/src/components/encounters/hooks/transcribe-blob.test.ts)            | 7 cases: happy-path POST, permanent error (no retry), transient retry+fail, transient retry+succeed, empty text, network retry+fail, network retry+succeed.                                                                                                                                                           |
+| [use-save-status.test.ts](web/src/hooks/use-save-status.test.ts)                                  | 5 cases: initial state, saving→saved→idle transition, saving→error, auto-reset cancellation, no auto-reset from error.                                                                                                                                                                                               |
+| [merge-metadata.test.ts](web/src/lib/supabase/merge-metadata.test.ts)                             | 6 cases: happy path, null-key deletion, retry on transient error, RPC-not-found fallback, error propagation, empty partial.                                                                                                                                                                                           |
 
 Plus route-level integration tests in:
 
 - [web/src/app/api/generate/route.test.ts](web/src/app/api/generate/route.test.ts)
 - [web/src/app/api/regenerate/route.test.ts](web/src/app/api/regenerate/route.test.ts)
 
-Total test suite as of this writing: **566 tests, all passing.**
+Total test suite as of this writing: **589 tests, all passing.**
 
 ---
 
@@ -793,6 +851,11 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | Opus ignoring the "only these ICDs" constraint                                 | **Pass 2.5** defensive filter strips the offending codes from both the sidebar and the note text. |
 | Cloudflare 100s edge timeout killing idle Supabase writes after long Opus runs | `retrySupabaseCall` wrapper.                                                                      |
 | File extraction failing transiently                                            | Errors collected into `extractionErrors` and surfaced; generation continues.                      |
+| Concurrent metadata writers clobbering each other (auto-save vs generation)    | Atomic `merge_visit_metadata` RPC does JSONB `\|\|` merge in one SQL statement.                  |
+| File extraction getting stuck (server crash mid-extraction)                    | Generate route resets files stuck in `"extracting"` > 5 min to `"failed"` for retry.             |
+| Extract RPC failing after successful OCR (lost extracted text)                 | 3-attempt retry with backoff (500ms/1s/2s) on the final status update RPC.                       |
+| Client-side transcription failing on network hiccup                            | `transcribeBlob` retries once with 2s delay for transient HTTP errors and `TypeError`.            |
+| Doctor notes auto-save failing silently                                        | `useSaveStatus` hook with visual indicator + single retry after 3s. Toast errors on recording.    |
 
 ---
 
@@ -812,8 +875,13 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | Add a specialty prompt pack                        | [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts)                                                                                                                                         |
 | Add a clinical concept or ICD hint                 | [clinical-concepts.ts](web/src/lib/clinical/clinical-concepts.ts) and refresh any fixtures in tests                                                                                                       |
 | Add a medication to the approved list              | [medication-index.ts](web/src/lib/clinical/medication-index.ts)                                                                                                                                           |
+| Change recording / pause-time upload behavior      | [recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) (session persistence, `persistBlobAtPause`, `finalize`) and [use-audio-recorder.ts](web/src/components/encounters/hooks/use-audio-recorder.ts) |
+| Access transcript / doctor notes / file texts      | [encounters/sources.ts](web/src/lib/encounters/sources.ts) — `getTranscript()`, `getDoctorNotes()`, `getFileTexts()`. All code should go through these helpers, not read `metadata` keys directly.         |
 | Change the streaming protocol                      | [sse.ts](web/src/lib/api/sse.ts) _and_ the client consumer (`use-encounter-generation.ts`)                                                                                                                |
 | Bump a model ID                                    | [pipeline.ts](web/src/lib/clinical/pipeline.ts), [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts), [anthropic.ts](web/src/lib/anthropic.ts), and pricing in [usage.ts](web/src/lib/usage.ts) |
+| Write to visit metadata                            | Always use [mergeVisitMetadata](web/src/lib/supabase/merge-metadata.ts) for atomic merge. Never do a raw read-modify-write on metadata JSONB.                                                             |
+| Change client-side extraction behavior             | [files-panel.tsx](web/src/components/encounters/files-panel.tsx) — tracked extraction with retry, dispatches `extraction-complete` CustomEvent.                                                             |
+| Refresh client state after background operations   | [use-encounter-data.ts](web/src/components/encounters/hooks/use-encounter-data.ts) — `refreshEncounter()` re-fetches both visit and files state.                                                           |
 
 Whenever you change a stage, also:
 
@@ -832,7 +900,7 @@ Captured here so we don't lose the thread between sessions:
 3. **Fact-to-section alignment.** Right now Opus decides which facts land in which section. We could pre-assign facts to sections deterministically (e.g. `diagnoses` → Assessment, `plan` → Plan) and just let Opus phrase them.
 4. **ICD certainty stem length.** 6 is a compromise. It correctly matches `hypert*` but has false-positive potential for short Slavic roots. Test suite covers the known cases; watch production logs for unexpected drops.
 5. **Regenerate fast path.** Only reformat. If the doctor changes `doctor_notes` _and_ the template, we currently take the full path. Could be smarter.
-6. **Embedding search.** `transcript_chunks` embeddings are still used for older encounters. Newer encounters store full `raw_text` and skip embeddings. Decide whether to deprecate chunking entirely.
+6. **Embedding search.** `transcript_chunks` is now fully deprecated for reads — the regenerate route prefers `metadata.transcript` and only falls back to chunks for pre-migration encounters. The table still exists for legacy similarity search but no new data is written to it. Decide whether to drop the table entirely once all legacy encounters are backfilled.
 7. **Telemetry dashboard.** `api_usage` + `generation_history` have the data but there's no internal dashboard yet. Would surface drift and cost per encounter.
 8. **Title generator stability.** Title is generated alongside the note. It occasionally drifts between runs even when the note doesn't — add a deterministic rule-based title generator with Opus as fallback.
 

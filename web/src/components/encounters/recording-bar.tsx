@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/shared/button";
 import {
@@ -27,17 +33,29 @@ import { RecordingConsentDialog } from "@/components/encounters/recording-consen
 import { useRecordingConsent } from "@/hooks/use-recording-consent";
 import { useAudioDevices } from "@/components/encounters/hooks/use-audio-devices";
 import { useRecordingGuards } from "@/components/encounters/hooks/use-recording-guards";
-import { useAudioRecorder } from "@/components/encounters/hooks/use-audio-recorder";
+import {
+  useAudioRecorder,
+  audioMimeToExt,
+} from "@/components/encounters/hooks/use-audio-recorder";
+import { uploadToStorage } from "@/lib/supabase/upload";
+import { transcribeBlob } from "@/components/encounters/hooks/transcribe-blob";
+import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
+import type { SupportedLanguage } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "paused";
 
+/** Persisted to visits.metadata.recording_session */
+interface RecordingSession {
+  state: "recording" | "paused";
+  durationAtPause: number;
+  audioPath?: string;
+}
+
 export interface RecordingBarRef {
-  /** Stop recorder and return blob. */
-  finalize: () => Promise<{
-    blob: Blob | null;
-  }>;
+  /** Stop recorder and return blob + whether this is a restored session. */
+  finalize: () => Promise<{ blob: Blob | null; isRestoredSession: boolean }>;
 }
 
 interface RecordingBarProps {
@@ -47,11 +65,9 @@ interface RecordingBarProps {
   templateId?: string;
   onTemplateChange?: (id: string) => void;
   visitId: string;
-  language?: string;
-  metadata?: {
-    recording_consent?: boolean;
-    recording_consent_date?: string;
-  };
+  metadata?: Record<string, unknown>;
+  /** Language for pause-time transcription (e.g. "sk", "en", "cs"). */
+  language?: SupportedLanguage;
 }
 
 function formatDuration(seconds: number) {
@@ -72,14 +88,30 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       onTemplateChange,
       visitId,
       metadata,
+      language,
     },
     ref,
   ) {
     const t = useTranslations("encounters.detail");
 
+    // Tracks whether the user has started a fresh recording in this mount
+    const [freshRecordingStarted, setFreshRecordingStarted] = useState(false);
+    // Duration offset from a restored session (so timer continues where it left off)
+    const [durationOffset, setDurationOffset] = useState(0);
+    // Whether a blob upload / session persist is in-flight
+    const [isPersisting, setIsPersisting] = useState(false);
+
+    // Extract restored session from metadata (derived values computed after recorder)
+    const restoredSession = metadata?.recording_session as
+      | RecordingSession
+      | undefined;
+
     // Recording consent hook
+    const consentMetadata = metadata as
+      | { recording_consent?: boolean; recording_consent_date?: string }
+      | undefined;
     const { showConsentDialog, setShowConsentDialog, saveConsent } =
-      useRecordingConsent(visitId, metadata);
+      useRecordingConsent(visitId, consentMetadata);
 
     // Device selection
     const { devices, selectedDeviceId, selectDevice } = useAudioDevices();
@@ -87,7 +119,15 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // Audio recorder — MediaRecorder lifecycle, segments, timer
     const recorder = useAudioRecorder();
 
+    // Derive restored-paused from metadata + recorder state (no setState in effects)
+    const restoredPaused =
+      !freshRecordingStarted &&
+      restoredSession?.state === "paused" &&
+      recorder.state === "idle";
+    const restoredDuration = restoredSession?.durationAtPause ?? 0;
+
     // Recording guards — navigation, wake lock, notifications
+    // Block navigation when actively recording OR when a blob upload is in-flight
     const {
       navDialogOpen,
       closeNavDialog,
@@ -97,7 +137,15 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       showRecordingNotification,
       closeRecordingNotification,
       audioInterrupted,
-    } = useRecordingGuards(recorder.state !== "idle");
+    } = useRecordingGuards(
+      recorder.state === "recording" || isPersisting,
+      async () => {
+        // Auto-pause + persist before navigating away
+        await recorder.pause();
+        await persistBlobAtPause();
+        onRecordingStateChange?.("paused");
+      },
+    );
 
     // Keep latest hook values in refs so mount-only effects don't go stale
     const recorderRef = useRef(recorder);
@@ -136,6 +184,81 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       }
     }, [audioInterrupted, recorder, onRecordingStateChange]);
 
+    // Session restore: notify parent on mount when we have a paused session
+    const sessionRestoredRef = useRef(false);
+    useEffect(() => {
+      if (sessionRestoredRef.current) return;
+      if (restoredSession?.state === "paused") {
+        sessionRestoredRef.current = true;
+        onRecordingStateChange?.("paused");
+        logger.debug(
+          `[recording] Restored paused session: duration=${restoredSession.durationAtPause}s, audioPath=${restoredSession.audioPath ?? "none"}`,
+        );
+      }
+    }, [restoredSession, onRecordingStateChange]);
+
+    // ── Blob upload at pause ──
+
+    /** Upload the current recording snapshot to storage, persist session metadata,
+     *  and fire-and-forget transcription that saves to raw_text. */
+    const persistBlobAtPause = async () => {
+      const snapshot = recorderRef.current.getSnapshotBlob();
+      if (!snapshot) return;
+
+      setIsPersisting(true);
+      try {
+        const ext = audioMimeToExt(snapshot.type);
+        const { path } = await uploadToStorage(snapshot, `recording${ext}`, {
+          encounterId: visitId,
+        });
+
+        await fetch(`/api/encounters/${visitId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metadata: {
+              recording_session: {
+                state: "paused",
+                durationAtPause: durationOffset + recorderRef.current.duration,
+                audioPath: path,
+              } satisfies RecordingSession,
+            },
+          }),
+        });
+
+        logger.debug(`[recording] Blob uploaded at pause: ${path}`);
+
+        // Fire-and-forget: transcribe the cumulative blob and save to
+        // metadata.transcript. Within a session the blob is cumulative (native
+        // pause/resume = single container), so each pause transcription replaces
+        // the previous transcript.
+        if (language) {
+          transcribeBlob(snapshot, language, visitId)
+            .then((text) => {
+              if (!text) return;
+              fetch(`/api/encounters/${visitId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ metadata: { transcript: text } }),
+              }).catch(() => {
+                toast.error(t("transcriptSaveFailed"));
+              });
+              logger.debug(
+                `[recording] Pause-time transcription saved: ${text.length} chars`,
+              );
+            })
+            .catch(() => {
+              toast.error(t("transcriptSaveFailed"));
+            });
+        }
+      } catch (err) {
+        logger.warn("[recording] Blob upload at pause failed:", err);
+        toast.error(t("pauseSaveFailed"));
+      } finally {
+        setIsPersisting(false);
+      }
+    };
+
     // ── Finalize (exposed via ref) ──
 
     useImperativeHandle(
@@ -155,19 +278,26 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           closeRecordingNotification();
           rec.reset();
 
-          return { blob };
+          // durationOffset > 0 means user resumed a restored session (after
+          // page refresh). The prior recording's transcript is already in
+          // raw_text from a previous pause-time transcription, and audioPath
+          // points to the prior blob. The server should concatenate both.
+          return { blob, isRestoredSession: durationOffset > 0 };
         },
       }),
-      [releaseWakeLock, closeRecordingNotification],
+      [releaseWakeLock, closeRecordingNotification, durationOffset],
     );
 
     // ── Actions (no manual useCallback — React Compiler handles memoization) ──
 
     const startRecordingFlow = async () => {
+      // Mark session as owned by this mount — prevent the restore effect from
+      // firing when persistSession updates server-side metadata that later
+      // flows back into restoredSession on a re-fetch.
+      sessionRestoredRef.current = true;
+
       if (isNative) {
         await recorder.start();
-
-        // Android foreground service / iOS background mode
         acquireWakeLock();
         onRecordingStateChange?.("recording");
       } else {
@@ -188,8 +318,10 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       }
     };
 
-    const handlePause = () => {
-      recorder.pause();
+    const handlePause = async () => {
+      await recorder.pause();
+      // Upload blob snapshot and persist session metadata
+      await persistBlobAtPause();
 
       if (!isNative) {
         closeRecordingNotification();
@@ -199,6 +331,27 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     };
 
     const handleResume = async () => {
+      if (restoredPaused) {
+        // Resuming from a restored session — need fresh mic stream
+        // Carry the restored duration as offset so timer continues where it left off
+        setDurationOffset(restoredDuration);
+        setFreshRecordingStarted(true);
+
+        if (isNative) {
+          await recorder.start();
+          acquireWakeLock();
+        } else {
+          const stream = await recorder.start({
+            deviceId: selectedDeviceId,
+          });
+          if (!stream) return;
+          acquireWakeLock();
+          await showRecordingNotification();
+        }
+        onRecordingStateChange?.("recording");
+        return;
+      }
+
       recorder.resume();
 
       if (!isNative) {
@@ -277,8 +430,13 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
     // ── Render ──
 
+    // Effective display duration: restored → persisted value; active → offset + recorder timer
+    const displayDuration = restoredPaused
+      ? restoredDuration
+      : durationOffset + recorder.duration;
+
     /* ── Idle: template selector (left) | mic + start button (right) ── */
-    if (recorder.state === "idle") {
+    if (recorder.state === "idle" && !restoredPaused) {
       return (
         <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
           {templateId !== undefined && onTemplateChange && (
@@ -357,7 +515,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             <div className="flex shrink-0 items-center justify-between gap-3 desktop:justify-start">
               <span className="flex items-center gap-2 text-sm font-medium text-destructive">
                 <span className="inline-block size-1.5 animate-pulse rounded-full bg-destructive" />
-                {t("recordingStatus")} {formatDuration(recorder.duration)}
+                {t("recordingStatus")} {formatDuration(displayDuration)}
               </span>
               <Button
                 size="lg"
@@ -395,7 +553,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             <div className="flex items-center justify-between gap-3 desktop:justify-start">
               <span className="flex shrink-0 items-center gap-2 text-sm font-medium text-status-to_review">
                 <span className="inline-block size-1.5 rounded-full bg-status-to_review" />
-                {t("pausedStatus")} {formatDuration(recorder.duration)}
+                {t("pausedStatus")} {formatDuration(displayDuration)}
               </span>
               <Button
                 variant="secondary"
@@ -408,7 +566,6 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             </div>
           </div>
         </div>
-        {navGuardDialog}
       </>
     );
   },

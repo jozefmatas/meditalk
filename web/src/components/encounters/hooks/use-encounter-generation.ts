@@ -15,6 +15,10 @@ import { parseSSEStream } from "@/lib/api/parse-sse-stream";
 import { useTemplateCache } from "./use-template-cache";
 import { useGenerationPolling } from "./use-generation-polling";
 import { transcribeBlob } from "./transcribe-blob";
+import { uploadToStorage } from "@/lib/supabase/upload";
+import { audioMimeToExt } from "./use-audio-recorder";
+import { getTranscript } from "@/lib/encounters/sources";
+import { useSaveStatus } from "@/hooks/use-save-status";
 import { logger } from "@/lib/logger";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -85,6 +89,7 @@ export function useEncounterGeneration({
   const recordingBarRef = useRef<RecordingBarRef>(null);
 
   const initialDoctorNotesRef = useRef("");
+  const saveStatus = useSaveStatus();
 
   // Client-side cache: templateId → { generatedNote, letter }
   const { getCachedTemplate, setCachedTemplate, clearCache } =
@@ -101,27 +106,43 @@ export function useEncounterGeneration({
     titleRef.current = t;
   }, []);
 
-  // Auto-save doctor notes (2s debounce)
+  // Auto-save doctor notes (2s debounce) with save-status feedback + single retry.
   useEffect(() => {
     if (!visit || doctorNotes === initialDoctorNotesRef.current) return;
 
     const timeout = setTimeout(async () => {
-      try {
-        await fetch(`/api/encounters/${visitId}`, {
+      saveStatus.markSaving();
+
+      const doSave = async () => {
+        const res = await fetch(`/api/encounters/${visitId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            metadata: { ...visit.metadata, doctor_notes: doctorNotes },
+            metadata: { doctor_notes: doctorNotes },
           }),
         });
+        if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+      };
+
+      try {
+        await doSave();
         initialDoctorNotesRef.current = doctorNotes;
+        saveStatus.markSaved();
       } catch {
-        // Silent fail
+        // Single retry after 3 s
+        try {
+          await new Promise((r) => setTimeout(r, 3000));
+          await doSave();
+          initialDoctorNotesRef.current = doctorNotes;
+          saveStatus.markSaved();
+        } catch {
+          saveStatus.markError();
+        }
       }
     }, 2000);
 
     return () => clearTimeout(timeout);
-  }, [doctorNotes, visit, visitId]);
+  }, [doctorNotes, visit, visitId, saveStatus]);
 
   const handleRecordingStateChange = useCallback(
     (recordingState: "idle" | "recording" | "paused") => {
@@ -173,31 +194,115 @@ export function useEncounterGeneration({
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
 
-      // Set processing state immediately — the activeGenerations guard in
-      // handleRecordingStateChange prevents finalize()'s "idle" from overriding this.
+      // Finalize BEFORE setting processing status — setVisit(processing) causes
+      // DraftView to unmount (swaps to ProcessingView), which destroys RecordingBar
+      // and nulls recordingBarRef. We need the ref alive to collect the blob.
+      const finalized = await recordingBarRef.current?.finalize();
+      const blobToProcess = finalized?.blob ?? audioBlob;
+      const isRestoredSession = finalized?.isRestoredSession ?? false;
+
+      // Now safe to switch to processing UI
       setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, status: "processing" },
         }),
       );
-      fetch(`/api/encounters/${visitId}`, {
+
+      // Persist generation intent BEFORE transcription.
+      // This ensures that if the app is killed (e.g. Android background), we can
+      // auto-resume generation on page reload using the stored audio blob.
+      await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "processing" }),
+        body: JSON.stringify({
+          status: "processing",
+          metadata: {
+            generation_pending: {
+              templateId: capturedTemplateId,
+              doctorNotes: capturedDoctorNotes || undefined,
+            },
+          },
+        }),
       }).catch(() => {});
-
-      const finalized = await recordingBarRef.current?.finalize();
-      const blobToProcess = finalized?.blob ?? audioBlob;
 
       logger.debug(
         `[generate] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Batch-transcribe the recorded blob via /api/batch-transcribe.
+      // Upload blob to Supabase storage for recovery if app is killed/closed.
+      // Runs in parallel with transcription — upload is fast (just bytes),
+      // transcription is the slow path (20-60s via ElevenLabs).
+      const uploadPromise = blobToProcess
+        ? (async () => {
+            try {
+              const ext = audioMimeToExt(blobToProcess.type);
+              const fileName = `recovery${ext}`;
+              const { path } = await uploadToStorage(
+                new File([blobToProcess], fileName, {
+                  type: blobToProcess.type,
+                }),
+                fileName,
+                { encounterId: visitId },
+              );
+              // Persist audioPath so auto-resume can find it after app kill
+              fetch(`/api/encounters/${visitId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  metadata: {
+                    generation_pending: {
+                      templateId: capturedTemplateId,
+                      doctorNotes: capturedDoctorNotes || undefined,
+                      audioPath: path,
+                    },
+                  },
+                }),
+              }).catch(() => {});
+              logger.debug(`[generate] Recovery blob uploaded: ${path}`);
+              return path;
+            } catch (err) {
+              logger.warn("[generate] Recovery blob upload failed:", err);
+              return null;
+            }
+          })()
+        : Promise.resolve(null);
+
+      // Full-blob transcription gives the best quality — the transcriber
+      // has full conversational context in one pass. When no blob is available
+      // (e.g. restored session after navigate-away), fall back to
+      // metadata.transcript which was set during pause-time transcription,
+      // or let the server use the audioPath from recording_session /
+      // generation_pending metadata.
       const finalTranscript = blobToProcess
         ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
-        : null;
+        : getTranscript(visit?.metadata as Record<string, unknown>);
+
+      // Wait for recovery upload (usually completes during transcription)
+      await uploadPromise;
+
+      // Determine audioPath for server-side recovery/concatenation:
+      // - No blob in memory: server downloads from generation_pending or recording_session
+      // - Restored session (resumed after page refresh): prior recording's audioPath
+      //   from recording_session — server transcribes it and prepends to finalTranscript
+      const meta = (visit?.metadata ?? {}) as Record<string, unknown>;
+      const pendingMeta = meta?.generation_pending as
+        | { audioPath?: string }
+        | undefined;
+      const sessionMeta = meta?.recording_session as
+        | { audioPath?: string }
+        | undefined;
+
+      let audioRecoveryPath: string | undefined;
+      if (!blobToProcess) {
+        // No blob at all — full recovery from server
+        audioRecoveryPath =
+          pendingMeta?.audioPath || sessionMeta?.audioPath || undefined;
+      } else if (isRestoredSession && sessionMeta?.audioPath) {
+        // Restored session: prior recording blob + new recording blob.
+        // Send prior audioPath so server transcribes and prepends it.
+        audioRecoveryPath = sessionMeta.audioPath;
+      }
 
       try {
         setAudioBlob(null);
@@ -230,6 +335,7 @@ export function useEncounterGeneration({
                 templateId: capturedTemplateId,
                 doctorNotes: capturedDoctorNotes || undefined,
                 transcriptText: finalTranscript || undefined,
+                audioPath: audioRecoveryPath || undefined,
                 sendAsEmail: options?.sendAsEmail || false,
               }),
             });
@@ -291,10 +397,12 @@ export function useEncounterGeneration({
                     encounter_note: event.generatedNote as string,
                     patient_letter: event.letter as string,
                     status: "to_review",
-                    ...(finalTranscript ? { raw_text: finalTranscript } : {}),
                     ...(autoTitle ? { title: autoTitle } : {}),
                     metadata: {
                       ...existingMeta,
+                      ...(finalTranscript
+                        ? { transcript: finalTranscript }
+                        : {}),
                       ...(event.clinicalAnalysis
                         ? { clinical_analysis: event.clinicalAnalysis }
                         : {}),
@@ -419,31 +527,97 @@ export function useEncounterGeneration({
         .filter(Boolean)
         .join("\n\n");
 
-      // Set processing state
+      // Finalize BEFORE setting processing status — same reason as handleGenerate:
+      // status change can unmount the component holding the recording bar ref.
+      const finalized = await opts.adjustRecordingBarRef.current?.finalize();
+      const blobToProcess = finalized?.blob ?? null;
+      const isRestoredSession = finalized?.isRestoredSession ?? false;
+
+      // Now safe to switch to processing UI
       setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       window.dispatchEvent(
         new CustomEvent("encounter-update", {
           detail: { id: visitId, status: "processing" },
         }),
       );
-      fetch(`/api/encounters/${visitId}`, {
+
+      // Persist generation intent before transcription (same as handleGenerate)
+      await fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "processing" }),
+        body: JSON.stringify({
+          status: "processing",
+          metadata: {
+            generation_pending: {
+              templateId: capturedTemplateId,
+              doctorNotes: mergedNotes || undefined,
+            },
+          },
+        }),
       }).catch(() => {});
-
-      // Finalize any recording in the adjust drawer
-      const finalized = await opts.adjustRecordingBarRef.current?.finalize();
-      const blobToProcess = finalized?.blob ?? null;
 
       logger.debug(
         `[adjust] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Batch-transcribe the recorded blob (same as handleGenerate).
+      // Upload blob to storage for recovery (same as handleGenerate)
+      const uploadPromise = blobToProcess
+        ? (async () => {
+            try {
+              const ext = audioMimeToExt(blobToProcess.type);
+              const fileName = `recovery${ext}`;
+              const { path } = await uploadToStorage(
+                new File([blobToProcess], fileName, {
+                  type: blobToProcess.type,
+                }),
+                fileName,
+                { encounterId: visitId },
+              );
+              fetch(`/api/encounters/${visitId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  metadata: {
+                    generation_pending: {
+                      templateId: capturedTemplateId,
+                      doctorNotes: mergedNotes || undefined,
+                      audioPath: path,
+                    },
+                  },
+                }),
+              }).catch(() => {});
+              logger.debug(`[adjust] Recovery blob uploaded: ${path}`);
+              return path;
+            } catch (err) {
+              logger.warn("[adjust] Recovery blob upload failed:", err);
+              return null;
+            }
+          })()
+        : Promise.resolve(null);
+
+      // Full-blob transcription for best quality (see handleGenerate comment).
       const finalTranscript = blobToProcess
         ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
-        : null;
+        : getTranscript(visit?.metadata as Record<string, unknown>);
+
+      // Wait for recovery upload
+      await uploadPromise;
+
+      // Determine audioPath for recovery/concatenation (same logic as handleGenerate)
+      const adjustMeta = (visit?.metadata ?? {}) as Record<string, unknown>;
+      const adjustPendingMeta = adjustMeta?.generation_pending as
+        | { audioPath?: string }
+        | undefined;
+      const adjustSessionMeta = adjustMeta?.recording_session as
+        | { audioPath?: string }
+        | undefined;
+
+      let audioRecoveryPath: string | undefined;
+      if (!blobToProcess) {
+        audioRecoveryPath = adjustPendingMeta?.audioPath || undefined;
+      } else if (isRestoredSession && adjustSessionMeta?.audioPath) {
+        audioRecoveryPath = adjustSessionMeta.audioPath;
+      }
 
       try {
         // Clear template cache — new context invalidates previous outputs
@@ -460,6 +634,7 @@ export function useEncounterGeneration({
             templateId: capturedTemplateId,
             doctorNotes: mergedNotes || undefined,
             transcriptText: finalTranscript || undefined,
+            audioPath: audioRecoveryPath || undefined,
           }),
         });
 
@@ -508,9 +683,9 @@ export function useEncounterGeneration({
                 encounter_note: event.generatedNote as string,
                 patient_letter: event.letter as string,
                 status: "to_review",
-                ...(finalTranscript ? { raw_text: finalTranscript } : {}),
                 metadata: {
                   ...existingMeta,
+                  ...(finalTranscript ? { transcript: finalTranscript } : {}),
                   ...(event.clinicalAnalysis
                     ? { clinical_analysis: event.clinicalAnalysis }
                     : {}),
@@ -600,11 +775,10 @@ export function useEncounterGeneration({
       setSelectedTemplateId(id);
       setPreferredTemplateId(id);
       if (!visit) return;
-      const meta = (visit.metadata || {}) as Record<string, unknown>;
       fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata: { ...meta, template_id: id } }),
+        body: JSON.stringify({ metadata: { template_id: id } }),
       }).catch(() => {});
     },
     [visit, visitId],
@@ -642,14 +816,13 @@ export function useEncounterGeneration({
             : prev,
         );
         // Persist template switch + restored note to DB
-        const meta = (visit?.metadata || {}) as Record<string, unknown>;
         fetch(`/api/encounters/${visitId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             encounter_note: cached.generatedNote,
             patient_letter: cached.letter,
-            metadata: { ...meta, template_id: newTemplateId },
+            metadata: { template_id: newTemplateId },
           }),
         }).catch(() => {});
         return;
@@ -662,12 +835,11 @@ export function useEncounterGeneration({
 
       // Persist template choice
       if (visit) {
-        const meta = (visit.metadata || {}) as Record<string, unknown>;
         fetch(`/api/encounters/${visitId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            metadata: { ...meta, template_id: newTemplateId },
+            metadata: { template_id: newTemplateId },
           }),
         }).catch(() => {});
       }
@@ -776,12 +948,11 @@ export function useEncounterGeneration({
         }
         // Revert template_id in DB
         if (visit) {
-          const meta = (visit.metadata || {}) as Record<string, unknown>;
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              metadata: { ...meta, template_id: previousTemplateId },
+              metadata: { template_id: previousTemplateId },
             }),
           }).catch(() => {});
         }
@@ -813,6 +984,10 @@ export function useEncounterGeneration({
     setCachedTemplate,
   });
 
+  // Auto-resume: set to true when we detect an interrupted generation on load
+  const [pendingResume, setPendingResume] = useState(false);
+  const resumeCheckedRef = useRef(false);
+
   /** Initialize state from fetched visit data */
   const initFromVisit = useCallback(
     (data: Encounter) => {
@@ -834,21 +1009,82 @@ export function useEncounterGeneration({
           letter: data.patient_letter || "",
         });
       }
+
+      // Detect interrupted generation — generation_pending exists but no note
+      if (meta?.generation_pending && !data.encounter_note) {
+        logger.debug(
+          "[generate] Detected interrupted generation — will auto-resume",
+        );
+        setPendingResume(true);
+      }
     },
     [setCachedTemplate],
   );
 
+  // Auto-resume interrupted generation. Fires once after initFromVisit
+  // detects generation_pending. Uses handleGenerate which will:
+  // 1. Prefer stored audio (audioPath) for full-quality server-side transcription
+  // 2. Fall back to metadata.transcript if available
+  useEffect(() => {
+    if (!pendingResume || resumeCheckedRef.current) return;
+    if (!visit || isGenerating || isStreaming) return;
+    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
+    const pending = meta?.generation_pending as
+      | { audioPath?: string }
+      | undefined;
+    const session = meta?.recording_session as
+      | { audioPath?: string }
+      | undefined;
+    // Resume if there's a stored audio blob OR a transcript to work with
+    const hasTranscript = !!getTranscript(meta);
+    if (!hasTranscript && !pending?.audioPath && !session?.audioPath) {
+      // No recovery source — can't resume, reset to draft
+      logger.warn(
+        "[generate] Auto-resume: no transcript or audio available, resetting",
+      );
+      resumeCheckedRef.current = true;
+      setPendingResume(false);
+      setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "started",
+          metadata: { generation_pending: null },
+        }),
+      }).catch(() => {});
+      return;
+    }
+    resumeCheckedRef.current = true;
+    setPendingResume(false);
+    logger.debug(
+      `[generate] Auto-resuming interrupted generation (audioPath: ${!!pending?.audioPath}, transcript: ${hasTranscript})`,
+    );
+    handleGenerate();
+  }, [
+    pendingResume,
+    visit,
+    isGenerating,
+    isStreaming,
+    visitId,
+    setVisit,
+    handleGenerate,
+  ]);
+
   // Calculate content metrics for timer estimation
   // Note: fileCount and imageCount are not available in this hook yet
   // They should be passed from the page component for more accurate estimation
+  const visitTranscript = getTranscript(
+    visit?.metadata as Record<string, unknown>,
+  );
   const contentMetrics = useMemo(
     () => ({
-      transcriptLength: visit?.raw_text?.length || 0,
+      transcriptLength: visitTranscript?.length || 0,
       doctorNotesLength: doctorNotes.length,
       fileCount: 0, // TODO: Pass files from page component
       imageCount: 0, // TODO: Pass files from page component
     }),
-    [visit?.raw_text, doctorNotes],
+    [visitTranscript, doctorNotes],
   );
 
   // Generation timer for countdown display — only starts when streaming begins,
@@ -885,5 +1121,6 @@ export function useEncounterGeneration({
     handleRegenerate,
     handleAdjustGenerate,
     timerState,
+    saveStatus: saveStatus.status,
   };
 }
