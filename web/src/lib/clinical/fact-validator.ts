@@ -7,7 +7,7 @@ import type {
 import { FACT_CATEGORIES, emptyExtractedFacts } from "./fact-extraction";
 import type { SupportedLanguage } from "../types";
 import type { ClinicalAnalysis } from "./types";
-import { isValidMedication, searchMedications } from "./medication-index";
+import { isValidMedication, correctMedicationName } from "./medication-index";
 import { logger } from "@/lib/logger";
 
 /**
@@ -237,14 +237,26 @@ export function validateFacts(
       }
       seen.add(key);
 
-      // 4. Category-specific cross-checks (warnings only — never drop).
+      // 4. Category-specific: auto-correct misspelled medications.
+      // Transcription often misspells drug names (e.g. "Koprenesa" for
+      // "Co-Prenessa"). If the name isn't in the approved list, try
+      // fuzzy matching and auto-correct if a confident match is found.
       if (category === "medications" && options.locale) {
         const locale = options.locale;
         if (!isValidMedication(acceptedFact.value, locale)) {
-          const candidates = searchMedications(acceptedFact.value, 1, locale);
-          if (candidates.length === 0) {
+          const correction = correctMedicationName(acceptedFact.value, locale);
+          if (correction) {
+            const original = acceptedFact.value;
+            acceptedFact.value = correction.correctedName;
+            logger.info(
+              `[fact-validator] Auto-corrected medication: "${original}" → "${correction.correctedName}" (${correction.entry.activeIngredient})`,
+            );
             warnings.push(
-              `Medication "${acceptedFact.value}" not found in ${locale} approved list`,
+              `Medication auto-corrected: "${original}" → "${correction.correctedName}" (${correction.entry.activeIngredient})`,
+            );
+          } else {
+            warnings.push(
+              `Medication "${acceptedFact.value}" not found in ${locale} approved list — no close match found`,
             );
           }
         }

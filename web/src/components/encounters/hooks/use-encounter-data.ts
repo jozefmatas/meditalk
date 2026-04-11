@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Encounter, EncounterStatus } from "@/lib/types";
 import type { EncounterFile } from "@/components/encounters/files-panel";
+import { GENERATION_STALE_THRESHOLD_MS } from "@/lib/extraction/constants";
+import { logger } from "@/lib/logger";
 
 interface UseEncounterDataOptions {
   visitId: string;
@@ -57,8 +59,15 @@ export function useEncounterData({
         if (!res.ok) throw new Error("Visit not found");
 
         const data: Encounter = await res.json();
+        // ── Status auto-corrections ──────────────────────────────
+        // Fix inconsistent states caused by server crashes, browser kills,
+        // or legacy bugs. Each correction is logged for observability.
+
         // Recording state isn't persisted across page loads — reset to started
         if (data.status === "recording") {
+          logger.debug(
+            `[encounter-data] Auto-correcting status: recording → started (visit=${visitId})`,
+          );
           data.status = "started";
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",
@@ -66,21 +75,50 @@ export function useEncounterData({
             body: JSON.stringify({ status: "started" }),
           }).catch(() => {});
         }
+
         // Processing: server-side generation may still be running
         if (data.status === "processing") {
           if (data.encounter_note) {
-            // Server finished but status wasn't updated (pre-fix encounters) — auto-correct
+            // Server finished but status wasn't updated (pre-fix encounters)
+            logger.debug(
+              `[encounter-data] Auto-correcting status: processing → to_review (note exists, visit=${visitId})`,
+            );
             data.status = "to_review";
             fetch(`/api/encounters/${visitId}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ status: "to_review" }),
             }).catch(() => {});
+          } else {
+            // No note — check if the generation is stale (server died mid-flight).
+            const meta = data.metadata as Record<string, unknown> | null;
+            const pending = meta?.generation_pending as
+              | { startedAt?: string }
+              | undefined;
+            if (pending?.startedAt) {
+              const elapsed =
+                Date.now() - new Date(pending.startedAt).getTime();
+              if (elapsed > GENERATION_STALE_THRESHOLD_MS) {
+                logger.warn(
+                  `[encounter-data] Stale generation detected: processing → started (elapsed=${Math.round(elapsed / 1000)}s, visit=${visitId})`,
+                );
+                data.status = "started";
+                fetch(`/api/encounters/${visitId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: "started" }),
+                }).catch(() => {});
+              }
+            }
+            // else: server may still be generating — keep "processing", polling hook will handle
           }
-          // else: server is still generating — keep "processing", generation hook will poll
         }
-        // Started but note exists: auto-resume bug corrupted the status — auto-correct
+
+        // Started but note exists: auto-resume bug corrupted the status
         if (data.status === "started" && data.encounter_note) {
+          logger.debug(
+            `[encounter-data] Auto-correcting status: started → to_review (note exists, visit=${visitId})`,
+          );
           data.status = "to_review";
           fetch(`/api/encounters/${visitId}`, {
             method: "PATCH",

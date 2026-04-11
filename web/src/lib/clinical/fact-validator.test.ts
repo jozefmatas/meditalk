@@ -316,6 +316,29 @@ describe("validateFacts", () => {
     expect(result.validFacts.medications).toHaveLength(1);
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings[0]).toContain("ObviouslyFakeNotARealDrug");
+    expect(result.warnings[0]).toContain("no close match found");
+  });
+
+  it("auto-corrects misspelled medication names via fuzzy matching (sk)", () => {
+    // "Koprenesa" is a transcription misspelling of "Co-Prenessa"
+    const facts = factsWithOne(
+      "medications",
+      "Koprenesa",
+      0,
+      "berie Koprenesa",
+    );
+    const input: FactExtractionInput = {
+      chunks: ["pacient berie Koprenesa raz denne"],
+    };
+    const result = validateFacts(facts, input, { locale: "sk" });
+    expect(result.validFacts.medications).toHaveLength(1);
+    // The medication name should be corrected to "Co-Prenessa ..."
+    expect(result.validFacts.medications[0].value).toContain("Co-Prenessa");
+    expect(result.validFacts.medications[0].value).not.toContain("Koprenesa");
+    // Should have a warning about the correction
+    expect(result.warnings.some((w) => w.includes("auto-corrected"))).toBe(
+      true,
+    );
   });
 });
 

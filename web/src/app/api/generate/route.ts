@@ -36,6 +36,11 @@ import type {
 } from "@/lib/clinical/fact-extraction";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
+import {
+  EXTRACTION_STUCK_THRESHOLD_MS,
+  EXTRACTION_WAIT_TIMEOUT_MS,
+  EXTRACTION_POLL_INTERVAL_MS,
+} from "@/lib/extraction/constants";
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
@@ -182,18 +187,21 @@ export async function POST(request: NextRequest) {
     }
     let uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
 
-    // Stuck extraction recovery: if a file has been "extracting" for over 5
-    // minutes, it's likely stuck (server died mid-extraction, network timeout,
-    // etc.). Reset it to "failed" so it naturally enters the retry path below.
-    const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+    // ── Stuck extraction recovery ──────────────────────────────
+    // If a file has been "extracting" longer than the threshold, the server
+    // process that was extracting likely died. Reset to "failed" so it
+    // enters the retry path below. Also clear extraction_started_at so
+    // the next retry gets a fresh timestamp (otherwise stuck recovery
+    // would trigger immediately on the retry because the old timestamp
+    // is still > threshold).
     const now = Date.now();
     for (const file of uploadedFiles) {
       if (file.extraction_status !== "extracting") continue;
       if (!file.extraction_started_at) continue;
       const elapsed = now - new Date(file.extraction_started_at).getTime();
-      if (elapsed > STUCK_THRESHOLD_MS) {
+      if (elapsed > EXTRACTION_STUCK_THRESHOLD_MS) {
         logger.warn(
-          `[generate] Resetting stuck extraction: file=${file.id} elapsed=${Math.round(elapsed / 1000)}s`,
+          `[generate] Resetting stuck extraction: file=${file.id} name=${file.name} elapsed=${Math.round(elapsed / 1000)}s`,
         );
         await supabase.rpc("update_file_extraction_status", {
           p_visit_id: visitId,
@@ -201,10 +209,12 @@ export async function POST(request: NextRequest) {
           p_status: "failed",
         });
         file.extraction_status = "failed";
+        file.extraction_started_at = null;
       }
     }
 
-    // Wait for any in-progress or pending extractions (poll until resolved)
+    // ── Wait for in-progress extractions ─────────────────────
+    // Poll until all pending/extracting files resolve (or timeout).
     const pendingIds = new Set(
       uploadedFiles
         .filter(
@@ -217,13 +227,17 @@ export async function POST(request: NextRequest) {
 
     if (pendingIds.size > 0) {
       logger.debug(
-        `[generate] Waiting for ${pendingIds.size} extraction(s)...`,
+        `[generate] Waiting for ${pendingIds.size} extraction(s): ${uploadedFiles
+          .filter((f) => pendingIds.has(f.id))
+          .map((f) => f.name)
+          .join(", ")}`,
       );
       const pollStart = Date.now();
-      const MAX_WAIT = 60000;
 
-      while (Date.now() - pollStart < MAX_WAIT) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+      while (Date.now() - pollStart < EXTRACTION_WAIT_TIMEOUT_MS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, EXTRACTION_POLL_INTERVAL_MS),
+        );
         const { data: refreshed } = await supabase
           .from("visits")
           .select("metadata")
@@ -246,93 +260,57 @@ export async function POST(request: NextRequest) {
       const completed = uploadedFiles.filter(
         (f) => pendingIds.has(f.id) && f.extraction_status === "completed",
       ).length;
+      const failed = uploadedFiles.filter(
+        (f) => pendingIds.has(f.id) && f.extraction_status === "failed",
+      ).length;
       logger.debug(
-        `[generate] Extraction wait done (${Date.now() - pollStart}ms): ${completed}/${pendingIds.size} completed`,
+        `[generate] Extraction wait done (${Date.now() - pollStart}ms): ${completed} completed, ${failed} failed out of ${pendingIds.size}`,
       );
     }
 
-    // Extract text from all unprocessed files — in parallel for speed
+    // ── Inline extraction for unprocessed files ────────────────
+    // Files that are "failed" (retrying) or legacy (no status) get extracted
+    // inline in parallel. Files still "extracting" or "pending" are skipped
+    // (they're being handled by background extraction).
     const unprocessed = uploadedFiles.filter(
       (f) =>
         !f.extracted_text &&
         f.path &&
-        f.extraction_status !== "extracting" && // Don't re-extract if extraction in progress
-        f.extraction_status !== "pending", // Don't re-extract if pending background extraction
-      // Note: Files marked "failed" or old "completed" with no text will be retried
+        f.extraction_status !== "extracting" &&
+        f.extraction_status !== "pending",
     );
     const extractionErrors: string[] = [];
 
     if (unprocessed.length > 0) {
-      const failed = unprocessed.filter(
+      const retrying = unprocessed.filter(
         (f) => f.extraction_status === "failed",
       );
       const legacy = unprocessed.filter((f) => !f.extraction_status);
       logger.debug(
-        `[generate] ${unprocessed.length} unprocessed file(s): ${failed.length} failed, ${legacy.length} legacy (no status)`,
+        `[generate] Extracting ${unprocessed.length} file(s) inline: ${retrying.length} retrying, ${legacy.length} legacy`,
       );
       lap("extraction-start");
+
       await Promise.all(
         unprocessed.map(async (file) => {
-          const filePath = file.path!; // guaranteed by filter above
           try {
-            const isAudio = file.type.startsWith("audio/");
-
-            if (!isAudio) {
-              // Images and PDFs: use shared extraction service
-              try {
-                const result = await extractFileText({
-                  file: { ...file, path: filePath },
-                  supabase,
-                  userId,
-                  visitId,
-                  language,
-                });
-                file.extracted_text = result.text;
-                logger.debug(
-                  `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
-                );
-              } catch (extractError) {
-                const msg =
-                  extractError instanceof Error
-                    ? extractError.message
-                    : "Unknown extraction error";
-                logger.error(
-                  `[generate] Extraction failed for ${file.name}:`,
-                  extractError,
-                );
-                extractionErrors.push(`${file.name}: ${msg}`);
-              }
-            } else {
-              // Audio: use shared extraction service (handles real-time transcript priority)
-              try {
-                const result = await extractFileText({
-                  file: { ...file, path: filePath },
-                  supabase,
-                  userId,
-                  visitId,
-                  language,
-                  transcriptText,
-                });
-                file.extracted_text = result.text;
-                logger.debug(
-                  `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
-                );
-              } catch (extractError) {
-                const msg =
-                  extractError instanceof Error
-                    ? extractError.message
-                    : "Unknown extraction error";
-                logger.error(
-                  `[generate] Audio extraction failed for ${file.name}:`,
-                  extractError,
-                );
-                extractionErrors.push(`${file.name}: ${msg}`);
-              }
-            }
+            const result = await extractFileText({
+              file: { ...file, path: file.path! },
+              supabase,
+              userId,
+              visitId,
+              language,
+              // Audio files can use the real-time transcript as a shortcut
+              ...(file.type.startsWith("audio/") && { transcriptText }),
+            });
+            file.extracted_text = result.text;
+            logger.debug(
+              `[generate] Extracted ${result.text.length} chars from ${file.name} in ${result.elapsedMs}ms`,
+            );
           } catch (err) {
             const msg =
               err instanceof Error ? err.message : "Unknown extraction error";
-            logger.error(`Text extraction failed for ${file.name}:`, err);
+            logger.error(`[generate] Extraction failed for ${file.name}:`, err);
             extractionErrors.push(`${file.name}: ${msg}`);
           }
         }),

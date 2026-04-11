@@ -110,13 +110,35 @@ export async function POST(request: NextRequest) {
     const language =
       ((visit.language as string)?.trim() as SupportedLanguage) || "en";
 
-    // Collect already-extracted file texts from metadata
+    // Collect already-extracted file texts from metadata.
+    // Unlike the generate route, regenerate does NOT re-extract — it uses
+    // cached extracted_text from the prior generation.
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
     const uploadedFiles = (visitMeta.files ?? []) as {
       name: string;
       type: string;
       extracted_text?: string | null;
+      extraction_status?: string;
     }[];
+
+    // Log files that will be omitted (no extracted_text despite being "completed")
+    const missingText = uploadedFiles.filter(
+      (f) => !f.extracted_text && f.extraction_status === "completed",
+    );
+    if (missingText.length > 0) {
+      logger.warn(
+        `[regenerate] ${missingText.length} file(s) have status=completed but no extracted_text — omitting: ${missingText.map((f) => f.name).join(", ")}`,
+      );
+    }
+    const failedFiles = uploadedFiles.filter(
+      (f) => f.extraction_status === "failed",
+    );
+    if (failedFiles.length > 0) {
+      logger.warn(
+        `[regenerate] ${failedFiles.length} file(s) have status=failed — omitting: ${failedFiles.map((f) => f.name).join(", ")}`,
+      );
+    }
+
     const fileTexts = uploadedFiles
       .filter((f) => f.extracted_text)
       .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));

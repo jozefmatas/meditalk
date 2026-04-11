@@ -135,14 +135,24 @@ export default function EncounterDetailPage({ params }: PageProps) {
     return () => setPageTitle(null);
   }, [setPageTitle]);
 
-  // Refresh encounter data when file extraction completes in the background
+  // Refresh encounter data when file extraction completes in the background.
+  // Debounce: when multiple files finish extracting in rapid succession (e.g. 5
+  // files uploaded at once), batch into a single refresh instead of 5 fetches.
   const { refreshEncounter } = data;
   useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handler = () => {
-      refreshEncounter();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        refreshEncounter();
+        debounceTimer = null;
+      }, 500);
     };
     window.addEventListener("extraction-complete", handler);
-    return () => window.removeEventListener("extraction-complete", handler);
+    return () => {
+      window.removeEventListener("extraction-complete", handler);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
   }, [refreshEncounter]);
 
   // --- Generation hook ---

@@ -6,7 +6,7 @@ import { REGIONAL_TERMS } from "./regional-terms";
 import { CLINICAL_CONCEPTS } from "./clinical-concepts";
 import { getSpecialtyPromptPack } from "./specialty-prompts";
 import { buildIcdReferenceForConcepts } from "./icd-index";
-import { searchMedications } from "./medication-index";
+import { searchMedications, correctMedicationName } from "./medication-index";
 import { buildPass1SystemPrompt, buildPass1UserMessage } from "./prompts";
 import { extractJson } from "./json-repair";
 
@@ -140,7 +140,9 @@ export function buildEnrichedSystemPrompt(
     }
   }
 
-  // Resolve mentioned medications against the approved database
+  // Resolve mentioned medications against the approved database.
+  // Uses fuzzy matching so transcription misspellings (e.g. "Koprenesa"
+  // for "Co-Prenessa") are resolved to the correct approved name.
   if (analysis.mentionedMedications.length > 0) {
     const resolvedMeds: string[] = [];
     for (const medName of analysis.mentionedMedications) {
@@ -150,7 +152,15 @@ export function buildEnrichedSystemPrompt(
           ...matches.map((m) => `  ${m.name} (${m.activeIngredient})`),
         );
       } else {
-        resolvedMeds.push(`  ${medName} [not found in approved list]`);
+        // Try fuzzy matching for misspelled names
+        const correction = correctMedicationName(medName, locale);
+        if (correction) {
+          resolvedMeds.push(
+            `  ${correction.entry.name} (${correction.entry.activeIngredient}) [corrected from "${medName}"]`,
+          );
+        } else {
+          resolvedMeds.push(`  ${medName} [not found in approved list]`);
+        }
       }
     }
 
@@ -161,7 +171,8 @@ RULES:
 - Use the EXACT medication names from the VERIFIED MEDICATIONS list above when documenting
 - Include both brand name and active ingredient
 - Do NOT add medications that are "commonly prescribed" for a condition unless they are explicitly mentioned in the source material
-- If a medication is marked [not found in approved list], write the name as mentioned and note it needs verification`);
+- If a medication is marked [corrected from "..."], use the CORRECTED name (it was auto-matched from a misspelling)
+- If a medication is marked [not found in approved list], DO NOT include it in the clinical note — instead write "[NEOVERENÝ LIEK: name]" as a placeholder so the doctor can manually verify`);
   }
 
   // Add ICD code candidates

@@ -81,34 +81,33 @@ export function FilesContent({
       const { uploadWithRetry } =
         await import("@/lib/upload/upload-with-persistence");
 
+      // Compute source tags once — audio files uploaded during an active
+      // recording get tagged so the server can use the real-time transcript
+      const fileSources = allFiles.map((file) =>
+        hasActiveRecording && file.type.startsWith("audio/")
+          ? ("recording-upload" as const)
+          : undefined,
+      );
+
       // Add pending files to list immediately (before upload)
-      const pendingFiles: EncounterFile[] = allFiles.map((file) => ({
+      const pendingFiles: EncounterFile[] = allFiles.map((file, i) => ({
         id: crypto.randomUUID(), // temporary ID
         name: file.name,
         size: file.size,
         type: file.type,
         pending: true,
-        // Tag audio files uploaded during recording so they can use real-time transcript
-        source:
-          hasActiveRecording && file.type.startsWith("audio/")
-            ? "recording-upload"
-            : undefined,
+        source: fileSources[i],
       }));
       onFilesChange([...files, ...pendingFiles]);
 
       try {
         // Upload all files with retry
         const results = await Promise.allSettled(
-          allFiles.map(async (file) => {
-            // Tag audio files uploaded during recording so they can use real-time transcript
-            const source =
-              hasActiveRecording && file.type.startsWith("audio/")
-                ? "recording-upload"
-                : undefined;
-            return uploadWithRetry(file, file.name, visitId, {
-              source,
-            });
-          }),
+          allFiles.map(async (file, i) =>
+            uploadWithRetry(file, file.name, visitId, {
+              source: fileSources[i],
+            }),
+          ),
         );
 
         const uploadResults = results

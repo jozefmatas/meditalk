@@ -188,6 +188,133 @@ export function searchMedications(
   );
 }
 
+// ── Fuzzy medication matching ─────────────────────────────────────────
+// Handles misspellings from transcription (e.g. "Koprenesa" → "Co-Prenessa").
+
+/**
+ * Extract the base drug name before dosage/strength info.
+ * "Co-Prenessa 4 mg /1,25 mg" → "Co-Prenessa"
+ * "Amlessa 8 mg/10 mg tablety" → "Amlessa"
+ */
+function extractBaseName(fullName: string): string {
+  // Cut at the first digit or "mg"/"ml"/"tbl" marker
+  const match = fullName.match(/^(.*?)(?:\s+\d|\s+mg|\s+ml|\s+tbl)/i);
+  return (match ? match[1] : fullName).trim();
+}
+
+/**
+ * Normalize a string for fuzzy comparison: lowercase, strip non-letters.
+ * "Co-Prenessa" → "coprenessa", "Koprenesa" → "koprenesa"
+ */
+function normalizeForFuzzy(name: string): string {
+  return name.toLowerCase().replace(/[^a-záäčďéěíľňóôřšťúůýžüöß]/gi, "");
+}
+
+/**
+ * Compute Levenshtein edit distance between two strings.
+ * Used for fuzzy medication name matching.
+ */
+function levenshtein(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost,
+      );
+    }
+  }
+
+  return matrix[a.length][b.length];
+}
+
+/**
+ * Fuzzy search for medications by name similarity.
+ * Handles transcription misspellings like "Koprenesa" → "Co-Prenessa".
+ *
+ * Returns matches sorted by similarity (highest first), only above the
+ * threshold (default 0.65 — allows ~35% of the name to differ).
+ */
+export function fuzzySearchMedications(
+  query: string,
+  limit = 3,
+  locale = "en",
+  threshold = 0.65,
+): Array<MedicationEntry & { similarity: number }> {
+  const { byName } = loadIndex(locale);
+
+  const queryBase = normalizeForFuzzy(extractBaseName(query));
+  if (queryBase.length < 3) return []; // too short for meaningful fuzzy match
+
+  const matches: Array<MedicationEntry & { similarity: number }> = [];
+  const seen = new Set<string>();
+
+  for (const [, entry] of byName) {
+    const entryBase = normalizeForFuzzy(extractBaseName(entry.name));
+    if (entryBase.length < 3) continue;
+
+    const dist = levenshtein(queryBase, entryBase);
+    const maxLen = Math.max(queryBase.length, entryBase.length);
+    const similarity = 1 - dist / maxLen;
+
+    if (similarity >= threshold) {
+      const key = entry.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push({ ...entry, similarity });
+    }
+  }
+
+  // Sort by similarity descending, then by name length (prefer shorter/simpler)
+  matches.sort(
+    (a, b) => b.similarity - a.similarity || a.name.length - b.name.length,
+  );
+  return matches.slice(0, limit);
+}
+
+/**
+ * Attempt to correct a misspelled medication name using fuzzy matching.
+ * Returns the best match if similarity >= 0.7, otherwise null.
+ *
+ * Used by fact validation to auto-correct transcription errors like
+ * "Koprenesa 5 mg/25 mg" → "Co-Prenessa 4 mg /1,25 mg".
+ */
+export function correctMedicationName(
+  name: string,
+  locale = "en",
+): { correctedName: string; entry: MedicationEntry } | null {
+  // First try exact match — no correction needed
+  if (isValidMedication(name, locale)) return null;
+
+  // Try substring match first (cheaper)
+  const substringMatches = searchMedications(name, 1, locale);
+  if (substringMatches.length > 0) {
+    return {
+      correctedName: substringMatches[0].name,
+      entry: substringMatches[0],
+    };
+  }
+
+  // Fuzzy match with higher threshold (0.7) for auto-correction
+  const fuzzyMatches = fuzzySearchMedications(name, 1, locale, 0.7);
+  if (fuzzyMatches.length > 0) {
+    return {
+      correctedName: fuzzyMatches[0].name,
+      entry: fuzzyMatches[0],
+    };
+  }
+
+  return null;
+}
+
 /**
  * Resolve multiple medication names to their active ingredients in bulk.
  * Returns found status for each medication.

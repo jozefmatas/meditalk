@@ -24,6 +24,76 @@ import { logger } from "@/lib/logger";
 /** Module-level tracking of active generations so they survive component remounts. */
 const activeGenerations = new Set<string>();
 
+/**
+ * Module-level cache for streaming state so a remounted component can pick up
+ * live SSE data from the old async function (SPA navigation during generation).
+ */
+interface StreamingCacheEntry {
+  sections: NoteSection[];
+  sectionIds: string[];
+  sectionLabels: Record<string, string>;
+}
+const streamingCache = new Map<string, StreamingCacheEntry>();
+
+const STREAMING_LS_PREFIX = "meditalk:streaming:";
+
+/** Update module-level cache, localStorage, and broadcast for remounted components. */
+function updateStreamingCache(
+  visitId: string,
+  update: Partial<StreamingCacheEntry>,
+) {
+  const current = streamingCache.get(visitId) || {
+    sections: [],
+    sectionIds: [],
+    sectionLabels: {},
+  };
+  const updated = { ...current, ...update };
+  streamingCache.set(visitId, updated);
+
+  // Persist to localStorage so the cache survives full page refresh
+  try {
+    localStorage.setItem(
+      STREAMING_LS_PREFIX + visitId,
+      JSON.stringify(updated),
+    );
+  } catch {
+    // localStorage full or unavailable — non-critical
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("streaming-update", {
+      detail: { visitId, ...updated },
+    }),
+  );
+}
+
+/** Clear streaming cache from both module-level and localStorage. */
+function clearStreamingCache(visitId: string) {
+  streamingCache.delete(visitId);
+  try {
+    localStorage.removeItem(STREAMING_LS_PREFIX + visitId);
+  } catch {
+    // non-critical
+  }
+}
+
+/** Read streaming cache: module-level first (SPA nav), then localStorage (refresh). */
+function readStreamingCache(visitId: string): StreamingCacheEntry | null {
+  const cached = streamingCache.get(visitId);
+  if (cached) return cached;
+
+  try {
+    const stored = localStorage.getItem(STREAMING_LS_PREFIX + visitId);
+    if (stored) {
+      const parsed = JSON.parse(stored) as StreamingCacheEntry;
+      if (parsed.sectionIds?.length > 0) return parsed;
+    }
+  } catch {
+    // localStorage unavailable or corrupt
+  }
+  return null;
+}
+
 const CLIENT_MAX_RETRIES = 2;
 const CLIENT_RETRY_DELAY = 3000;
 
@@ -221,6 +291,7 @@ export function useEncounterGeneration({
             generation_pending: {
               templateId: capturedTemplateId,
               doctorNotes: capturedDoctorNotes || undefined,
+              startedAt: new Date().toISOString(),
             },
           },
         }),
@@ -255,6 +326,7 @@ export function useEncounterGeneration({
                       templateId: capturedTemplateId,
                       doctorNotes: capturedDoctorNotes || undefined,
                       audioPath: path,
+                      startedAt: new Date().toISOString(),
                     },
                   },
                 }),
@@ -367,12 +439,23 @@ export function useEncounterGeneration({
                 setStreamedSections([]);
                 setStreamingSectionIds(e.sectionIds);
                 setStreamingSectionLabels(e.sectionLabels);
+                updateStreamingCache(visitId, {
+                  sections: [],
+                  sectionIds: e.sectionIds,
+                  sectionLabels: e.sectionLabels,
+                });
               },
               onSection: (e) => {
-                setStreamedSections((prev) => [
-                  ...prev,
-                  { id: e.id, title: e.title, content: e.content },
-                ]);
+                const section = {
+                  id: e.id,
+                  title: e.title,
+                  content: e.content,
+                };
+                setStreamedSections((prev) => [...prev, section]);
+                const cached = streamingCache.get(visitId);
+                updateStreamingCache(visitId, {
+                  sections: [...(cached?.sections || []), section],
+                });
               },
               onComplete: (event) => {
                 ctx.completedEvent = event;
@@ -480,6 +563,7 @@ export function useEncounterGeneration({
         // generating. Keep "processing" so polling recovers when user returns.
       } finally {
         activeGenerations.delete(visitId);
+        clearStreamingCache(visitId);
 
         setIsStreaming(false);
         setIsGenerating(false);
@@ -551,6 +635,7 @@ export function useEncounterGeneration({
             generation_pending: {
               templateId: capturedTemplateId,
               doctorNotes: mergedNotes || undefined,
+              startedAt: new Date().toISOString(),
             },
           },
         }),
@@ -582,6 +667,7 @@ export function useEncounterGeneration({
                       templateId: capturedTemplateId,
                       doctorNotes: mergedNotes || undefined,
                       audioPath: path,
+                      startedAt: new Date().toISOString(),
                     },
                   },
                 }),
@@ -657,12 +743,19 @@ export function useEncounterGeneration({
             setStreamedSections([]);
             setStreamingSectionIds(e.sectionIds);
             setStreamingSectionLabels(e.sectionLabels);
+            updateStreamingCache(visitId, {
+              sections: [],
+              sectionIds: e.sectionIds,
+              sectionLabels: e.sectionLabels,
+            });
           },
           onSection: (e) => {
-            setStreamedSections((prev) => [
-              ...prev,
-              { id: e.id, title: e.title, content: e.content },
-            ]);
+            const section = { id: e.id, title: e.title, content: e.content };
+            setStreamedSections((prev) => [...prev, section]);
+            const cached = streamingCache.get(visitId);
+            updateStreamingCache(visitId, {
+              sections: [...(cached?.sections || []), section],
+            });
           },
           onComplete: (event) => {
             ctx.completedEvent = event;
@@ -732,6 +825,7 @@ export function useEncounterGeneration({
         }
       } finally {
         activeGenerations.delete(visitId);
+        clearStreamingCache(visitId);
         setIsStreaming(false);
         setIsGenerating(false);
 
@@ -980,6 +1074,7 @@ export function useEncounterGeneration({
     setVisit,
     isStreaming,
     setIsGenerating,
+    setIsStreaming,
     updateTitleRef,
     setGeneratedNoteHtml,
     setCachedTemplate,
@@ -1013,10 +1108,22 @@ export function useEncounterGeneration({
 
       // If the server is still generating (status "processing") OR we have an
       // active generation async function from a previous mount (SPA navigation),
-      // show ProcessingOverlay immediately. The old SSE reader's stale setState
-      // calls won't update this component, but polling will detect completion.
+      // show the appropriate UI. If the SSE reader cached streaming data (in
+      // module-level cache for SPA nav, or localStorage for page refresh),
+      // restore it so the user sees sections instead of ProcessingOverlay.
       if (data.status === "processing" || activeGenerations.has(visitId)) {
         setIsGenerating(true);
+
+        const cached = readStreamingCache(visitId);
+        if (cached && cached.sectionIds.length > 0) {
+          setIsStreaming(true);
+          setStreamedSections(cached.sections);
+          setStreamingSectionIds(cached.sectionIds);
+          setStreamingSectionLabels(cached.sectionLabels);
+        }
+      } else {
+        // Generation isn't active — clean up any stale localStorage entry
+        clearStreamingCache(visitId);
       }
 
       // Detect interrupted generation — generation_pending exists but no note.
@@ -1038,6 +1145,45 @@ export function useEncounterGeneration({
     },
     [setCachedTemplate, visitId],
   );
+
+  // Sync streaming state from the old async function's SSE reader when
+  // recovering a generation started on a previous mount (SPA navigation).
+  // initFromVisit seeds the initial snapshot; this effect catches live updates.
+  useEffect(() => {
+    if (!isGenerating) return;
+
+    const handleStreamUpdate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.visitId !== visitId) return;
+      setIsStreaming(true);
+      setStreamedSections(detail.sections as NoteSection[]);
+      setStreamingSectionIds(detail.sectionIds as string[]);
+      setStreamingSectionLabels(detail.sectionLabels as Record<string, string>);
+    };
+
+    const handleDone = (e: Event) => {
+      const { visitId: doneId } = (e as CustomEvent).detail;
+      if (doneId !== visitId) return;
+      setIsStreaming(false);
+    };
+
+    window.addEventListener("streaming-update", handleStreamUpdate);
+    window.addEventListener("generation-done", handleDone);
+
+    // Catch any updates that arrived between initFromVisit and this effect
+    const cached = streamingCache.get(visitId);
+    if (cached && cached.sectionIds.length > 0) {
+      setIsStreaming(true);
+      setStreamedSections(cached.sections);
+      setStreamingSectionIds(cached.sectionIds);
+      setStreamingSectionLabels(cached.sectionLabels);
+    }
+
+    return () => {
+      window.removeEventListener("streaming-update", handleStreamUpdate);
+      window.removeEventListener("generation-done", handleDone);
+    };
+  }, [isGenerating, visitId]);
 
   // Auto-resume interrupted generation. Fires once after initFromVisit
   // detects generation_pending. Uses handleGenerate which will:
