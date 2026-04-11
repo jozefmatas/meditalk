@@ -58,6 +58,25 @@ describe("transcribeBlob", () => {
     expect(body.get("language")).toBe("sk");
     expect(body.get("visitId")).toBe("visit-abc");
     expect(body.get("audio")).toBeInstanceOf(Blob);
+    // webm blob → .webm filename
+    const file = body.get("audio") as File;
+    expect(file.name).toBe("recording.webm");
+  });
+
+  it("derives filename extension from blob MIME type (mp4 → .m4a)", async () => {
+    const fetchStub = okFetch("mp4 transcript");
+    // Safari records audio/mp4, not audio/webm
+    const blob = new Blob([new Uint8Array(512)], { type: "audio/mp4" });
+
+    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+      fetch: fetchStub,
+    });
+
+    expect(result).toBe("mp4 transcript");
+    const body = (fetchStub as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0][1].body as FormData;
+    const file = body.get("audio") as File;
+    expect(file.name).toBe("recording.m4a");
   });
 
   it("returns null on a permanent non-OK response (no retry)", async () => {

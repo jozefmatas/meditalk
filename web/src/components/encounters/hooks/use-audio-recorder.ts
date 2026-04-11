@@ -28,7 +28,9 @@ function getSupportedMimeType(): string {
   for (const type of types) {
     if (MediaRecorder.isTypeSupported(type)) return type;
   }
-  return "";
+  // Safari (iOS/macOS) always supports mp4 — fall back rather than
+  // passing "" which can throw NotSupportedError on some browsers.
+  return "audio/mp4";
 }
 
 export interface StartOptions {
@@ -52,8 +54,8 @@ export interface UseAudioRecorderReturn {
 
   /**
    * Pause current recording. Uses native MediaRecorder.pause() on web
-   * so the recording stays in a single container. Resolves after data
-   * is flushed via requestData().
+   * so the recording stays in a single container. Flushes data via
+   * requestData() when available (with timeout fallback for Safari).
    */
   pause: () => Promise<void>;
 
@@ -317,19 +319,61 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     }
 
     // Flush accumulated data via requestData(), then use native pause().
-    // This keeps a single WebM container so stop() produces one valid file
+    // This keeps a single container so stop() produces one valid file
     // containing all audio across pause/resume cycles.
+    //
+    // Safari quirks:
+    // - requestData() may not exist on very old Safari (pre-14.1)
+    // - Even when it exists, ondataavailable might not fire reliably
+    // - We guard with try/catch + a 500ms timeout to prevent hangs
     return new Promise<void>((resolve) => {
-      recorder.ondataavailable = (e: BlobEvent) => {
-        onDataAvailable(e);
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
         // Restore normal handler for future events (after resume)
         recorder.ondataavailable = (ev: BlobEvent) => onDataAvailable(ev);
-        recorder.pause();
-        logger.info("[rec-diag] MediaRecorder paused (native pause)");
+        try {
+          if (recorder.state === "recording") recorder.pause();
+        } catch (e) {
+          logger.warn("[rec-diag] recorder.pause() threw:", e);
+        }
+        logger.info(
+          `[rec-diag] MediaRecorder paused, chunks=${chunksRef.current.length}`,
+        );
         setState("paused");
         resolve();
       };
-      recorder.requestData();
+
+      // Timeout: if requestData doesn't fire ondataavailable within 500ms,
+      // force-pause anyway. Data will be captured on stop() instead.
+      const timeout = setTimeout(() => {
+        logger.warn("[rec-diag] requestData timeout — forcing pause");
+        settle();
+      }, 500);
+
+      recorder.ondataavailable = (e: BlobEvent) => {
+        clearTimeout(timeout);
+        onDataAvailable(e);
+        settle();
+      };
+
+      try {
+        if (typeof recorder.requestData === "function") {
+          recorder.requestData();
+        } else {
+          // Safari < 14.1: requestData not available — force-pause directly
+          logger.warn(
+            "[rec-diag] requestData not available — pausing directly",
+          );
+          clearTimeout(timeout);
+          settle();
+        }
+      } catch (e) {
+        logger.warn("[rec-diag] requestData() threw:", e);
+        clearTimeout(timeout);
+        settle();
+      }
     });
   }, [pauseTimer, onDataAvailable]);
 
@@ -340,9 +384,22 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         .catch((e) => logger.warn("[recording] Native resume failed:", e));
     } else {
       const recorder = mediaRecorderRef.current;
-      if (!recorder || recorder.state !== "paused") return;
-      recorder.resume();
-      logger.info("[rec-diag] MediaRecorder resumed");
+      if (!recorder) return;
+      // Guard: if pause() couldn't actually pause the MediaRecorder (Safari
+      // requestData hang), the recorder may still be "recording". Skip the
+      // resume() call — it would throw on a non-paused recorder.
+      if (recorder.state === "paused") {
+        try {
+          recorder.resume();
+          logger.info("[rec-diag] MediaRecorder resumed");
+        } catch (e) {
+          logger.warn("[rec-diag] recorder.resume() threw:", e);
+        }
+      } else {
+        logger.info(
+          `[rec-diag] Skipping resume — recorder is "${recorder.state}", not "paused"`,
+        );
+      }
     }
 
     startTimer();

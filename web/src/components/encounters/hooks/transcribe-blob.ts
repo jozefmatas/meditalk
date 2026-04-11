@@ -13,6 +13,14 @@ export interface TranscribeBlobDeps {
   fetch: typeof fetch;
 }
 
+/** Map blob MIME type to file extension for the upload filename. */
+function blobMimeToExt(mime: string): string {
+  if (mime.includes("mp4")) return ".m4a";
+  if (mime.includes("ogg")) return ".ogg";
+  if (mime.includes("wav")) return ".wav";
+  return ".webm";
+}
+
 const TRANSIENT_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 const RETRY_DELAY_MS = 2000;
 
@@ -39,7 +47,11 @@ export async function transcribeBlob(
   for (let attempt = 0; attempt <= 1; attempt++) {
     try {
       const form = new FormData();
-      form.append("audio", blob, "recording.webm");
+      // Derive filename from blob's actual MIME type — Safari records
+      // audio/mp4, not audio/webm. Mismatched filename+content can
+      // confuse server-side format detection (e.g. ElevenLabs).
+      const ext = blobMimeToExt(blob.type);
+      form.append("audio", blob, `recording${ext}`);
       form.append("language", language);
       form.append("visitId", visitId);
 

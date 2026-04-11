@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const text = await transcribeAudio(
       audioFile,
-      audioFile.name || "recording.webm",
+      audioFile.name || "recording.m4a",
       language,
       { userId: authResult.userId, visitId: visitId ?? "" },
     );
