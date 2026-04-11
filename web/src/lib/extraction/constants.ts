@@ -9,8 +9,9 @@
 /** How long before a stuck extraction (status "extracting") is considered dead. */
 export const EXTRACTION_STUCK_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
-/** How long before a stuck generation (status "processing") is considered dead. */
-export const GENERATION_STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+/** How long before a stuck generation (status "processing") is considered dead.
+ *  Typical generation takes 60-120s; 3 min gives a safe 1.5-3x margin. */
+export const GENERATION_STALE_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
 
 /** Max time to wait for in-progress extractions before generating anyway. */
 export const EXTRACTION_WAIT_TIMEOUT_MS = 60_000; // 60 seconds

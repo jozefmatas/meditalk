@@ -1067,6 +1067,29 @@ export function useEncounterGeneration({
     ],
   );
 
+  // Guard: only auto-resume from poll timeout once per page load
+  const pollTimeoutResumedRef = useRef(false);
+
+  // Stable ref for visit so the poll-timeout callback always sees latest state
+  const visitRef = useRef(visit);
+  visitRef.current = visit;
+
+  // Stable ref for handleGenerate so the callback doesn't need it as a dependency
+  const handleGenerateRef = useRef(handleGenerate);
+  handleGenerateRef.current = handleGenerate;
+
+  const handlePollTimeout = useCallback(() => {
+    // Only auto-resume once — prevents infinite retry loops
+    if (pollTimeoutResumedRef.current) return;
+    const v = visitRef.current;
+    const meta = (v?.metadata ?? {}) as Record<string, unknown>;
+    if (meta?.generation_pending && !v?.encounter_note) {
+      pollTimeoutResumedRef.current = true;
+      logger.debug("[generate] Poll timeout — auto-resuming lost generation");
+      handleGenerateRef.current();
+    }
+  }, []);
+
   // Polling + generation-done recovery (extracted hook)
   useGenerationPolling({
     visitId,
@@ -1078,6 +1101,7 @@ export function useEncounterGeneration({
     updateTitleRef,
     setGeneratedNoteHtml,
     setCachedTemplate,
+    onPollTimeout: handlePollTimeout,
   });
 
   // Auto-resume: set to true when we detect an interrupted generation on load

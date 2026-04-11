@@ -4,7 +4,7 @@ import { useEffect, useCallback, useRef } from "react";
 import type { Encounter } from "@/lib/types";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 
-const POLL_TIMEOUT_MS = 300_000; // 5 min — generations can take 60-240s
+const POLL_TIMEOUT_MS = 180_000; // 3 min — matches GENERATION_STALE_THRESHOLD_MS
 const POLL_INTERVAL_MS = 3_000;
 
 interface UseGenerationPollingOptions {
@@ -20,6 +20,9 @@ interface UseGenerationPollingOptions {
     templateId: string,
     data: { generatedNote: string; letter: string },
   ) => void;
+  /** Called when the polling loop times out without finding a completed generation.
+   *  Used by use-encounter-generation to auto-resume lost generations. */
+  onPollTimeout?: () => void;
 }
 
 /**
@@ -40,7 +43,13 @@ export function useGenerationPolling({
   updateTitleRef,
   setGeneratedNoteHtml,
   setCachedTemplate,
+  onPollTimeout,
 }: UseGenerationPollingOptions): void {
+  const onPollTimeoutRef = useRef(onPollTimeout);
+  useEffect(() => {
+    onPollTimeoutRef.current = onPollTimeout;
+  });
+
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -111,6 +120,8 @@ export function useGenerationPolling({
             detail: { id: visitId, status: "started" },
           }),
         );
+        // Notify parent — allows auto-resume of lost generations
+        onPollTimeoutRef.current?.();
         return;
       }
       try {

@@ -322,10 +322,31 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     // This keeps a single container so stop() produces one valid file
     // containing all audio across pause/resume cycles.
     //
-    // Safari quirks:
+    // IMPORTANT — mp4 (Safari / iOS): requestData() flushes an mp4 fragment
+    // mid-recording. After resume + stop, the next fragment can't be
+    // concatenated into a valid mp4 (headers conflict). Skip requestData()
+    // on mp4 — stop() will produce one clean blob with all data.
+    //
+    // Other Safari quirks:
     // - requestData() may not exist on very old Safari (pre-14.1)
     // - Even when it exists, ondataavailable might not fire reliably
     // - We guard with try/catch + a 500ms timeout to prevent hangs
+    const isMP4 = mimeTypeRef.current.includes("mp4");
+
+    if (isMP4) {
+      // mp4: skip requestData — just pause directly to keep one valid container
+      try {
+        recorder.pause();
+      } catch (e) {
+        logger.warn("[rec-diag] recorder.pause() threw:", e);
+      }
+      logger.info(
+        `[rec-diag] MediaRecorder paused (mp4, no flush), chunks=${chunksRef.current.length}`,
+      );
+      setState("paused");
+      return Promise.resolve();
+    }
+
     return new Promise<void>((resolve) => {
       let settled = false;
       const settle = () => {
