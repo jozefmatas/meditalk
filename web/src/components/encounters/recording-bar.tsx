@@ -38,7 +38,10 @@ import {
   audioMimeToExt,
 } from "@/components/encounters/hooks/use-audio-recorder";
 import { uploadToStorage } from "@/lib/supabase/upload";
-import { transcribeBlob } from "@/components/encounters/hooks/transcribe-blob";
+import {
+  transcribeBlob,
+  transcribeFromPath,
+} from "@/components/encounters/hooks/transcribe-blob";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
@@ -244,8 +247,17 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
         // metadata.transcript. Within a session the blob is cumulative (native
         // pause/resume = single container), so each pause transcription replaces
         // the previous transcript.
+        //
+        // On native, the blob is already in storage at `path` — use
+        // transcribeFromPath to bypass the Vercel 4.5 MB body limit (a 13-min
+        // WAV at 16 kHz can be ~25 MB). Fall back to transcribeBlob for web
+        // where blobs are smaller (compressed webm/m4a).
         if (language) {
-          transcribeBlob(snapshot, language, visitId)
+          const transcribePromise = isNative
+            ? transcribeFromPath(path, language, visitId)
+            : transcribeBlob(snapshot, language, visitId);
+
+          transcribePromise
             .then((text) => {
               if (!text) return;
               fetch(`/api/encounters/${visitId}`, {

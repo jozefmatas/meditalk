@@ -415,6 +415,12 @@ export function useEncounterGeneration({
         // server download and transcribe it (critical for native apps where
         // network may be disrupted during foreground-service teardown).
         audioRecoveryPath = uploadedPath;
+      } else if (!finalTranscript && !uploadedPath && sessionMeta?.audioPath) {
+        // Both generate-time blob upload and transcription failed (e.g.
+        // foreground service killed before upload on native), but the
+        // pause-time upload succeeded — the same cumulative blob is at
+        // recording_session.audioPath. Fall back to it.
+        audioRecoveryPath = sessionMeta.audioPath;
       } else if (isRestoredSession && sessionMeta?.audioPath) {
         // Restored session: prior recording blob + new recording blob.
         // Send prior audioPath so server transcribes and prepends it.
