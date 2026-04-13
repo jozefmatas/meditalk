@@ -54,8 +54,13 @@ interface RecordingSession {
 }
 
 export interface RecordingBarRef {
-  /** Stop recorder and return blob + whether this is a restored session. */
+  /** Stop recorder and return blob + whether this is a restored session.
+   *  Does NOT tear down the foreground service — call `releaseGuards()` after
+   *  transcription is done so the network stays alive on native. */
   finalize: () => Promise<{ blob: Blob | null; isRestoredSession: boolean }>;
+  /** Release wake lock / foreground service / notification. Call this after
+   *  transcription + upload are done — NOT during `finalize()`. */
+  releaseGuards: () => void;
 }
 
 interface RecordingBarProps {
@@ -153,11 +158,18 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       recorderRef.current = recorder;
     });
 
+    // When finalize() is called, the caller takes responsibility for tearing
+    // down the foreground service via releaseGuards(). Skip the automatic
+    // cleanup so the service stays alive during transcription.
+    const finalizedRef = useRef(false);
+
     // Clean up all resources on unmount (e.g. navigating between encounters)
     useEffect(() => {
       return () => {
         recorderRef.current.cleanupOnUnmount();
-        releaseWakeLock();
+        if (!finalizedRef.current) {
+          releaseWakeLock();
+        }
         closeRecordingNotification();
       };
     }, [releaseWakeLock, closeRecordingNotification]);
@@ -273,8 +285,13 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             `[recording] finalize() — blob: ${blob?.size || 0} bytes`,
           );
 
-          // Clean up guards + reset recorder state
-          releaseWakeLock();
+          // Mark as finalized so the unmount cleanup skips releasing the
+          // foreground service — the caller handles it via releaseGuards().
+          finalizedRef.current = true;
+
+          // Reset recorder state but keep the foreground service alive —
+          // the caller must call releaseGuards() after transcription is done
+          // so the WebView network stays available on native (Android).
           closeRecordingNotification();
           rec.reset();
 
@@ -283,6 +300,9 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           // raw_text from a previous pause-time transcription, and audioPath
           // points to the prior blob. The server should concatenate both.
           return { blob, isRestoredSession: durationOffset > 0 };
+        },
+        releaseGuards: () => {
+          releaseWakeLock();
         },
       }),
       [releaseWakeLock, closeRecordingNotification, durationOffset],

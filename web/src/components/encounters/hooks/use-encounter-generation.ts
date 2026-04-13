@@ -268,6 +268,9 @@ export function useEncounterGeneration({
       // Finalize BEFORE setting processing status — setVisit(processing) causes
       // DraftView to unmount (swaps to ProcessingView), which destroys RecordingBar
       // and nulls recordingBarRef. We need the ref alive to collect the blob.
+      // Capture releaseGuards before unmount nulls the ref — we call it after
+      // transcription to keep the foreground service (and WebView network) alive.
+      const releaseGuards = recordingBarRef.current?.releaseGuards;
       const finalized = await recordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? audioBlob;
       const isRestoredSession = finalized?.isRestoredSession ?? false;
@@ -384,6 +387,11 @@ export function useEncounterGeneration({
           { duration: 10_000 },
         );
       }
+
+      // Transcription + upload done — safe to tear down the foreground service.
+      // Doing this AFTER transcription prevents the Android WebView network
+      // disruption that caused TypeError on native apps.
+      releaseGuards?.();
 
       // Determine audioPath for server-side recovery/concatenation:
       // - No blob in memory: server downloads from generation_pending or recording_session
@@ -650,6 +658,9 @@ export function useEncounterGeneration({
 
       // Finalize BEFORE setting processing status — same reason as handleGenerate:
       // status change can unmount the component holding the recording bar ref.
+      // Capture releaseGuards before unmount nulls the ref.
+      const adjustReleaseGuards =
+        opts.adjustRecordingBarRef.current?.releaseGuards;
       const finalized = await opts.adjustRecordingBarRef.current?.finalize();
       const blobToProcess = finalized?.blob ?? null;
       const isRestoredSession = finalized?.isRestoredSession ?? false;
@@ -763,6 +774,9 @@ export function useEncounterGeneration({
           { duration: 10_000 },
         );
       }
+
+      // Transcription + upload done — safe to tear down the foreground service.
+      adjustReleaseGuards?.();
 
       // Determine audioPath for recovery/concatenation (same logic as handleGenerate)
       const adjustMeta = (visit?.metadata ?? {}) as Record<string, unknown>;
