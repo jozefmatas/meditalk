@@ -60,9 +60,9 @@ export default function HomePage() {
         if (!templatesRes.ok) throw new Error("Failed to fetch templates");
         const data: Template[] = await templatesRes.json();
 
-        // Sort by server-side usage and take top 4
+        // Sort by server-side usage frequency
         const sorted = sortTemplatesByUsage(data, usage);
-        setTemplates(sorted.slice(0, 4));
+        setTemplates(sorted);
       } catch {
         // Silently fail — templates are non-critical
       } finally {
@@ -171,7 +171,7 @@ export default function HomePage() {
                 {isTemplatesLoading ? (
                   // Loading skeletons
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {[...Array(4)].map((_, i) => (
+                    {[...Array(8)].map((_, i) => (
                       <Skeleton key={i} className="h-44 rounded-2xl" />
                     ))}
                   </div>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
 import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
-import { embedText } from "@/lib/openai";
+import { embedText, LEGACY_EMBEDDING_MODEL } from "@/lib/openai";
 import {
   generateFromTemplate,
   InsufficientContextError,
@@ -451,10 +451,11 @@ export async function POST(request: NextRequest) {
             };
           }
 
-          const queryEmbedding = await embedText(RETRIEVAL_QUERY[language], {
-            userId,
-            visitId,
-          });
+          const queryEmbedding = await embedText(
+            RETRIEVAL_QUERY[language],
+            { userId, visitId },
+            LEGACY_EMBEDDING_MODEL,
+          );
 
           const { data: matches, error: rpcError } = await supabase.rpc(
             "match_chunks",

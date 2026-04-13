@@ -53,6 +53,7 @@ vi.mock("@/lib/clinical", () => ({
 
 vi.mock("@/lib/openai", () => ({
   embedText: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+  LEGACY_EMBEDDING_MODEL: "text-embedding-ada-002",
 }));
 
 vi.mock("@/lib/usage", () => ({

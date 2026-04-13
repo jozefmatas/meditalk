@@ -43,7 +43,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
 
   if (isLoading) {
     return (
-      <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0">
+      <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0 pb-32">
         <div className="flex flex-1 items-start justify-center">
           <div className="flex w-full max-w-3xl flex-col gap-6 pt-6">
             <Skeleton className="h-10 w-64" />
@@ -60,7 +60,7 @@ export default function TemplateDetailPage({ params }: PageProps) {
   const specialty = template.specialties?.[0] ?? "general";
 
   return (
-    <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0">
+    <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0 pb-32">
       <div className="flex flex-1 items-start justify-center">
         <div className="flex w-full max-w-3xl flex-col gap-6">
           {/* Sticky header */}

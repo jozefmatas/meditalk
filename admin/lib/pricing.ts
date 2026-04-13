@@ -14,7 +14,8 @@ export const MODEL_LABELS: Record<string, string> = {
   "claude-sonnet-4-6": "Claude Sonnet 4.6",
   "claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
   "claude-haiku-4-5-20251001": "Claude Haiku 4.5",
-  "text-embedding-ada-002": "Ada Embeddings",
+  "text-embedding-3-small": "Embeddings 3 Small",
+  "text-embedding-ada-002": "Ada Embeddings (legacy)",
   scribe_v2: "Scribe v2",
   "whisper-1": "Whisper (legacy)",
 };

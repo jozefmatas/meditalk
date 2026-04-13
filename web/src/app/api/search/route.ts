@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
-import { embedText } from "@/lib/openai";
+import { embedText, LEGACY_EMBEDDING_MODEL } from "@/lib/openai";
 import type { SearchResponse } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
@@ -35,7 +35,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Embed the search query
-    const queryEmbedding = await embedText(query, { userId, visitId });
+    const queryEmbedding = await embedText(
+      query,
+      { userId, visitId },
+      LEGACY_EMBEDDING_MODEL,
+    );
 
     // Semantic search via match_chunks RPC
     const { data: matches, error: rpcError } = await supabase.rpc(

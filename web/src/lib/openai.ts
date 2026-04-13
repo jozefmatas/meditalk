@@ -7,15 +7,19 @@ function openai() {
   return _openai;
 }
 
+export const EMBEDDING_MODEL = "text-embedding-3-small";
+export const LEGACY_EMBEDDING_MODEL = "text-embedding-ada-002";
+
 /**
  * Generate a 1536-dim embedding for a single text.
  */
 export async function embedText(
   text: string,
   ctx?: UsageContext,
+  model: string = EMBEDDING_MODEL,
 ): Promise<number[]> {
   const response = await openai().embeddings.create({
-    model: "text-embedding-ada-002",
+    model,
     input: text,
   });
 
@@ -24,7 +28,7 @@ export async function embedText(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "openai",
-      model: "text-embedding-ada-002",
+      model,
       operation: "embed",
       inputTokens: response.usage.prompt_tokens,
     });
@@ -39,9 +43,10 @@ export async function embedText(
 export async function embedTexts(
   texts: string[],
   ctx?: UsageContext,
+  model: string = EMBEDDING_MODEL,
 ): Promise<number[][]> {
   const response = await openai().embeddings.create({
-    model: "text-embedding-ada-002",
+    model,
     input: texts,
   });
 
@@ -50,7 +55,7 @@ export async function embedTexts(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "openai",
-      model: "text-embedding-ada-002",
+      model,
       operation: "embed",
       inputTokens: response.usage.prompt_tokens,
     });

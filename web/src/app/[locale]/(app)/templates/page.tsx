@@ -11,7 +11,7 @@ export default async function TemplatesPage({
   const templates = await resolveAllTemplates(locale);
 
   return (
-    <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0">
+    <AppShell contentClassName="flex-1 overflow-y-auto p-6 pt-0 pb-32">
       <TemplatesList templates={templates} />
     </AppShell>
   );
