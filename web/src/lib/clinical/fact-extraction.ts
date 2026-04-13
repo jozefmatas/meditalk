@@ -26,7 +26,7 @@ export interface FactExtractionInput {
   /** Free-form doctor notes (single blob). */
   doctorNotes?: string;
   /** OCR'd file content (labs, referrals, etc.), 0-based. */
-  files?: { name: string; type: string; text: string }[];
+  files?: { name: string; type: string; text: string; context?: string }[];
 }
 
 /** Where in the source material a fact was extracted from. */
@@ -191,10 +191,12 @@ export function buildFactExtractionUserMessage(
 
   if (input.files && input.files.length > 0) {
     const numbered = input.files
-      .map(
-        (f, i) =>
-          `[file sourceIndex=${i} name="${f.name}" type="${f.type}"]:\n${f.text}`,
-      )
+      .map((f, i) => {
+        const directive = f.context
+          ? `\nDOCTOR'S DIRECTIVE FOR THIS FILE: ${f.context}`
+          : "";
+        return `[file sourceIndex=${i} name="${f.name}" type="${f.type}"]:${directive}\n${f.text}`;
+      })
       .join("\n\n");
     parts.push(`UPLOADED FILE CONTENTS:\n\n${numbered}`);
   }
@@ -206,7 +208,7 @@ export function buildFactExtractionUserMessage(
   }
 
   parts.push(
-    "Extract every clinical fact that is EXPLICITLY stated in the source material above. Return a single JSON object with the exact category keys listed in the system prompt. Every fact MUST include a verbatim evidence quote. IMPORTANT: If the DOCTOR'S NOTES contain explicit instructions to only use certain parts of uploaded files (e.g. 'only use blood pressure from the document', 'ignore the old diagnosis in the referral'), respect those instructions — only extract the permitted facts from those files.",
+    "Extract every clinical fact that is EXPLICITLY stated in the source material above. Return a single JSON object with the exact category keys listed in the system prompt. Every fact MUST include a verbatim evidence quote. IMPORTANT: If the DOCTOR'S NOTES contain explicit instructions to only use certain parts of uploaded files (e.g. 'only use blood pressure from the document', 'ignore the old diagnosis in the referral'), respect those instructions — only extract the permitted facts from those files. EQUALLY IMPORTANT: If a file section contains a line starting with 'DOCTOR'S DIRECTIVE FOR THIS FILE:', that directive OVERRIDES what you extract from that specific file. For example, if the directive says 'I only want the diagnosis from the file, nothing else', extract ONLY diagnosis-related facts from that file and skip everything else (demographics, measurements, findings, medications, procedures, plan, etc.). Per-file directives are strict filters — obey them exactly.",
   );
 
   return parts.join("\n\n");

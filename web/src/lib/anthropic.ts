@@ -102,6 +102,8 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 3a. DOCTOR NOTES AS DIRECTIVES: Doctor's additional notes may contain explicit instructions about how to process other sources — e.g. "only use the blood pressure values from the uploaded file", "ignore the old diagnosis in the referral", "use only section X from the document". When doctor notes contain such filtering or processing instructions, treat them as authoritative directives and follow them exactly. Only include information from uploaded files and transcript that the doctor's instructions permit. This rule takes precedence over completeness — it is better to omit information the doctor explicitly excluded than to include everything.
 
+3b. PER-FILE DIRECTIVES: Individual uploaded files may contain a line starting with "DOCTOR'S DIRECTIVE FOR THIS FILE:" immediately after the file header. This directive tells you exactly what to use from that specific file. For example, if the directive says "I only want the diagnosis", use ONLY diagnosis-related information from that file — ignore all other content (demographics, measurements, findings, medications, procedures, recommendations, etc.) even if it is present. Per-file directives are strict filters and take precedence over completeness.
+
 4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
 
 5. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
@@ -136,7 +138,7 @@ export function buildTemplateUserMessage(
   chunks: string[],
   template: Template,
   doctorNotes?: string,
-  fileTexts?: { name: string; type: string; text: string }[],
+  fileTexts?: { name: string; type: string; text: string; context?: string }[],
   validatedFacts?: ExtractedFacts,
 ): string {
   const allIds = flattenSectionIds(template);
@@ -162,7 +164,12 @@ export function buildTemplateUserMessage(
 
   if (fileTexts && fileTexts.length > 0) {
     const fileSection = fileTexts
-      .map((f, i) => `[File ${i + 1}: ${f.name}]:\n${f.text}`)
+      .map((f, i) => {
+        const directive = f.context
+          ? `\nDOCTOR'S DIRECTIVE FOR THIS FILE: ${f.context}`
+          : "";
+        return `[File ${i + 1}: ${f.name}]:${directive}\n${f.text}`;
+      })
       .join("\n\n");
     parts.push(`UPLOADED FILE CONTENTS:\n\n${fileSection}`);
   }
@@ -327,7 +334,7 @@ export async function generateFromTemplate(
   language: SupportedLanguage,
   sectionLabels: Record<string, string>,
   doctorNotes?: string,
-  fileTexts?: { name: string; type: string; text: string }[],
+  fileTexts?: { name: string; type: string; text: string; context?: string }[],
   ctx?: UsageContext,
   clinicalAnalysis?: ClinicalAnalysis,
   sectionContexts?: Record<string, string>,

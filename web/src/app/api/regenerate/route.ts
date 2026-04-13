@@ -119,6 +119,7 @@ export async function POST(request: NextRequest) {
       type: string;
       extracted_text?: string | null;
       extraction_status?: string;
+      context?: string | null;
     }[];
 
     // Log files that will be omitted (no extracted_text despite being "completed")
@@ -141,7 +142,12 @@ export async function POST(request: NextRequest) {
 
     const fileTexts = uploadedFiles
       .filter((f) => f.extracted_text)
-      .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));
+      .map((f) => ({
+        name: f.name,
+        type: f.type,
+        text: f.extracted_text!,
+        context: f.context || undefined,
+      }));
 
     // Transcript resolution: prefer metadata.transcript, then fall back to
     // legacy transcript_chunks for old encounters created before the batch-only

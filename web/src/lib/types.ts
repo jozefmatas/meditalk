@@ -138,6 +138,8 @@ export interface FileMetadata {
   extraction_status?: ExtractionStatus | null;
   extraction_started_at?: string | null;
   extracted_at?: string | null;
+  /** Optional doctor directive for this file (e.g. "Focus on liver markers") */
+  context?: string | null;
 }
 
 // Encounter list query params

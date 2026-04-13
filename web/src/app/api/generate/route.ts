@@ -370,7 +370,12 @@ export async function POST(request: NextRequest) {
 
     const fileTexts = uploadedFiles
       .filter((f) => f.extracted_text)
-      .map((f) => ({ name: f.name, type: f.type, text: f.extracted_text! }));
+      .map((f) => ({
+        name: f.name,
+        type: f.type,
+        text: f.extracted_text!,
+        context: f.context || undefined,
+      }));
 
     // If streaming transcript is provided but no recording file captured it
     // (e.g. file upload hasn't completed yet), inject it directly as content
@@ -379,6 +384,7 @@ export async function POST(request: NextRequest) {
         name: "recording-transcript",
         type: "text/plain",
         text: transcriptText,
+        context: undefined,
       });
 
       // Also persist transcript to metadata for ResourcesPanel
@@ -413,7 +419,10 @@ export async function POST(request: NextRequest) {
     // Build clinical input from all extracted text + doctor notes
     const clinicalInputParts: string[] = [];
     for (const ft of fileTexts) {
-      clinicalInputParts.push(`[File: ${ft.name}]\n${ft.text}`);
+      const directive = ft.context
+        ? `\nDOCTOR'S DIRECTIVE FOR THIS FILE: ${ft.context}`
+        : "";
+      clinicalInputParts.push(`[File: ${ft.name}]${directive}\n${ft.text}`);
     }
     if (doctorNotes?.trim()) {
       clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);

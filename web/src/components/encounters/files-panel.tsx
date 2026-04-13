@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import type { FileMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { isAndroid } from "@/lib/platform";
+import { FileContextDialog } from "./file-context-dialog";
 
 export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
@@ -70,6 +71,7 @@ export function FilesContent({
   const t = useTranslations("encounters.detail");
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [contextDialogOpen, setContextDialogOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(
@@ -152,10 +154,21 @@ export function FilesContent({
           return [...withoutTheseUploads, ...(data.files as EncounterFile[])];
         });
 
+        // Open context dialog if any uploaded files are non-audio
+        const uploadedFiles = data.files as EncounterFile[];
+        const hasNonAudioUploads = uploadedFiles.some(
+          (f) =>
+            !f.type.startsWith("audio/") &&
+            f.source !== "recording" &&
+            f.source !== "recording-upload",
+        );
+        if (hasNonAudioUploads) {
+          setContextDialogOpen(true);
+        }
+
         // Trigger immediate extraction for each uploaded file (background).
         // Track completion so we can update file state and notify other components.
         // Includes a single retry (2s delay) for transient failures.
-        const uploadedFiles = data.files as EncounterFile[];
         uploadedFiles.forEach((file) => {
           const tryExtract = async (attempt: number): Promise<void> => {
             try {
@@ -274,6 +287,28 @@ export function FilesContent({
     [uploadFiles],
   );
 
+  const handleContextSave = useCallback(
+    (contexts: Record<string, string>) => {
+      const updatedFiles = files.map((f) =>
+        f.id in contexts ? { ...f, context: contexts[f.id] || null } : f,
+      );
+      onFilesChange(updatedFiles);
+      // Persist immediately via PATCH
+      fetch(`/api/encounters/${visitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadata: {
+            files: updatedFiles.map(
+              ({ pending: _, isRecording: __, ...rest }) => rest,
+            ),
+          },
+        }),
+      }).catch((err) => logger.error("Failed to persist file contexts:", err));
+    },
+    [files, onFilesChange, visitId],
+  );
+
   return (
     <>
       {/* Upload dropzone */}
@@ -331,6 +366,13 @@ export function FilesContent({
         }}
       />
 
+      <FileContextDialog
+        open={contextDialogOpen}
+        onOpenChange={setContextDialogOpen}
+        files={files}
+        onSave={handleContextSave}
+      />
+
       {/* File list */}
       {files.length > 0 && (
         <div className="flex flex-col">
@@ -339,43 +381,65 @@ export function FilesContent({
           </span>
           <Table variant="compact">
             <TableBody>
-              {files.map((file) => (
-                <TableRow key={file.id} className="group border-border">
-                  <TableCell>
-                    <div className="flex min-w-0 items-center gap-1">
-                      <HugeiconsIcon
-                        icon={
-                          file.pending
-                            ? file.source === "recording" && !file.isRecording
-                              ? Mic01Icon
-                              : Loading03Icon
-                            : iconForType(file.type)
-                        }
-                        size={14}
-                        className={cn(
-                          "shrink-0 text-muted-foreground",
-                          file.pending &&
-                            (file.source !== "recording" || file.isRecording) &&
-                            "animate-spin",
+              {files.map((file) => {
+                const isEligibleForContext =
+                  !file.pending &&
+                  !file.type.startsWith("audio/") &&
+                  file.source !== "recording" &&
+                  file.source !== "recording-upload";
+                return (
+                  <TableRow
+                    key={file.id}
+                    className={cn(
+                      "group border-border",
+                      isEligibleForContext && "cursor-pointer",
+                    )}
+                    onClick={
+                      isEligibleForContext
+                        ? () => setContextDialogOpen(true)
+                        : undefined
+                    }
+                  >
+                    <TableCell>
+                      <div className="flex min-w-0 items-center gap-1">
+                        <HugeiconsIcon
+                          icon={
+                            file.pending
+                              ? file.source === "recording" && !file.isRecording
+                                ? Mic01Icon
+                                : Loading03Icon
+                              : iconForType(file.type)
+                          }
+                          size={14}
+                          className={cn(
+                            "shrink-0 text-muted-foreground",
+                            file.pending &&
+                              (file.source !== "recording" ||
+                                file.isRecording) &&
+                              "animate-spin",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {file.name}
+                        </span>
+                        {!file.pending && (
+                          <Button
+                            variant="outline"
+                            size="icon-sm"
+                            className="shrink-0 desktop:opacity-0 desktop:transition-opacity desktop:group-hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(file.id);
+                            }}
+                          >
+                            <HugeiconsIcon icon={Delete01Icon} size={12} />
+                          </Button>
                         )}
-                      />
-                      <span className="min-w-0 flex-1 truncate">
-                        {file.name}
-                      </span>
-                      {!file.pending && (
-                        <Button
-                          variant="outline"
-                          size="icon-sm"
-                          className="shrink-0 desktop:opacity-0 desktop:transition-opacity desktop:group-hover:opacity-100"
-                          onClick={() => handleDelete(file.id)}
-                        >
-                          <HugeiconsIcon icon={Delete01Icon} size={12} />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>

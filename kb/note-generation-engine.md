@@ -1,6 +1,6 @@
 # MediTalk Note-Generation Engine
 
-_Last updated: 2026-04-11_
+_Last updated: 2026-04-13_
 
 This document is the **canonical reference** for how a medical encounter turns into a finalized clinical note in MediTalk. It exists so we can refine, refactor, and debug the pipeline without having to re-derive its shape from source code every time.
 
@@ -144,7 +144,7 @@ transcribeAudio(file, filename, languageCode?, ctx?) → string
 - **Two client-side helpers** in [transcribe-blob.ts](web/src/components/encounters/hooks/transcribe-blob.ts):
   1. `transcribeFromPath(storagePath, language, visitId)` — **preferred path** for full recordings. Sends a JSON body `{ storagePath, language, visitId }` to `/api/batch-transcribe`. The server downloads from Supabase storage and transcribes. Bypasses Vercel's 4.5 MB body limit.
   2. `transcribeBlob(blob, language, visitId)` — direct FormData upload for small blobs (pause-time snapshots < 4.5 MB). Subject to Vercel body limit.
-  Both include a **single retry** with 2s delay for transient HTTP errors (408, 429, 502, 503, 504) and `TypeError` (network failure).
+     Both include a **single retry** with 2s delay for transient HTTP errors (408, 429, 502, 503, 504) and `TypeError` (network failure).
 - The upload filename is derived from the blob's actual MIME type via `blobMimeToExt()` (`audio/mp4` → `.m4a`, `audio/ogg` → `.ogg`, `audio/wav` → `.wav`, default `.webm`) — critical because Safari records `audio/mp4` and sending it with a `.webm` filename confuses server-side format detection.
 - The server endpoint [batch-transcribe/route.ts](web/src/app/api/batch-transcribe/route.ts) (`maxDuration: 300`) accepts two modes:
   1. **Storage path mode** (`Content-Type: application/json`) — downloads audio from Supabase storage, derives extension from the storage path, transcribes server-side.
@@ -197,6 +197,7 @@ interface FileMetadata {
   extraction_status: "pending" | "extracting" | "completed" | "failed";
   extraction_started_at: string | null; // ISO timestamp, set when status flips to "extracting"
   extracted_at: string | null; // ISO timestamp
+  context?: string | null; // optional doctor directive for this file (see §2.6)
 }
 ```
 
@@ -223,6 +224,12 @@ Two routes invoke the extractor:
 
 Extracted file texts become entries in `FactExtractionInput.files`, and also prepended to `clinicalInputParts` that Pass 1 sees. Each file keeps its own `sourceIndex` so the Pass 1.5 fact extractor can anchor evidence at `[file sourceIndex=N]`.
 
+When a file has a `context` value (see §2.6), all three prompt paths inject it as `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` immediately after the file header and before the extracted text. This applies to:
+
+- `clinicalInputParts` in [generate/route.ts](web/src/app/api/generate/route.ts) (Pass 1 input)
+- `buildFactExtractionUserMessage` in [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) (Pass 1.5 input)
+- `buildTemplateUserMessage` in [anthropic.ts](web/src/lib/anthropic.ts) (Pass 2 input)
+
 ### 2.5 Upload-in-flight guard
 
 The encounter page and the adjust-drawer both block generation (and regeneration) while any file is still uploading. The helpers live in [files-panel.tsx](web/src/components/encounters/files-panel.tsx):
@@ -233,6 +240,17 @@ export function hasUploadingFiles(files: EncounterFile[]): boolean;
 ```
 
 `isFileUploading` deliberately excludes live-recording files (`source === "recording"`) because the recording flow has its own UX and the generate button explicitly supports starting generation during an active recording. The guard only prevents racing the generate request against in-progress uploads whose text isn't yet in `visits.metadata.files[i].extracted_text`.
+
+### 2.6 Per-file context (doctor directives)
+
+File: [web/src/components/encounters/file-context-dialog.tsx](web/src/components/encounters/file-context-dialog.tsx)
+
+After a non-audio file upload completes, a dialog opens showing **all** non-audio files in the encounter (not just the newly uploaded ones) with a `Textarea` for each. The doctor can optionally write a directive per file — e.g. "Focus on liver markers", "Only use the diagnosis from this referral". Clicking **any** file in the file list also opens the same dialog.
+
+- **Component:** `FileContextDialog` — controlled dialog (`open` / `onOpenChange`). Filters out audio/recording files internally. Seeds textareas from existing `file.context` values on open.
+- **Persistence:** On save, `files-panel.tsx` updates the local files array via `onFilesChange` (triggers the existing auto-save mechanism) and also fires an explicit `PATCH /api/encounters/:id` with `metadata.files` for immediate persistence.
+- **Context indicator:** Files with a non-empty `context` show a small info icon in the file list.
+- **Prompt integration:** The `context` string flows through all three prompt builders as `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` (see §2.4). This leverages the existing "doctor notes as directives" pattern (see §3.4) but scoped per-file rather than globally.
 
 ---
 
@@ -403,7 +421,7 @@ Pass 2 (Opus) is much more grounded when it sees a terse, category-bucketed list
 interface FactExtractionInput {
   chunks: string[]; // transcript chunks
   doctorNotes?: string;
-  files?: { name: string; type: string; text: string }[]; // OCR'd
+  files?: { name: string; type: string; text: string; context?: string }[]; // OCR'd + optional per-file directive
 }
 ```
 
@@ -583,7 +601,7 @@ Block order:
 
 1. **VALIDATED CLINICAL FACTS** — `formatFactsForPrompt(validatedFacts)` renders the 10 categories as a terse bullet list. This is introduced as the _factual contract_: every statement in the report must trace back to one of these facts.
 2. **SOURCE MATERIAL** — numbered transcript chunks. When facts are present, these are marked "phrasing and context reference only" — Opus should not extract new facts from them, only phrasing.
-3. **UPLOADED FILE CONTENTS** — numbered extracted texts.
+3. **UPLOADED FILE CONTENTS** — numbered extracted texts. Each file with a `context` value gets a `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` line inserted between the file header and the extracted text.
 4. **DOCTOR'S ADDITIONAL NOTES** — verbatim.
 5. Final instruction: return a single JSON object with one key per section ID, plus `letter` and `title`.
 
@@ -885,12 +903,12 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | File extraction getting stuck (server crash mid-extraction)                     | Generate route resets files stuck in `"extracting"` > 5 min to `"failed"` for retry.                                                                                                                                                                                               |
 | Extract RPC failing after successful OCR (lost extracted text)                  | 3-attempt retry with backoff (500ms/1s/2s) on the final status update RPC.                                                                                                                                                                                                         |
 | Client-side transcription failing on network hiccup                             | Both `transcribeBlob` and `transcribeFromPath` retry once with 2s delay for transient HTTP errors and `TypeError`.                                                                                                                                                                 |
-| Long recordings (>4.5 MB) silently failing transcription (Vercel body limit)   | Blob is uploaded to Supabase storage first; `transcribeFromPath` sends the storage path via JSON — server downloads directly from storage, bypassing the body limit. Falls back to `transcribeBlob` if storage-path mode fails. `toast.warning` shown on total failure.             |
+| Long recordings (>4.5 MB) silently failing transcription (Vercel body limit)    | Blob is uploaded to Supabase storage first; `transcribeFromPath` sends the storage path via JSON — server downloads directly from storage, bypassing the body limit. Falls back to `transcribeBlob` if storage-path mode fails. `toast.warning` shown on total failure.            |
 | ElevenLabs SDK timeout on long recordings                                       | SDK `timeoutInSeconds` set to 300 (default was 60). Server `maxDuration` also 300s.                                                                                                                                                                                                |
 | Safari recording `audio/mp4` but upload filename says `.webm` (format mismatch) | `blobMimeToExt()` derives filename from blob's actual MIME type; server fallback is `.m4a`.                                                                                                                                                                                        |
 | `requestData()` corrupting mp4 container on Safari iOS (post-resume audio loss) | `requestData()` is **skipped on mp4** — `pause()` calls `recorder.pause()` directly; all data captured in one clean blob on `stop()`. Trade-off: no pause-time snapshot/upload on Safari. Non-mp4 browsers still use `requestData()` with feature-detection guard + 500ms timeout. |
 | `getSupportedMimeType()` returning `""` on exotic browsers (recorder crash)     | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`.                                                                                                                                                                                               |
-| Native foreground-service teardown disrupting WebView network (TypeError)       | `audioRecoveryPath = uploadedPath` safety net in `handleGenerate`/`handleAdjustGenerate` — server downloads and transcribes from storage when client-side transcription fails entirely.                                                                                             |
+| Native foreground-service teardown disrupting WebView network (TypeError)       | `audioRecoveryPath = uploadedPath` safety net in `handleGenerate`/`handleAdjustGenerate` — server downloads and transcribes from storage when client-side transcription fails entirely.                                                                                            |
 | Doctor notes auto-save failing silently                                         | `useSaveStatus` hook with visual indicator + single retry after 3s. Toast errors on recording.                                                                                                                                                                                     |
 | Server dying mid-generation (encounter stuck in "processing")                   | `generation_pending.startedAt` timestamp + client auto-correction resets to "started" after 3 min. Polling hook also has 180s timeout + `onPollTimeout` auto-resume (once per page load).                                                                                          |
 | Multiple files finishing extraction at once (redundant client refreshes)        | 500ms debounce on `extraction-complete` event handler batches into a single `refreshEncounter()`.                                                                                                                                                                                  |
@@ -920,6 +938,7 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | Bump a model ID                                    | [pipeline.ts](web/src/lib/clinical/pipeline.ts), [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts), [anthropic.ts](web/src/lib/anthropic.ts), and pricing in [usage.ts](web/src/lib/usage.ts)           |
 | Write to visit metadata                            | Always use [mergeVisitMetadata](web/src/lib/supabase/merge-metadata.ts) for atomic merge. Never do a raw read-modify-write on metadata JSONB.                                                                       |
 | Change client-side extraction behavior             | [files-panel.tsx](web/src/components/encounters/files-panel.tsx) — tracked extraction with retry, dispatches `extraction-complete` CustomEvent.                                                                     |
+| Change per-file context dialog UX                  | [file-context-dialog.tsx](web/src/components/encounters/file-context-dialog.tsx) and wiring in [files-panel.tsx](web/src/components/encounters/files-panel.tsx).                                                    |
 | Refresh client state after background operations   | [use-encounter-data.ts](web/src/components/encounters/hooks/use-encounter-data.ts) — `refreshEncounter()` re-fetches both visit and files state.                                                                    |
 
 Whenever you change a stage, also:
