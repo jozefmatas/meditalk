@@ -163,6 +163,8 @@ transcribeAudio(file, filename, languageCode?, ctx?) → string
 
 The server downloads and transcribes `audioPath`, then **prepends** it to `transcriptText` so the final transcript contains all segments in order.
 
+**Native app recovery:** On Capacitor native apps (Android/iOS), stopping the foreground service after recording briefly disrupts the WebView's network stack — `fetch()` throws `TypeError`. If client-side transcription fails entirely (`!finalTranscript`) but the blob was successfully uploaded to storage (`uploadedPath`), `handleGenerate` and `handleAdjustGenerate` pass `uploadedPath` as `audioRecoveryPath` to `/api/generate`. The server then downloads and transcribes it — same path as restored-session recovery.
+
 **No blob path:** If there is no blob (doctor-notes-only encounter, or restored session with no new recording), `transcriptText` is null. The generate route then falls back to `metadata.transcript` (saved from pause-time transcription) via `getTranscript()` from [encounters/sources.ts](web/src/lib/encounters/sources.ts). If neither `transcriptText` nor `metadata.transcript` exist, the pipeline relies on doctor notes and uploaded files alone.
 
 ### 1.5 Transcript storage
@@ -250,6 +252,13 @@ In the generate route, `doctorNotes` becomes:
 - A `DOCTOR'S ADDITIONAL NOTES` block appended to the Opus user message in [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts).
 
 Doctor notes are treated as **high-trust source material** — they are never chunked, never embedded, and never truncated.
+
+### 3.4 Doctor notes as directives
+
+Doctor notes can contain not only clinical content but also **processing instructions** — e.g. "only use the blood pressure values from the uploaded file", "ignore the old diagnosis in the referral". When present, these instructions are treated as authoritative directives:
+
+- **Pass 2 (Opus):** Rule 3a (DOCTOR NOTES AS DIRECTIVES) in [anthropic.ts](web/src/lib/anthropic.ts) explicitly tells the model to follow filtering/processing instructions in doctor notes and omit any information the doctor excluded — even at the cost of completeness.
+- **Pass 1.5 (Haiku):** The fact extraction user message in [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) includes an `IMPORTANT` instruction to respect doctor-note filtering directives — only extracting the permitted facts from files when doctor notes say to restrict scope.
 
 ---
 
@@ -877,6 +886,7 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | Safari recording `audio/mp4` but upload filename says `.webm` (format mismatch) | `blobMimeToExt()` derives filename from blob's actual MIME type; server fallback is `.m4a`.                                                                                                                                                                                        |
 | `requestData()` corrupting mp4 container on Safari iOS (post-resume audio loss) | `requestData()` is **skipped on mp4** — `pause()` calls `recorder.pause()` directly; all data captured in one clean blob on `stop()`. Trade-off: no pause-time snapshot/upload on Safari. Non-mp4 browsers still use `requestData()` with feature-detection guard + 500ms timeout. |
 | `getSupportedMimeType()` returning `""` on exotic browsers (recorder crash)     | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`.                                                                                                                                                                                               |
+| Native foreground-service teardown disrupting WebView network (TypeError)       | `audioRecoveryPath = uploadedPath` safety net in `handleGenerate`/`handleAdjustGenerate` — server downloads and transcribes from storage when client-side transcription fails entirely.                                                                                             |
 | Doctor notes auto-save failing silently                                         | `useSaveStatus` hook with visual indicator + single retry after 3s. Toast errors on recording.                                                                                                                                                                                     |
 | Server dying mid-generation (encounter stuck in "processing")                   | `generation_pending.startedAt` timestamp + client auto-correction resets to "started" after 3 min. Polling hook also has 180s timeout + `onPollTimeout` auto-resume (once per page load).                                                                                          |
 | Multiple files finishing extraction at once (redundant client refreshes)        | 500ms debounce on `extraction-complete` event handler batches into a single `refreshEncounter()`.                                                                                                                                                                                  |

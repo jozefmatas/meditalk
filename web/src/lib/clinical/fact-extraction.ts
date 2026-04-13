@@ -206,7 +206,7 @@ export function buildFactExtractionUserMessage(
   }
 
   parts.push(
-    "Extract every clinical fact that is EXPLICITLY stated in the source material above. Return a single JSON object with the exact category keys listed in the system prompt. Every fact MUST include a verbatim evidence quote.",
+    "Extract every clinical fact that is EXPLICITLY stated in the source material above. Return a single JSON object with the exact category keys listed in the system prompt. Every fact MUST include a verbatim evidence quote. IMPORTANT: If the DOCTOR'S NOTES contain explicit instructions to only use certain parts of uploaded files (e.g. 'only use blood pressure from the document', 'ignore the old diagnosis in the referral'), respect those instructions — only extract the permitted facts from those files.",
   );
 
   return parts.join("\n\n");

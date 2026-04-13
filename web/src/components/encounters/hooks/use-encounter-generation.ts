@@ -402,6 +402,11 @@ export function useEncounterGeneration({
         // No blob at all — full recovery from server
         audioRecoveryPath =
           pendingMeta?.audioPath || sessionMeta?.audioPath || undefined;
+      } else if (!finalTranscript && uploadedPath) {
+        // Client-side transcription failed but blob is in storage — let the
+        // server download and transcribe it (critical for native apps where
+        // network may be disrupted during foreground-service teardown).
+        audioRecoveryPath = uploadedPath;
       } else if (isRestoredSession && sessionMeta?.audioPath) {
         // Restored session: prior recording blob + new recording blob.
         // Send prior audioPath so server transcribes and prepends it.
@@ -771,6 +776,10 @@ export function useEncounterGeneration({
       let audioRecoveryPath: string | undefined;
       if (!blobToProcess) {
         audioRecoveryPath = adjustPendingMeta?.audioPath || undefined;
+      } else if (!finalTranscript && uploadedPath) {
+        // Client-side transcription failed but blob is in storage — let the
+        // server download and transcribe it (critical for native apps).
+        audioRecoveryPath = uploadedPath;
       } else if (isRestoredSession && adjustSessionMeta?.audioPath) {
         audioRecoveryPath = adjustSessionMeta.audioPath;
       }
