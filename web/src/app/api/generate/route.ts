@@ -123,22 +123,52 @@ export async function POST(request: NextRequest) {
     // When both audioPath and transcriptText are present (resume + generate:
     // prior recording in storage + new recording transcribed client-side),
     // prepend the prior recording's transcript to the new one.
-    if (audioPath) {
-      lap("recovery-download-start");
-      try {
-        const { data: audioData, error: dlError } = await supabase.storage
-          .from("encounter-files")
-          .download(audioPath);
+    //
+    // Resolve the effective audio path: prefer client-provided, fall back to
+    // metadata paths (recording_session.audioPath, generation_pending.audioPath).
+    // This ensures recovery works even when the client didn't pass the path
+    // (e.g. stale JS bundle, race condition, or incomplete client-side state).
+    const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+    const sessionAudioPath = (
+      visitMeta.recording_session as { audioPath?: string } | undefined
+    )?.audioPath;
+    const pendingAudioPath = (
+      visitMeta.generation_pending as { audioPath?: string } | undefined
+    )?.audioPath;
+    const effectiveAudioPath =
+      audioPath || pendingAudioPath || sessionAudioPath;
 
-        if (dlError || !audioData) {
-          logger.error(
-            "[generate] Failed to download recovery audio:",
-            dlError,
-          );
-          // Fall through — may still have chunks or file content below
-        } else {
+    if (effectiveAudioPath) {
+      logger.debug(
+        `[generate] Recovery audio — client: ${audioPath || "NONE"}, pending: ${pendingAudioPath || "NONE"}, session: ${sessionAudioPath || "NONE"} → using: ${effectiveAudioPath}`,
+      );
+      lap("recovery-download-start");
+      // Retry once on transient failure (ElevenLabs timeout, network blip).
+      for (let attempt = 0; attempt <= 1; attempt++) {
+        try {
+          const { data: audioData, error: dlError } = await supabase.storage
+            .from("encounter-files")
+            .download(effectiveAudioPath);
+
+          if (dlError || !audioData) {
+            logger.error(
+              `[generate] Failed to download recovery audio (attempt ${attempt}):`,
+              dlError,
+            );
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 2000));
+              continue;
+            }
+            break;
+          }
+
           const buffer = Buffer.from(await audioData.arrayBuffer());
-          const ext = audioPath.substring(audioPath.lastIndexOf("."));
+          logger.debug(
+            `[generate] Recovery audio downloaded: ${buffer.byteLength} bytes`,
+          );
+          const ext = effectiveAudioPath.substring(
+            effectiveAudioPath.lastIndexOf("."),
+          );
           const recovered = await transcribeAudio(
             buffer,
             `recovery${ext}`,
@@ -157,20 +187,26 @@ export async function POST(request: NextRequest) {
             logger.warn(
               "[generate] Recovery transcription returned empty text",
             );
+            if (attempt === 0) {
+              await new Promise((r) => setTimeout(r, 2000));
+              continue;
+            }
           }
+          break; // Success or non-retryable
+        } catch (err) {
+          logger.warn(
+            `[generate] Recovery audio transcription failed (attempt ${attempt}):`,
+            err,
+          );
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          // Final attempt failed — fall through to other fallbacks
         }
-      } catch (err) {
-        logger.warn(
-          "[generate] Recovery audio transcription failed, using fallback:",
-          err,
-        );
-        // Falls through to existing chunks/files/transcriptText if any
       }
       lap("recovery-download-done");
     }
-
-    // Process uploaded files — extract text from any that haven't been processed yet
-    const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
 
     // Fallback: if client-side transcription failed (transcriptText is empty)
     // but the visit has a transcript from pause-time transcription, use that.
