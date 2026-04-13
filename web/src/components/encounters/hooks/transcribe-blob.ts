@@ -1,10 +1,14 @@
 /**
- * Batch transcription helper for the encounter generation flow.
+ * Batch transcription helpers for the encounter generation flow.
  *
- * POSTs the recorded audio blob to /api/batch-transcribe (ElevenLabs
- * Scribe v2 batch API) and returns the transcript text. The native
- * AudioRecord foreground service keeps the microphone alive across
- * backgrounding, so the blob is always the full recording.
+ * Two paths:
+ * 1. `transcribeBlob` — sends the blob via FormData to /api/batch-transcribe.
+ *    Only suitable for small blobs (< 4.5 MB) due to Vercel body limit.
+ *    Used for pause-time snapshot transcription.
+ *
+ * 2. `transcribeFromPath` — sends a Supabase Storage path via JSON to
+ *    /api/batch-transcribe. The server downloads from storage and transcribes.
+ *    Used for full recordings (bypasses Vercel body limit).
  */
 import { logger } from "@/lib/logger";
 
@@ -95,6 +99,69 @@ export async function transcribeBlob(
         continue;
       }
       logger.warn("[transcribe-blob] Batch transcription error:", err);
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Transcribe audio from a Supabase Storage path. The server downloads the
+ * file from storage and transcribes via ElevenLabs — the audio never passes
+ * through Vercel's body size limit.
+ *
+ * Preferred path for full recordings (which can be 5-50+ MB).
+ * Includes a single retry for transient errors.
+ */
+export async function transcribeFromPath(
+  storagePath: string,
+  language: string,
+  visitId: string,
+  deps: TranscribeBlobDeps = { fetch: globalThis.fetch.bind(globalThis) },
+): Promise<string | null> {
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      const res = await deps.fetch("/api/batch-transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath, language, visitId }),
+      });
+
+      if (!res.ok) {
+        if (isTransient(null, res.status) && attempt === 0) {
+          logger.warn(
+            `[transcribe-path] Transient error ${res.status}, retrying in ${RETRY_DELAY_MS}ms`,
+          );
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        logger.warn(
+          `[transcribe-path] Transcription from storage failed: ${res.status}`,
+        );
+        return null;
+      }
+
+      const data = (await res.json()) as { text?: string };
+      const text = data?.text;
+      if (!text) {
+        logger.warn(
+          "[transcribe-path] Transcription from storage returned empty text",
+        );
+        return null;
+      }
+      logger.debug(
+        `[transcribe-path] Transcription succeeded: ${text.length} chars`,
+      );
+      return text;
+    } catch (err) {
+      if (isTransient(err) && attempt === 0) {
+        logger.warn(
+          `[transcribe-path] Network error, retrying in ${RETRY_DELAY_MS}ms`,
+        );
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      logger.warn("[transcribe-path] Transcription error:", err);
       return null;
     }
   }

@@ -3,14 +3,20 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import { logger } from "@/lib/logger";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 /**
  * POST /api/batch-transcribe
  *
- * Accepts an audio blob via FormData and returns a batch transcript.
- * Used as fallback when Scribe real-time streaming fails (e.g. screen lock
- * kills the WebSocket but MediaRecorder keeps recording).
+ * Accepts audio via one of two modes:
+ *
+ * 1. **Storage path mode** (JSON body) — preferred for large recordings.
+ *    The client uploads the blob directly to Supabase Storage (bypassing
+ *    Vercel's 4.5 MB body limit) and sends `{ storagePath, language, visitId }`.
+ *    The server downloads from storage and transcribes.
+ *
+ * 2. **Direct blob mode** (FormData) — for small blobs (pause-time snapshots).
+ *    The blob is sent as multipart form data. Subject to Vercel body limit.
  */
 export async function POST(request: NextRequest) {
   let authResult: Awaited<ReturnType<typeof requireAuth>>;
@@ -22,6 +28,62 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const contentType = request.headers.get("content-type") || "";
+
+    // ── Storage path mode (JSON body) ──────────────────────────
+    if (contentType.includes("application/json")) {
+      const body = await request.json();
+      const storagePath: string | undefined = body.storagePath;
+      const language: string | undefined = body.language;
+      const visitId: string | undefined = body.visitId;
+
+      if (!storagePath) {
+        return NextResponse.json(
+          { error: "Missing storagePath" },
+          { status: 400 },
+        );
+      }
+
+      logger.info(
+        `[batch-transcribe] Storage mode: downloading ${storagePath}, language=${language ?? "auto"}`,
+      );
+
+      const { data: audioData, error: dlError } =
+        await authResult.supabase.storage
+          .from("encounter-files")
+          .download(storagePath);
+
+      if (dlError || !audioData) {
+        logger.error(
+          "[batch-transcribe] Failed to download from storage:",
+          dlError,
+        );
+        return NextResponse.json(
+          { error: "Failed to download audio from storage" },
+          { status: 500 },
+        );
+      }
+
+      const buffer = Buffer.from(await audioData.arrayBuffer());
+      const ext = storagePath.substring(storagePath.lastIndexOf("."));
+
+      logger.info(
+        `[batch-transcribe] Transcribing ${buffer.byteLength} bytes from storage`,
+      );
+
+      const text = await transcribeAudio(buffer, `recording${ext}`, language, {
+        userId: authResult.userId,
+        visitId: visitId ?? "",
+      });
+
+      logger.info(
+        `[batch-transcribe] Transcribed ${text.length} chars from storage`,
+      );
+
+      return NextResponse.json({ text });
+    }
+
+    // ── Direct blob mode (FormData) ────────────────────────────
     const formData = await request.formData();
     const audioFile = formData.get("audio") as File | null;
     const language = (formData.get("language") as string) || undefined;
@@ -34,8 +96,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    logger.debug(
-      `[batch-transcribe] Transcribing ${audioFile.size} bytes (${audioFile.type}), language=${language ?? "auto"}`,
+    logger.info(
+      `[batch-transcribe] Direct mode: ${audioFile.size} bytes (${audioFile.type}), language=${language ?? "auto"}`,
     );
 
     const text = await transcribeAudio(
@@ -45,7 +107,7 @@ export async function POST(request: NextRequest) {
       { userId: authResult.userId, visitId: visitId ?? "" },
     );
 
-    logger.debug(`[batch-transcribe] Transcribed ${text.length} chars`);
+    logger.info(`[batch-transcribe] Transcribed ${text.length} chars`);
 
     return NextResponse.json({ text });
   } catch (err) {

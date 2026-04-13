@@ -39,15 +39,22 @@ export async function transcribeAudio(
           type: mimeMap[ext] || "audio/mpeg",
         });
 
-  const result = await elevenlabs().speechToText.convert({
-    file: audioFile,
-    modelId: "scribe_v2",
-    // Specify language for better accuracy (especially for non-English)
-    languageCode: languageCode || undefined,
-    // Disable audio event tags like [laughter], [keyboard sounds], [silence]
-    // — they're noise in medical transcription context.
-    tagAudioEvents: false,
-  });
+  const result = await elevenlabs().speechToText.convert(
+    {
+      file: audioFile,
+      modelId: "scribe_v2",
+      // Specify language for better accuracy (especially for non-English)
+      languageCode: languageCode || undefined,
+      // Disable audio event tags like [laughter], [keyboard sounds], [silence]
+      // — they're noise in medical transcription context.
+      tagAudioEvents: false,
+    },
+    {
+      // Large recordings (30+ min) can take well over 60s to transcribe.
+      // SDK default is 60s which causes timeouts for long consultations.
+      timeoutInSeconds: 300,
+    },
+  );
 
   if (ctx) {
     const lastWord = result.words?.[result.words.length - 1];

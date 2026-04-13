@@ -14,11 +14,12 @@ import { useGenerationTimer } from "@/hooks/use-generation-timer";
 import { parseSSEStream } from "@/lib/api/parse-sse-stream";
 import { useTemplateCache } from "./use-template-cache";
 import { useGenerationPolling } from "./use-generation-polling";
-import { transcribeBlob } from "./transcribe-blob";
+import { transcribeBlob, transcribeFromPath } from "./transcribe-blob";
 import { uploadToStorage } from "@/lib/supabase/upload";
 import { audioMimeToExt } from "./use-audio-recorder";
 import { getTranscript } from "@/lib/encounters/sources";
 import { useSaveStatus } from "@/hooks/use-save-status";
+import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 
 /** Module-level tracking of active generations so they survive component remounts. */
@@ -301,57 +302,88 @@ export function useEncounterGeneration({
         `[generate] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Upload blob to Supabase storage for recovery if app is killed/closed.
-      // Runs in parallel with transcription — upload is fast (just bytes),
-      // transcription is the slow path (20-60s via ElevenLabs).
-      const uploadPromise = blobToProcess
-        ? (async () => {
-            try {
-              const ext = audioMimeToExt(blobToProcess.type);
-              const fileName = `recovery${ext}`;
-              const { path } = await uploadToStorage(
-                new File([blobToProcess], fileName, {
-                  type: blobToProcess.type,
-                }),
-                fileName,
-                { encounterId: visitId },
-              );
-              // Persist audioPath so auto-resume can find it after app kill
-              fetch(`/api/encounters/${visitId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  metadata: {
-                    generation_pending: {
-                      templateId: capturedTemplateId,
-                      doctorNotes: capturedDoctorNotes || undefined,
-                      audioPath: path,
-                      startedAt: new Date().toISOString(),
-                    },
-                  },
-                }),
-              }).catch(() => {});
-              logger.debug(`[generate] Recovery blob uploaded: ${path}`);
-              return path;
-            } catch (err) {
-              logger.warn("[generate] Recovery blob upload failed:", err);
-              return null;
-            }
-          })()
-        : Promise.resolve(null);
+      // Upload blob to Supabase storage FIRST, then transcribe via the
+      // storage path. This bypasses Vercel's 4.5 MB body limit — the
+      // server downloads from Supabase directly. uploadToStorage goes
+      // straight to the storage bucket (no serverless function).
+      let uploadedPath: string | null = null;
+      if (blobToProcess) {
+        try {
+          const ext = audioMimeToExt(blobToProcess.type);
+          const fileName = `recovery${ext}`;
+          const { path } = await uploadToStorage(
+            new File([blobToProcess], fileName, {
+              type: blobToProcess.type,
+            }),
+            fileName,
+            { encounterId: visitId },
+          );
+          uploadedPath = path;
+          // Persist audioPath so auto-resume can find it after app kill
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              metadata: {
+                generation_pending: {
+                  templateId: capturedTemplateId,
+                  doctorNotes: capturedDoctorNotes || undefined,
+                  audioPath: path,
+                  startedAt: new Date().toISOString(),
+                },
+              },
+            }),
+          }).catch(() => {});
+          logger.debug(`[generate] Blob uploaded: ${path}`);
+        } catch (err) {
+          logger.warn("[generate] Blob upload failed:", err);
+        }
+      }
 
-      // Full-blob transcription gives the best quality — the transcriber
-      // has full conversational context in one pass. When no blob is available
-      // (e.g. restored session after navigate-away), fall back to
-      // metadata.transcript which was set during pause-time transcription,
-      // or let the server use the audioPath from recording_session /
-      // generation_pending metadata.
-      const finalTranscript = blobToProcess
-        ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
-        : getTranscript(visit?.metadata as Record<string, unknown>);
+      // Transcribe: prefer storage-path mode (no body limit) when the
+      // blob was uploaded. Fall back to direct blob mode for small blobs
+      // or metadata.transcript when no blob exists.
+      let finalTranscript: string | null;
+      if (uploadedPath) {
+        finalTranscript = await transcribeFromPath(
+          uploadedPath,
+          generationLanguage,
+          visitId,
+        );
+        // If storage-path transcription failed, try direct blob as fallback
+        if (!finalTranscript && blobToProcess) {
+          logger.warn(
+            "[generate] Storage-path transcription failed, trying direct blob",
+          );
+          finalTranscript = await transcribeBlob(
+            blobToProcess,
+            generationLanguage,
+            visitId,
+          );
+        }
+      } else if (blobToProcess) {
+        // Upload failed — try direct blob (may hit body limit for large files)
+        finalTranscript = await transcribeBlob(
+          blobToProcess,
+          generationLanguage,
+          visitId,
+        );
+      } else {
+        finalTranscript = getTranscript(
+          visit?.metadata as Record<string, unknown>,
+        );
+      }
 
-      // Wait for recovery upload (usually completes during transcription)
-      await uploadPromise;
+      // Warn user when a recording existed but transcription failed completely
+      if (blobToProcess && !finalTranscript) {
+        logger.error(
+          `[generate] Transcription failed for ${blobToProcess.size} byte blob`,
+        );
+        toast.warning(
+          "Recording transcription failed. The note will be generated from uploaded files only.",
+          { duration: 10_000 },
+        );
+      }
 
       // Determine audioPath for server-side recovery/concatenation:
       // - No blob in memory: server downloads from generation_pending or recording_session
@@ -645,49 +677,87 @@ export function useEncounterGeneration({
         `[adjust] Finalized — blob: ${blobToProcess?.size || 0} bytes`,
       );
 
-      // Upload blob to storage for recovery (same as handleGenerate)
-      const uploadPromise = blobToProcess
-        ? (async () => {
-            try {
-              const ext = audioMimeToExt(blobToProcess.type);
-              const fileName = `recovery${ext}`;
-              const { path } = await uploadToStorage(
-                new File([blobToProcess], fileName, {
-                  type: blobToProcess.type,
-                }),
-                fileName,
-                { encounterId: visitId },
-              );
-              fetch(`/api/encounters/${visitId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  metadata: {
-                    generation_pending: {
-                      templateId: capturedTemplateId,
-                      doctorNotes: mergedNotes || undefined,
-                      audioPath: path,
-                      startedAt: new Date().toISOString(),
-                    },
-                  },
-                }),
-              }).catch(() => {});
-              logger.debug(`[adjust] Recovery blob uploaded: ${path}`);
-              return path;
-            } catch (err) {
-              logger.warn("[adjust] Recovery blob upload failed:", err);
-              return null;
-            }
-          })()
-        : Promise.resolve(null);
+      // Upload blob to Supabase storage FIRST, then transcribe via the
+      // storage path. This bypasses Vercel's 4.5 MB body limit — the
+      // server downloads from Supabase directly. (Same as handleGenerate.)
+      let uploadedPath: string | null = null;
+      if (blobToProcess) {
+        try {
+          const ext = audioMimeToExt(blobToProcess.type);
+          const fileName = `recovery${ext}`;
+          const { path } = await uploadToStorage(
+            new File([blobToProcess], fileName, {
+              type: blobToProcess.type,
+            }),
+            fileName,
+            { encounterId: visitId },
+          );
+          uploadedPath = path;
+          // Persist audioPath so auto-resume can find it after app kill
+          fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              metadata: {
+                generation_pending: {
+                  templateId: capturedTemplateId,
+                  doctorNotes: mergedNotes || undefined,
+                  audioPath: path,
+                  startedAt: new Date().toISOString(),
+                },
+              },
+            }),
+          }).catch(() => {});
+          logger.debug(`[adjust] Blob uploaded: ${path}`);
+        } catch (err) {
+          logger.warn("[adjust] Blob upload failed:", err);
+        }
+      }
 
-      // Full-blob transcription for best quality (see handleGenerate comment).
-      const finalTranscript = blobToProcess
-        ? await transcribeBlob(blobToProcess, generationLanguage, visitId)
-        : getTranscript(visit?.metadata as Record<string, unknown>);
+      // Transcribe: prefer storage-path mode (no body limit) when the
+      // blob was uploaded. Fall back to direct blob mode for small blobs
+      // or metadata.transcript when no blob exists.
+      let finalTranscript: string | null;
+      if (uploadedPath) {
+        finalTranscript = await transcribeFromPath(
+          uploadedPath,
+          generationLanguage,
+          visitId,
+        );
+        // If storage-path transcription failed, try direct blob as fallback
+        if (!finalTranscript && blobToProcess) {
+          logger.warn(
+            "[adjust] Storage-path transcription failed, trying direct blob",
+          );
+          finalTranscript = await transcribeBlob(
+            blobToProcess,
+            generationLanguage,
+            visitId,
+          );
+        }
+      } else if (blobToProcess) {
+        // Upload failed — try direct blob (may hit body limit for large files)
+        finalTranscript = await transcribeBlob(
+          blobToProcess,
+          generationLanguage,
+          visitId,
+        );
+      } else {
+        finalTranscript = getTranscript(
+          visit?.metadata as Record<string, unknown>,
+        );
+      }
 
-      // Wait for recovery upload
-      await uploadPromise;
+      // Warn user when a recording existed but transcription failed completely
+      if (blobToProcess && !finalTranscript) {
+        logger.error(
+          `[adjust] Transcription failed for ${blobToProcess.size} byte blob`,
+        );
+        toast.warning(
+          "Recording transcription failed. The note will be generated from uploaded files only.",
+          { duration: 10_000 },
+        );
+      }
 
       // Determine audioPath for recovery/concatenation (same logic as handleGenerate)
       const adjustMeta = (visit?.metadata ?? {}) as Record<string, unknown>;
