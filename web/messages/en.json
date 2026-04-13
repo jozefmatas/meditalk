@@ -118,7 +118,7 @@
       "uploadFiles": "Click or drag files to upload",
       "uploadedFiles": "Uploaded files",
       "fileContextTitle": "File context",
-      "fileContextDescription": "Optionally tell the AI what to focus on in each file.",
+      "fileContextDescription": "Optionally tell MediTalk AI what to focus on in each file.",
       "fileContextPlaceholder": "E.g. Focus on liver markers, ignore old diagnosis",
       "fileContextSkip": "Skip",
       "fileContextSave": "Save",

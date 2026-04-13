@@ -118,7 +118,7 @@
       "uploadFiles": "Klikněte nebo přetáhněte soubory k nahrání",
       "uploadedFiles": "Nahrané soubory",
       "fileContextTitle": "Kontext souborů",
-      "fileContextDescription": "Volitelně řekněte AI, na co se má v každém souboru zaměřit.",
+      "fileContextDescription": "Volitelně řekněte MediTalk AI, na co se má v každém souboru zaměřit.",
       "fileContextPlaceholder": "Např. Zaměř se na jaterní markery, ignoruj starou diagnózu",
       "fileContextSkip": "Přeskočit",
       "fileContextSave": "Uložit",
