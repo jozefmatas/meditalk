@@ -2,7 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
-import type { EncounterFile } from "@/components/encounters/files-panel";
+import {
+  type EncounterFile,
+  awaitPendingContextSave,
+} from "@/components/encounters/files-panel";
 import { type RecordingBarRef } from "@/components/encounters/recording-bar";
 import type { NoteSection } from "@/lib/parse-note-sections";
 import {
@@ -430,6 +433,11 @@ export function useEncounterGeneration({
       try {
         setAudioBlob(null);
 
+        // Wait for any in-flight file-context save so the server reads the
+        // latest per-file directives from the database (prevents race where
+        // user saves context and immediately hits Generate).
+        await awaitPendingContextSave(visitId);
+
         // Generate note via SSE streaming (with client-side retry for transient errors)
         // Mutable container — TypeScript can't track assignments inside async callbacks
         const ctx = {
@@ -807,6 +815,9 @@ export function useEncounterGeneration({
       try {
         // Clear template cache — new context invalidates previous outputs
         clearCache();
+
+        // Wait for any in-flight file-context save (same guard as handleGenerate)
+        await awaitPendingContextSave(visitId);
 
         // Re-generate via SSE (same as handleGenerate but no retry logic)
         const ctx = { completedEvent: null as Record<string, unknown> | null };

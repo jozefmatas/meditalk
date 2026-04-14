@@ -24,6 +24,20 @@ import { isAndroid } from "@/lib/platform";
 import { FileContextDialog } from "./file-context-dialog";
 import { FilePickerDrawer } from "./file-picker-drawer";
 
+/**
+ * Module-level tracking of pending file-context save PATCHes.
+ * `handleGenerate` awaits these before calling `/api/generate` so the server
+ * always reads the latest per-file directives from the database.
+ */
+const pendingContextSaves = new Map<string, Promise<void>>();
+
+/** Await (and clear) any in-flight file-context save for a visit. */
+export function awaitPendingContextSave(
+  visitId: string,
+): Promise<void> | undefined {
+  return pendingContextSaves.get(visitId);
+}
+
 export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
   pending?: boolean;
@@ -295,8 +309,8 @@ export function FilesContent({
         f.id in contexts ? { ...f, context: contexts[f.id] || null } : f,
       );
       onFilesChange(updatedFiles);
-      // Persist immediately via PATCH
-      fetch(`/api/encounters/${visitId}`, {
+      // Persist immediately via PATCH — tracked so handleGenerate can await it.
+      const savePromise: Promise<void> = fetch(`/api/encounters/${visitId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -306,7 +320,11 @@ export function FilesContent({
             ),
           },
         }),
-      }).catch((err) => logger.error("Failed to persist file contexts:", err));
+      })
+        .then(() => {})
+        .catch((err) => logger.error("Failed to persist file contexts:", err))
+        .finally(() => pendingContextSaves.delete(visitId));
+      pendingContextSaves.set(visitId, savePromise);
     },
     [files, onFilesChange, visitId],
   );
