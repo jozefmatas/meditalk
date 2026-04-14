@@ -206,6 +206,25 @@ Fingerprint diffing (SHA-256 over every pipeline component) detects whether diff
 - [web/src/lib/templates/index.ts](web/src/lib/templates/index.ts) — resolution logic
 - [web/src/lib/templates/types.ts](web/src/lib/templates/types.ts) — Template and TemplateSection interfaces
 
+### 8a. User Template Editor (planned)
+
+Doctors will be able to create and customize their own templates directly in the web app — similar to the admin template editor but scoped to their own account and without access to the system prompt.
+
+**Capabilities:**
+- **Create from scratch or clone** — start with a blank template or duplicate a built-in/system template as a starting point (`sourceTemplateId` tracks lineage)
+- **Section management** — add, remove, rename, and reorder top-level sections and subsections via drag-and-drop
+- **Per-section context** — optional guidance text per section (`TemplateSection.context`) that tells the LLM what content belongs there, what to emphasize, what to exclude
+- **Style and tone controls** — configure `styleGuide` (free-text style instructions, e.g. "Use formal medical language", "Keep sentences short and direct", "Write in third person") and `styleExamples` (name + text pairs showing desired output style for reference)
+- **i18n labels** — section labels are per-locale (`labels: Record<string, string>`) so templates work across sk/cs/en
+- **No system prompt access** — the `systemPrompt` field is only editable by admins. User templates inherit the default clinical system prompt. This keeps the core pipeline behavior consistent while letting doctors shape structure and style.
+
+**What users CANNOT change:**
+- The main system prompt (clinical rules, source priority, fact grounding)
+- Pipeline passes or model selection
+- Built-in/system templates (read-only; can be cloned)
+
+**Data model:** User templates live in the same `templates` table with `user_id` set (system templates have `user_id: null`). RLS ensures doctors only see their own templates + system templates.
+
 ---
 
 ## 9. Transcription
