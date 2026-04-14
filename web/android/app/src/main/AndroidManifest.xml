@@ -51,6 +51,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Camera: photo capture from file picker -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
     <!-- Storage: file uploads from device (API < 33 only; API 33+ uses file picker URI access) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 </manifest>
