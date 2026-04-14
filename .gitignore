@@ -21,7 +21,7 @@ build
 # misc
 .DS_Store
 *.pem
-pnpm-lock.yaml
+package-lock.json
 
 # debug
 npm-debug.log*
