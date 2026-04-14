@@ -1,6 +1,6 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-11_
+_Last updated: 2026-04-14_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
@@ -396,7 +396,7 @@ Separate Next.js app at `admin/`:
 
 ## 18. Testing
 
-- **589 tests** across the clinical pipeline, hooks, utilities
+- **617 tests** across the clinical pipeline, hooks, utilities
 - Every clinical module has matching `*.test.ts`
 - Route-level integration tests for `/api/generate` and `/api/regenerate`
 - Lint (ESLint) + Prettier enforced on every commit
@@ -420,7 +420,7 @@ Separate Next.js app at `admin/`:
 | AI — Transcription | ElevenLabs Scribe v2 |
 | Native | Capacitor 8 (iOS + Android) |
 | Email | Resend |
-| Package manager | npm |
+| Package manager | pnpm |
 
 ---
 

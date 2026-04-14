@@ -138,7 +138,17 @@ export async function POST(request: NextRequest) {
     const effectiveAudioPath =
       audioPath || pendingAudioPath || sessionAudioPath;
 
-    if (effectiveAudioPath) {
+    // Only enter recovery when:
+    // 1. The client explicitly asked for it (audioPath param set) — e.g.
+    //    client transcription failed, or restored session prepend.
+    // 2. OR there is no transcriptText yet — full recovery needed.
+    //
+    // When the client already sent transcriptText (successful client-side
+    // transcription) AND did NOT pass audioPath, skip recovery — the
+    // pendingAudioPath/sessionAudioPath in metadata is the SAME blob the
+    // client already transcribed via batch-transcribe. Re-transcribing it
+    // would double the transcript.
+    if (effectiveAudioPath && (audioPath || !transcriptText)) {
       logger.debug(
         `[generate] Recovery audio — client: ${audioPath || "NONE"}, pending: ${pendingAudioPath || "NONE"}, session: ${sessionAudioPath || "NONE"} → using: ${effectiveAudioPath}`,
       );
@@ -206,6 +216,10 @@ export async function POST(request: NextRequest) {
         }
       }
       lap("recovery-download-done");
+    } else if (effectiveAudioPath && transcriptText && !audioPath) {
+      logger.debug(
+        `[generate] Skipping recovery audio — client already sent ${transcriptText.length} char transcript (metadata audioPath: ${effectiveAudioPath})`,
+      );
     }
 
     // Fallback: if client-side transcription failed (transcriptText is empty)
@@ -368,8 +382,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // When transcriptText is available it goes into transcriptChunks (line 527)
+    // as a "Chunk" in the prompt. Exclude recording-sourced files from fileTexts
+    // so the same transcript doesn't also appear as a "File" — this caused
+    // double transcripts in generated sources on Android with pause/resume.
     const fileTexts = uploadedFiles
-      .filter((f) => f.extracted_text)
+      .filter(
+        (f) =>
+          f.extracted_text && !(transcriptText && f.source === "recording"),
+      )
       .map((f) => ({
         name: f.name,
         type: f.type,
@@ -377,17 +398,9 @@ export async function POST(request: NextRequest) {
         context: f.context || undefined,
       }));
 
-    // If streaming transcript is provided but no recording file captured it
-    // (e.g. file upload hasn't completed yet), inject it directly as content
-    if (transcriptText && !fileTexts.some((f) => f.text === transcriptText)) {
-      fileTexts.push({
-        name: "recording-transcript",
-        type: "text/plain",
-        text: transcriptText,
-        context: undefined,
-      });
-
-      // Also persist transcript to metadata for ResourcesPanel
+    // Persist transcript to metadata for ResourcesPanel display.
+    // (No need to add to fileTexts — transcriptChunks already carries it.)
+    if (transcriptText) {
       await mergeVisitMetadata(supabase, visitId, {
         transcript: transcriptText,
       });

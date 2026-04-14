@@ -260,7 +260,7 @@
     },
     "specialties": {
       "general_practice": "Všeobecné lekárstvo",
-      "internal_medicine": "Interné lekárstvo",
+      "internal_medicine": "Vnútorné lekárstvo",
       "cardiology": "Kardiológia",
       "pulmonology": "Pneumológia",
       "gastroenterology": "Gastroenterológia",
@@ -329,7 +329,7 @@
     "specialty": "Špecializácia",
     "specialtyAll": "Všetky",
     "open": "Otvoriť",
-    "templatesCount": "{count} šablón",
+    "templatesCount": "{count, plural, one {# šablóna} few {# šablóny} other {# šablón}}",
     "useTemplate": "Použiť šablónu",
     "system": "Systémová",
     "noContext": "Žiadny ďalší kontext"

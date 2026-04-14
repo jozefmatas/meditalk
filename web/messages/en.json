@@ -329,7 +329,7 @@
     "specialty": "Specialty",
     "specialtyAll": "All",
     "open": "Open",
-    "templatesCount": "{count} templates",
+    "templatesCount": "{count, plural, one {# template} other {# templates}}",
     "useTemplate": "Use template",
     "system": "System",
     "noContext": "No additional context"

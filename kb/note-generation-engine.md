@@ -1,6 +1,6 @@
 # MediTalk Note-Generation Engine
 
-_Last updated: 2026-04-13_
+_Last updated: 2026-04-14_
 
 This document is the **canonical reference** for how a medical encounter turns into a finalized clinical note in MediTalk. It exists so we can refine, refactor, and debug the pipeline without having to re-derive its shape from source code every time.
 
@@ -168,6 +168,8 @@ The server downloads and transcribes `audioPath`, then **prepends** it to `trans
 **Pause-time transcription on native:** When recording is paused on native, the cumulative blob is uploaded to storage. Transcription uses `transcribeFromPath` (storage path → server-side download) instead of `transcribeBlob` (FormData) to bypass Vercel's 4.5 MB body limit — native WAV recordings at 16 kHz can be 25+ MB. Web recordings use `transcribeBlob` since compressed webm/m4a blobs are typically small enough.
 
 **Server-side audio recovery:** The `/api/generate` route independently resolves an effective audio path from three sources (in priority order): (1) client-provided `audioPath`, (2) `metadata.generation_pending.audioPath`, (3) `metadata.recording_session.audioPath`. This belt-and-suspenders approach ensures recovery works even when the client fails to pass the path. Recovery transcription includes a single retry with 2s delay for transient failures (download errors, ElevenLabs timeouts, empty transcriptions).
+
+**Double-transcription guard:** Recovery audio transcription is only entered when: (1) the client explicitly passed `audioPath` (e.g. client transcription failed, or restored session prepend), OR (2) there is no `transcriptText` yet (full recovery needed). When the client already sent `transcriptText` (successful client-side batch transcription) AND did NOT pass `audioPath`, recovery is **skipped** — the `pendingAudioPath`/`sessionAudioPath` in metadata is the same blob the client already transcribed via `/api/batch-transcribe`, and re-transcribing it would double the transcript. The guard condition: `if (effectiveAudioPath && (audioPath || !transcriptText))`.
 
 **No blob path:** If there is no blob (doctor-notes-only encounter, or restored session with no new recording), `transcriptText` is null. The generate route then falls back to `metadata.transcript` (saved from pause-time transcription) via `getTranscript()` from [encounters/sources.ts](web/src/lib/encounters/sources.ts). If neither `transcriptText` nor `metadata.transcript` exist, the pipeline relies on doctor notes and uploaded files alone.
 
@@ -869,7 +871,7 @@ Plus route-level integration tests in:
 - [web/src/app/api/generate/route.test.ts](web/src/app/api/generate/route.test.ts)
 - [web/src/app/api/regenerate/route.test.ts](web/src/app/api/regenerate/route.test.ts)
 
-Total test suite as of this writing: **589 tests, all passing.**
+Total test suite as of this writing: **617 tests, all passing.**
 
 ---
 
@@ -910,6 +912,7 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | `requestData()` corrupting mp4 container on Safari iOS (post-resume audio loss) | `requestData()` is **skipped on mp4** — `pause()` calls `recorder.pause()` directly; all data captured in one clean blob on `stop()`. Trade-off: no pause-time snapshot/upload on Safari. Non-mp4 browsers still use `requestData()` with feature-detection guard + 500ms timeout. |
 | `getSupportedMimeType()` returning `""` on exotic browsers (recorder crash)     | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`.                                                                                                                                                                                               |
 | Native foreground-service teardown disrupting WebView network (TypeError)       | `audioRecoveryPath = uploadedPath` safety net in `handleGenerate`/`handleAdjustGenerate` — server downloads and transcribes from storage when client-side transcription fails entirely.                                                                                            |
+| Server-side recovery re-transcribing audio that client already transcribed     | Double-transcription guard: `if (effectiveAudioPath && (audioPath \|\| !transcriptText))` — skips recovery when client sent `transcriptText` without `audioPath`, since the metadata audio path is the same blob the client already transcribed.                                   |
 | Doctor notes auto-save failing silently                                         | `useSaveStatus` hook with visual indicator + single retry after 3s. Toast errors on recording.                                                                                                                                                                                     |
 | Server dying mid-generation (encounter stuck in "processing")                   | `generation_pending.startedAt` timestamp + client auto-correction resets to "started" after 3 min. Polling hook also has 180s timeout + `onPollTimeout` auto-resume (once per page load).                                                                                          |
 | Multiple files finishing extraction at once (redundant client refreshes)        | 500ms debounce on `extraction-complete` event handler batches into a single `refreshEncounter()`.                                                                                                                                                                                  |

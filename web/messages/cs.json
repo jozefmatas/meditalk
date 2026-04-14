@@ -329,7 +329,7 @@
     "specialty": "Specializace",
     "specialtyAll": "Všechny",
     "open": "Otevřít",
-    "templatesCount": "{count} šablon",
+    "templatesCount": "{count, plural, one {# šablona} few {# šablony} other {# šablon}}",
     "useTemplate": "Použít šablonu",
     "system": "Systémová",
     "noContext": "Žádný další kontext"
