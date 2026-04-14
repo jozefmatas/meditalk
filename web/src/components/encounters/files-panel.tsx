@@ -22,6 +22,7 @@ import type { FileMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 import { isAndroid } from "@/lib/platform";
 import { FileContextDialog } from "./file-context-dialog";
+import { FilePickerDrawer } from "./file-picker-drawer";
 
 export interface EncounterFile extends FileMetadata {
   /** True if file is saved to IndexedDB but upload pending */
@@ -72,6 +73,7 @@ export function FilesContent({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [contextDialogOpen, setContextDialogOpen] = useState(false);
+  const [pickerDrawerOpen, setPickerDrawerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(
@@ -314,12 +316,10 @@ export function FilesContent({
       {/* Upload dropzone */}
       <button
         type="button"
-        onClick={async () => {
+        onClick={() => {
           if (isAndroid) {
-            const { StoragePermission } =
-              await import("@/lib/storage-permission");
-            const { granted } = await StoragePermission.request();
-            if (!granted) return;
+            setPickerDrawerOpen(true);
+            return;
           }
           inputRef.current?.click();
         }}
@@ -372,6 +372,34 @@ export function FilesContent({
         files={files}
         onSave={handleContextSave}
       />
+
+      {isAndroid && (
+        <FilePickerDrawer
+          open={pickerDrawerOpen}
+          onOpenChange={setPickerDrawerOpen}
+          onTakePhoto={async () => {
+            setPickerDrawerOpen(false);
+            const { takePhoto } = await import("@/lib/android-file-picker");
+            const files = await takePhoto();
+            if (files.length > 0) uploadFiles(files);
+          }}
+          onChooseFromGallery={async () => {
+            setPickerDrawerOpen(false);
+            const { pickFromGallery } =
+              await import("@/lib/android-file-picker");
+            const files = await pickFromGallery();
+            if (files.length > 0) uploadFiles(files);
+          }}
+          onFileManager={async () => {
+            setPickerDrawerOpen(false);
+            const { StoragePermission } =
+              await import("@/lib/storage-permission");
+            const { granted } = await StoragePermission.request();
+            if (!granted) return;
+            inputRef.current?.click();
+          }}
+        />
+      )}
 
       {/* File list */}
       {files.length > 0 && (
