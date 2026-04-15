@@ -1,7 +1,7 @@
 import { anthropic } from "../anthropic";
 import { logUsage, type UsageContext } from "../usage";
 import type { SupportedLanguage } from "../types";
-import type { ClinicalAnalysis } from "./types";
+import type { ClinicalAnalysis, CandidateIcdCode } from "./types";
 import { REGIONAL_TERMS } from "./regional-terms";
 import { CLINICAL_CONCEPTS } from "./clinical-concepts";
 import { getSpecialtyPromptPack } from "./specialty-prompts";
@@ -117,6 +117,20 @@ export async function runClinicalAnalysis(
 }
 
 /**
+ * Pre-render the ICD-10 block that Opus must copy verbatim into the
+ * Záver/Assessment section. Sorted alphabetically by code so the output
+ * is deterministic regardless of the order Pass 1 emitted them.
+ */
+export function buildPreRenderedIcdBlock(
+  candidates: CandidateIcdCode[],
+): string {
+  return [...candidates]
+    .sort((a, b) => a.code.localeCompare(b.code))
+    .map((c) => `- ${c.code} ${c.description}`)
+    .join("\n");
+}
+
+/**
  * Augment a base system prompt with specialty context, ICD codes,
  * matched concepts, and medication validation from clinical analysis.
  */
@@ -175,13 +189,11 @@ RULES:
 - If a medication is marked [not found in approved list], still include it in the clinical note using EXACTLY the name the doctor dictated — do NOT add any warning label, bracket, or annotation around it`);
   }
 
-  // Add ICD code candidates
+  // Add pre-rendered ICD block — Opus must copy this verbatim
   if (analysis.candidateIcdCodes.length > 0) {
-    const icdList = analysis.candidateIcdCodes
-      .map((c) => `  ${c.code}: ${c.description} (confidence: ${c.confidence})`)
-      .join("\n");
+    const icdBlock = buildPreRenderedIcdBlock(analysis.candidateIcdCodes);
     parts.push(
-      `\nCANDIDATE ICD-10 CODES — these are the ONLY codes you may emit in this report. Use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions. Do NOT add any other ICD codes, even if labs, vital signs, or symptoms suggest them — any code not in this list has already been judged insufficiently grounded by a deterministic certainty filter and MUST NOT appear anywhere in your output:\n${icdList}`,
+      `\nICD-10 BLOCK (VERBATIM) — Copy the following block EXACTLY as-is into the Záver/Assessment section. Do NOT reorder, add, remove, rephrase, or modify any line. Do NOT add any other ICD codes. Every code below has been validated by a deterministic certainty filter — codes not in this list MUST NOT appear anywhere in your output:\n${icdBlock}`,
     );
   }
 

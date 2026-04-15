@@ -153,8 +153,8 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 | **Pass 1.6a** — Fact Validation | Pure TypeScript | Verify evidence appears in claimed source, fuzzy matching, cross-source fallback, medication correction |
 | **Pass 1.6b** — Fact Resolution | Pure TypeScript | Detect speaker self-corrections, drop superseded facts |
 | **Pass 1.7** — ICD Certainty Filter | Pure TypeScript | Drop ICD candidates not grounded in diagnoses/history-subcategory facts |
-| **Prompt Assembly** | — | Build system prompt (template + specialty pack + filtered ICDs + concepts) + user message (validated facts + sources) |
-| **Pass 2** — Generation | Opus 4.6 (temp=0) | Single call → JSON with one key per section + letter + title, streamed via SSE |
+| **Prompt Assembly** | Pure TypeScript | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
+| **Pass 2** — Generation | Opus 4.6 (temp=0) | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE |
 | **Pass 2.5** — Post-Generation | Pure TypeScript | Strip ungrounded ICD codes from output, validate title |
 
 ### Streaming Protocol (SSE events):
@@ -179,6 +179,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 - [web/src/lib/clinical/fact-validator.ts](web/src/lib/clinical/fact-validator.ts) — Pass 1.6a
 - [web/src/lib/clinical/fact-resolver.ts](web/src/lib/clinical/fact-resolver.ts) — Pass 1.6b
 - [web/src/lib/clinical/icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) — Pass 1.7
+- [web/src/lib/clinical/fact-section-assigner.ts](web/src/lib/clinical/fact-section-assigner.ts) — deterministic fact-to-section assignment
 - [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts) — Pass 2 + prompt builders + Pass 2.5
 - [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
 
@@ -406,8 +407,8 @@ Separate Next.js app at `admin/`:
 ## 17. Key Guarantees
 
 1. **Every fact has verbatim evidence** — Pass 1.5 requires quotes; Pass 1.6a drops unverifiable facts
-2. **Every ICD code is grounded** — Pass 1.7 drops ungrounded candidates; Pass 2.5 defensively strips any Opus snuck past
-3. **Deterministic pipeline** — LLM non-determinism absorbed by pure-TypeScript gates (1.6a, 1.6b, 1.7, 2.5)
+2. **Every ICD code is grounded and pre-rendered** — Pass 1.7 drops ungrounded candidates; `buildPreRenderedIcdBlock` sorts and formats them; Opus copies the block VERBATIM; Pass 2.5 defensively strips any Opus snuck past
+3. **Deterministic pipeline** — LLM non-determinism absorbed by pure-TypeScript gates (1.6a, 1.6b, 1.7, fact-section-assigner, pre-rendered ICD, 2.5). Template specialty overrides Pass 1 inference. Transcript omitted when facts present.
 4. **No hallucinated clinical content** — Opus told "validated facts are the factual contract"
 5. **Atomic metadata** — concurrent writers can't clobber each other thanks to JSONB merge RPC
 

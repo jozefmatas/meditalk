@@ -56,9 +56,9 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 │                                                             │
 │  Prompt  ─ buildTemplateSystemPrompt + buildEnriched...     │
 │          → system prompt = template + specialty pack +      │
-│            filtered ICDs + concepts + clusters              │
-│          → user msg  = validated facts (contract) +         │
-│            numbered source material                         │
+│            pre-rendered ICD block (VERBATIM) + concepts     │
+│          → user msg  = facts pre-assigned to sections       │
+│            (transcript omitted when facts present)          │
 │                                                             │
 │  Pass 2  ─ generateFromTemplate       Opus 4.6   (t=0)     │
 │           → streamed SSE of section JSON → HTML note +      │
@@ -89,8 +89,8 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 
 1. **Every fact has verbatim evidence.** Pass 1.5 refuses to emit a fact without a quote; Pass 1.6a drops any fact whose quote isn't in the source.
 2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in `diagnoses` or history-subcategory facts (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`); Pass 2.5 defensively strips any Opus snuck past the prompt.
-3. **Same inputs → same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates.
-4. **No hallucinated clinical content.** Opus is told: _"these are the ONLY codes you may emit; the validated facts are the factual contract."_
+3. **Same inputs → same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates. ICD codes are pre-rendered in sorted order (VERBATIM copy), facts are pre-assigned to template sections, and transcript is omitted when facts are present — Opus acts as a formatter, not a reasoner.
+4. **No hallucinated clinical content.** Opus receives pre-rendered ICD codes (VERBATIM block), pre-assigned facts (per-section), and no raw transcript to deviate from. The validated facts are the sole factual contract.
 
 ---
 
@@ -588,26 +588,23 @@ The filter rewrites `clinicalAnalysis.candidateIcdCodes` in place so everything 
 
 ### 9.1 Enriched system prompt
 
-File: [web/src/lib/clinical/pipeline.ts:123](web/src/lib/clinical/pipeline.ts#L123) — `buildEnrichedSystemPrompt`
+File: [web/src/lib/clinical/pipeline.ts:135](web/src/lib/clinical/pipeline.ts#L135) — `buildEnrichedSystemPrompt`
 
 The base template prompt gets augmented with:
 
-1. **Specialty prompt pack** — addendum, terminology notes, emphasized sections from [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts).
+1. **Specialty prompt pack** — addendum, terminology notes, emphasized sections from [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts). When the template declares a `specialties` field, the template specialty overrides Pass 1's `inferredSpecialty` — eliminates cross-run variance from LLM specialty detection.
 2. **Medication verification block** — exact names resolved against the approved medication index. Medications not found in the approved list are included using the doctor's exact dictated name without any warning label or annotation (no `[NEOVERENÝ LIEK]` markers in the output).
-3. **CANDIDATE ICD-10 CODES** — the **filtered** list from Pass 1.7 with a hard constraint:
-
-   > _"these are the ONLY codes you may emit in this report. Use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions. Do NOT add any other ICD codes, even if labs, vital signs, or symptoms suggest them — any code not in this list has already been judged insufficiently grounded by a deterministic certainty filter and MUST NOT appear anywhere in your output"_
-
+3. **ICD-10 BLOCK (VERBATIM)** — the **filtered** list from Pass 1.7, pre-rendered by `buildPreRenderedIcdBlock()` which sorts candidates alphabetically by code and formats as `- {code} {description}`. The prompt instructs Opus to copy this block verbatim into the Záver/Assessment section — no reordering, adding, removing, or rephrasing. Confidence labels are excluded (internal metadata only).
 4. **Matched clinical concepts** and **problem clusters** — hints for structuring the Assessment section.
 
 ### 9.2 User message
 
-File: [web/src/lib/anthropic.ts:133](web/src/lib/anthropic.ts#L133) — `buildTemplateUserMessage`
+File: [web/src/lib/anthropic.ts:157](web/src/lib/anthropic.ts#L157) — `buildTemplateUserMessage`
 
 Block order:
 
-1. **VALIDATED CLINICAL FACTS** — `formatFactsForPrompt(validatedFacts)` renders the 15 categories as a terse bullet list with routing hints (e.g. `"Medications → section LA/Meds"`, `"Substance Use → section Ab"`). This is introduced as the _factual contract_: every statement in the report must trace back to one of these facts.
-2. **SOURCE MATERIAL** — numbered transcript chunks. When facts are present, these are marked "phrasing and context reference only" — Opus should not extract new facts from them, only phrasing.
+1. **VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS** — when `sectionLabels` are available, `assignFactsToSections()` from [fact-section-assigner.ts](web/src/lib/clinical/fact-section-assigner.ts) deterministically maps each fact category to a template section ID using keyword matching against section labels and contexts. The output groups facts by section (e.g. `[Section "RA" (s_ra)]: - [Family History] otec DM`). Opus is told to place ONLY the listed facts into each section and NOT move facts between sections. Falls back to `formatFactsForPrompt()` (category-grouped with routing hints) when section labels are unavailable.
+2. **TRANSCRIPT CHUNKS** — numbered chunks. **Omitted entirely when validated facts are present** — the facts block becomes the sole source of clinical truth, eliminating the LLM's ability to deviate by picking up details from the raw transcript. Only included in the legacy no-facts path.
 3. **UPLOADED FILE CONTENTS** — numbered extracted texts. Each file with a `context` value gets a `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` line inserted between the file header and the extracted text.
 4. **DOCTOR'S ADDITIONAL NOTES** — verbatim.
 5. Final instruction: return a single JSON object with one key per section ID, plus `letter` and `title`.
@@ -862,7 +859,8 @@ Everything in the clinical pipeline has unit tests in [web/src/lib/clinical/](we
 | [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                    | 27 tests including the user's EMS regression: candidates `[I21.2, I10, R07.2, E11.91, E78.5]` with diagnosis facts `["akútny infarkt myokardu", "artériová hypertenzia"]` → keeps exactly `[I21.2, I10]`. Also covers short-word whitelist, bidirectional stem matching, chapter strictness, determinism, and purity. |
 | [icd-validation.test.ts](web/src/lib/clinical/icd-validation.test.ts)                  | Canonical description replacement for hallucinated ICDs.                                                                                                                                                                                                                                                              |
 | [json-repair.test.ts](web/src/lib/clinical/json-repair.test.ts)                        | `extractJson` robust fallback parsing.                                                                                                                                                                                                                                                                                |
-| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                              | `buildEnrichedSystemPrompt` — specialty, ICD, concepts, medications blocks.                                                                                                                                                                                                                                           |
+| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                              | `buildEnrichedSystemPrompt` — specialty, pre-rendered ICD block (VERBATIM), concepts, medications blocks. `buildPreRenderedIcdBlock` — alphabetical sort, no confidence labels, determinism, immutability.                                                                                                             |
+| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts)    | `assignFactsToSections` — category-to-section mapping via context keywords and label abbreviations. `formatAssignedFactsForPrompt` — section-grouped output, unassigned fallback, ordering.                                                                                                                          |
 | [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                        | SHA-256 stability, stable stringify, `diffFingerprints` component-level diff.                                                                                                                                                                                                                                         |
 | [wav-builder.test.ts](web/src/lib/wav-builder.test.ts)                                 | WAV header construction, PCM accumulation, `extractNewChunks` partial extraction, `resetExtraction`, `reset`.                                                                                                                                                                                                         |
 | [sources.test.ts](web/src/lib/encounters/sources.test.ts)                              | `getTranscript`, `getDoctorNotes`, `getFileTexts` — null/empty/happy-path, recording file exclusion.                                                                                                                                                                                                                  |

@@ -1,4 +1,8 @@
-export { runClinicalAnalysis, buildEnrichedSystemPrompt } from "./pipeline";
+export {
+  runClinicalAnalysis,
+  buildEnrichedSystemPrompt,
+  buildPreRenderedIcdBlock,
+} from "./pipeline";
 export { extractJson } from "./json-repair";
 export { getSpecialtyPromptPack } from "./specialty-prompts";
 export {
@@ -75,6 +79,10 @@ export {
   filterCertainIcdCandidates,
   extractContentTokens,
 } from "./icd-certainty";
+export {
+  assignFactsToSections,
+  formatAssignedFactsForPrompt,
+} from "./fact-section-assigner";
 export type {
   CertaintyFilterResult,
   DroppedIcdCandidate,

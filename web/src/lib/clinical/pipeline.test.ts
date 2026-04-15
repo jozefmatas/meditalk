@@ -13,8 +13,11 @@ vi.mock("@/lib/env/client", () => ({
   },
 }));
 
-import { buildEnrichedSystemPrompt } from "./pipeline";
-import type { ClinicalAnalysis } from "./types";
+import {
+  buildEnrichedSystemPrompt,
+  buildPreRenderedIcdBlock,
+} from "./pipeline";
+import type { ClinicalAnalysis, CandidateIcdCode } from "./types";
 
 // ── Fixtures ──
 
@@ -56,7 +59,7 @@ describe("buildEnrichedSystemPrompt", () => {
     expect(result).toContain("TERMINOLOGY");
   });
 
-  it("includes candidate ICD codes when present", () => {
+  it("includes pre-rendered ICD block with VERBATIM instruction", () => {
     const analysis = makeAnalysis({
       candidateIcdCodes: [
         {
@@ -74,19 +77,21 @@ describe("buildEnrichedSystemPrompt", () => {
       ],
     });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en");
-    expect(result).toContain("CANDIDATE ICD-10 CODES");
-    expect(result).toContain("I10");
-    expect(result).toContain("Essential hypertension");
-    expect(result).toContain("E11.9");
-    expect(result).toContain("Type 2 diabetes mellitus");
-    expect(result).toContain("high");
-    expect(result).toContain("medium");
+    expect(result).toContain("ICD-10 BLOCK (VERBATIM)");
+    expect(result).toContain("- E11.9 Type 2 diabetes mellitus");
+    expect(result).toContain("- I10 Essential hypertension");
+    // Confidence labels should NOT appear (they're internal metadata)
+    expect(result).not.toContain("(confidence:");
+    // Codes should be sorted alphabetically (E before I)
+    const e11Pos = result.indexOf("E11.9");
+    const i10Pos = result.indexOf("I10 ");
+    expect(e11Pos).toBeLessThan(i10Pos);
   });
 
   it("omits ICD section when no candidate codes", () => {
     const analysis = makeAnalysis({ candidateIcdCodes: [] });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en");
-    expect(result).not.toContain("CANDIDATE ICD-10 CODES");
+    expect(result).not.toContain("ICD-10 BLOCK");
   });
 
   it("includes matched concepts when present", () => {
@@ -189,9 +194,68 @@ describe("buildEnrichedSystemPrompt", () => {
     // Should have all sections
     expect(result).toContain(BASE_PROMPT);
     expect(result).toContain("TERMINOLOGY");
-    expect(result).toContain("CANDIDATE ICD-10 CODES");
+    expect(result).toContain("ICD-10 BLOCK (VERBATIM)");
     expect(result).toContain("IDENTIFIED CLINICAL CONCEPTS");
     expect(result).toContain("PROBLEM CLUSTERS");
     expect(result).toContain("VERIFIED MEDICATIONS");
+  });
+});
+
+describe("buildPreRenderedIcdBlock", () => {
+  function icd(
+    code: string,
+    description: string,
+    confidence: "high" | "medium" | "low" = "high",
+  ): CandidateIcdCode {
+    return { code, description, confidence, sourceConceptIds: [] };
+  }
+
+  it("sorts candidates alphabetically by code", () => {
+    const block = buildPreRenderedIcdBlock([
+      icd("I10", "Essential hypertension"),
+      icd("E11.9", "Type 2 DM"),
+      icd("I21.2", "Acute MI"),
+    ]);
+    const lines = block.split("\n");
+    expect(lines[0]).toBe("- E11.9 Type 2 DM");
+    expect(lines[1]).toBe("- I10 Essential hypertension");
+    expect(lines[2]).toBe("- I21.2 Acute MI");
+  });
+
+  it("excludes confidence labels", () => {
+    const block = buildPreRenderedIcdBlock([
+      icd("I10", "Essential hypertension", "high"),
+      icd("E11.9", "Type 2 DM", "low"),
+    ]);
+    expect(block).not.toContain("high");
+    expect(block).not.toContain("low");
+    expect(block).not.toContain("confidence");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(buildPreRenderedIcdBlock([])).toBe("");
+  });
+
+  it("does not mutate the input array", () => {
+    const candidates = [
+      icd("I10", "Essential hypertension"),
+      icd("E11.9", "Type 2 DM"),
+    ];
+    const snapshot = JSON.parse(JSON.stringify(candidates));
+    buildPreRenderedIcdBlock(candidates);
+    expect(candidates).toEqual(snapshot);
+  });
+
+  it("produces identical output across invocations", () => {
+    const candidates = [
+      icd("I21.2", "Acute MI"),
+      icd("I10", "Essential hypertension"),
+      icd("E78.5", "Hyperlipidemia"),
+    ];
+    const a = buildPreRenderedIcdBlock(candidates);
+    const b = buildPreRenderedIcdBlock(candidates);
+    const c = buildPreRenderedIcdBlock(candidates);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
   });
 });

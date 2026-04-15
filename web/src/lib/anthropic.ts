@@ -11,9 +11,18 @@ import {
   resolveIcdCodes,
 } from "./clinical/icd-index";
 import { extractSectionsFromStream } from "./api/sse";
-import type { CandidateIcdCode, ClinicalAnalysis } from "./clinical/types";
+import type {
+  CandidateIcdCode,
+  ClinicalAnalysis,
+  SpecialtyId,
+} from "./clinical/types";
+import { getSpecialtyPromptPack } from "./clinical/specialty-prompts";
 import type { ExtractedFacts } from "./clinical/fact-extraction";
 import { countFacts, formatFactsForPrompt } from "./clinical/fact-validator";
+import {
+  assignFactsToSections,
+  formatAssignedFactsForPrompt,
+} from "./clinical/fact-section-assigner";
 import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
@@ -144,10 +153,12 @@ TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 /**
  * Build the user message for template-based generation.
  *
- * When `validatedFacts` is provided (Phase 2), the message opens with a
- * VALIDATED CLINICAL FACTS block that acts as the factual contract: every
- * statement in the generated report must correspond to one of these facts.
- * The source material that follows is included for phrasing/context only.
+ * When `validatedFacts` is provided together with `sectionLabels`, facts
+ * are deterministically assigned to template sections before reaching Opus.
+ * This eliminates cross-run variance from Opus deciding where facts go.
+ *
+ * When section info is not available, falls back to category-grouped
+ * `formatFactsForPrompt` (legacy path).
  */
 export function buildTemplateUserMessage(
   chunks: string[],
@@ -155,26 +166,48 @@ export function buildTemplateUserMessage(
   doctorNotes?: string,
   fileTexts?: { name: string; type: string; text: string; context?: string }[],
   validatedFacts?: ExtractedFacts,
+  sectionLabels?: Record<string, string>,
+  sectionContexts?: Record<string, string>,
 ): string {
   const allIds = flattenSectionIds(template);
   const parts: string[] = [];
 
   if (validatedFacts && countFacts(validatedFacts) > 0) {
-    const factList = formatFactsForPrompt(validatedFacts);
-    parts.push(
-      `VALIDATED CLINICAL FACTS (use ONLY these facts as the factual basis for the report — do NOT introduce clinical details that are not in this list):\n\n${factList}`,
-    );
+    // When section labels are available, assign facts to sections
+    // deterministically so Opus doesn't choose where each fact goes.
+    if (sectionLabels && Object.keys(sectionLabels).length > 0) {
+      const assignment = assignFactsToSections(
+        validatedFacts,
+        sectionLabels,
+        sectionContexts,
+      );
+      const factBlock = formatAssignedFactsForPrompt(assignment, sectionLabels);
+      parts.push(
+        `VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS (place ONLY the listed facts into each section — do NOT move facts between sections, do NOT introduce clinical details that are not in this list):\n\n${factBlock}`,
+      );
+    } else {
+      // Fallback: category-grouped facts without section assignment
+      const factList = formatFactsForPrompt(validatedFacts);
+      parts.push(
+        `VALIDATED CLINICAL FACTS (use ONLY these facts as the factual basis for the report — do NOT introduce clinical details that are not in this list):\n\n${factList}`,
+      );
+    }
   }
 
-  if (chunks.length > 0) {
+  // When validated facts are present they are the sole source of clinical
+  // truth — including the raw transcript would give the LLM room to deviate
+  // from the fact-based contract, producing cross-run inconsistencies.
+  // Only include transcript when there are no validated facts (legacy path).
+  if (
+    chunks.length > 0 &&
+    !(validatedFacts && countFacts(validatedFacts) > 0)
+  ) {
     const numberedChunks = chunks
       .map((chunk, i) => `[Chunk ${i + 1}]:\n${chunk}`)
       .join("\n\n");
-    const heading =
-      validatedFacts && countFacts(validatedFacts) > 0
-        ? "SOURCE MATERIAL — TRANSCRIPT CHUNKS (phrasing and context reference only; every clinical fact must trace back to the VALIDATED CLINICAL FACTS block above)"
-        : "Here are the transcript chunks from a medical consultation";
-    parts.push(`${heading}:\n\n${numberedChunks}`);
+    parts.push(
+      `Here are the transcript chunks from a medical consultation:\n\n${numberedChunks}`,
+    );
   }
 
   if (fileTexts && fileTexts.length > 0) {
@@ -373,6 +406,8 @@ export async function generateFromTemplate(
     doctorNotes,
     fileTexts,
     validatedFacts,
+    sectionLabels,
+    sectionContexts,
   );
 
   // Build system prompt, enriched with specialty context if analysis available
@@ -383,6 +418,17 @@ export async function generateFromTemplate(
     sectionContexts,
   );
   if (clinicalAnalysis) {
+    // When the template declares a specialty, use it instead of Pass 1's
+    // inferred specialty — eliminates one source of cross-run variance.
+    const templateSpecialty = template.specialties?.[0] as
+      | SpecialtyId
+      | undefined;
+    if (templateSpecialty && getSpecialtyPromptPack(templateSpecialty)) {
+      clinicalAnalysis = {
+        ...clinicalAnalysis,
+        inferredSpecialty: templateSpecialty,
+      };
+    }
     systemPrompt = buildEnrichedSystemPrompt(
       systemPrompt,
       clinicalAnalysis,
