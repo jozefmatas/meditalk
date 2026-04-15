@@ -15,7 +15,6 @@ vi.mock("@/lib/env/client", () => ({
 
 import {
   buildFactBasedSystemPrompt,
-  buildLetterInstruction,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
   buildTitleSystemPrompt,
@@ -445,7 +444,7 @@ describe("buildFactBasedSystemPrompt", () => {
     expect(prompt).toContain("English");
     expect(prompt).toContain("FORMATTING");
     expect(prompt).toContain("Return valid JSON");
-    expect(prompt).toContain('"letter"');
+    expect(prompt).not.toContain('"letter"');
     expect(prompt).toContain('"title"');
   });
 
@@ -503,17 +502,6 @@ describe("buildFactBasedSystemPrompt", () => {
     expect(prompt).toContain("telegraphic sentences");
   });
 
-  it("includes patient letter instruction block", () => {
-    const prompt = buildFactBasedSystemPrompt(
-      SIMPLE_TEMPLATE,
-      "en",
-      SECTION_LABELS,
-    );
-    expect(prompt).toContain("PATIENT LETTER");
-    expect(prompt).toContain("non-medical reader");
-    expect(prompt).toContain("Do NOT include ICD codes");
-  });
-
   it("is significantly shorter than the full system prompt", () => {
     const factPrompt = buildFactBasedSystemPrompt(
       SIMPLE_TEMPLATE,
@@ -527,45 +515,6 @@ describe("buildFactBasedSystemPrompt", () => {
     );
     // Fact-based prompt should be at least 30% shorter
     expect(factPrompt.length).toBeLessThan(fullPrompt.length * 0.7);
-  });
-});
-
-describe("buildLetterInstruction", () => {
-  it("includes the language name", () => {
-    expect(buildLetterInstruction("en")).toContain("English");
-    expect(buildLetterInstruction("sk")).toContain("Slovak");
-    expect(buildLetterInstruction("cs")).toContain("Czech");
-  });
-
-  it("specifies patient-friendly, non-medical language", () => {
-    const instr = buildLetterInstruction("sk");
-    expect(instr).toContain("non-medical reader");
-    expect(instr).toContain("Avoid jargon");
-  });
-
-  it("forbids ICD codes in the letter", () => {
-    const instr = buildLetterInstruction("en");
-    expect(instr).toContain("Do NOT include ICD codes");
-  });
-
-  it("specifies concise length", () => {
-    const instr = buildLetterInstruction("en");
-    expect(instr).toContain("3 to 6 sentences");
-  });
-
-  it("is included in both fact-based and full system prompts", () => {
-    const factPrompt = buildFactBasedSystemPrompt(
-      SIMPLE_TEMPLATE,
-      "en",
-      SECTION_LABELS,
-    );
-    const fullPrompt = buildTemplateSystemPrompt(
-      SIMPLE_TEMPLATE,
-      "en",
-      SECTION_LABELS,
-    );
-    expect(factPrompt).toContain("PATIENT LETTER");
-    expect(fullPrompt).toContain("PATIENT LETTER");
   });
 });
 
@@ -724,7 +673,7 @@ describe("buildTemplateUserMessage", () => {
     expect(msg).toContain('"subjective"');
     expect(msg).toContain('"objective"');
     expect(msg).toContain('"assessment"');
-    expect(msg).toContain('"letter"');
+    expect(msg).not.toContain('"letter"');
     expect(msg).toContain('"title"');
   });
 

@@ -29,7 +29,6 @@ export interface Encounter {
   visit_type: EncounterType;
   status: EncounterStatus;
   encounter_note: string | null;
-  patient_letter: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
@@ -72,7 +71,6 @@ export interface UpdateEncounterRequest {
   status?: EncounterStatus;
   language?: SupportedLanguage;
   encounter_note?: string;
-  patient_letter?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -83,7 +81,6 @@ export interface SearchResponse {
 
 export interface GenerateResponse {
   generatedNote: string;
-  letter: string;
   suggestedTitle?: string;
   usedChunks: string[];
   templateId: string;

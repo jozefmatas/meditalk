@@ -18,7 +18,7 @@ interface UseGenerationPollingOptions {
   setGeneratedNoteHtml: (html: string) => void;
   setCachedTemplate: (
     templateId: string,
-    data: { generatedNote: string; letter: string },
+    data: { generatedNote: string },
   ) => void;
   /** Called when the polling loop times out without finding a completed generation.
    *  Used by use-encounter-generation to auto-resume lost generations. */
@@ -140,7 +140,6 @@ export function useGenerationPolling({
                 ?.template_id as string) || DEFAULT_TEMPLATE_ID;
             setCachedTemplate(tid, {
               generatedNote: updated.encounter_note,
-              letter: updated.patient_letter || "",
             });
           }
           if (updated.title) updateTitleRef.current(updated.title);

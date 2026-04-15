@@ -183,7 +183,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 
 ### Persistence (split save):
 
-1. Column update: `encounter_note`, `patient_letter`, `title`, `status: "to_review"`
+1. Column update: `encounter_note`, `title`, `status: "to_review"`
 2. Atomic metadata merge: `clinical_analysis`, `generation_fingerprint`, `generation_history`
 
 **Key files:**
@@ -295,7 +295,6 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
 | `language`       | text      | sk / cs / en                                                        |
 | `status`         | text      | started / recording / processing / to_review / completed / archived |
 | `encounter_note` | text      | Generated HTML note                                                 |
-| `patient_letter` | text      | Generated HTML letter                                               |
 | `metadata`       | jsonb     | All other data (see below)                                          |
 
 ### Metadata JSONB shape:

@@ -520,7 +520,6 @@ export function useEncounterGeneration({
                 ctx.completedEvent = event;
                 setCachedTemplate(capturedTemplateId, {
                   generatedNote: event.generatedNote as string,
-                  letter: (event.letter as string) || "",
                 });
                 setGeneratedNoteHtml(event.generatedNote as string);
 
@@ -537,7 +536,6 @@ export function useEncounterGeneration({
                   return {
                     ...prev,
                     encounter_note: event.generatedNote as string,
-                    patient_letter: event.letter as string,
                     status: "to_review",
                     ...(autoTitle ? { title: autoTitle } : {}),
                     metadata: {
@@ -871,7 +869,6 @@ export function useEncounterGeneration({
             ctx.completedEvent = event;
             setCachedTemplate(capturedTemplateId, {
               generatedNote: event.generatedNote as string,
-              letter: (event.letter as string) || "",
             });
             setGeneratedNoteHtml(event.generatedNote as string);
 
@@ -884,7 +881,6 @@ export function useEncounterGeneration({
               return {
                 ...prev,
                 encounter_note: event.generatedNote as string,
-                patient_letter: event.letter as string,
                 status: "to_review",
                 metadata: {
                   ...existingMeta,
@@ -1000,7 +996,6 @@ export function useEncounterGeneration({
       if (visit?.encounter_note) {
         setCachedTemplate(selectedTemplateId, {
           generatedNote: visit.encounter_note,
-          letter: visit.patient_letter || "",
         });
       }
 
@@ -1015,7 +1010,6 @@ export function useEncounterGeneration({
             ? {
                 ...prev,
                 encounter_note: cached.generatedNote,
-                patient_letter: cached.letter,
               }
             : prev,
         );
@@ -1025,7 +1019,6 @@ export function useEncounterGeneration({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             encounter_note: cached.generatedNote,
-            patient_letter: cached.letter,
             metadata: { template_id: newTemplateId },
           }),
         }).catch(() => {});
@@ -1101,7 +1094,6 @@ export function useEncounterGeneration({
               onComplete: (event) => {
                 setCachedTemplate(newTemplateId, {
                   generatedNote: event.generatedNote as string,
-                  letter: (event.letter as string) || "",
                 });
                 setGeneratedNoteHtml(event.generatedNote as string);
                 setVisit((prev) =>
@@ -1109,7 +1101,6 @@ export function useEncounterGeneration({
                     ? {
                         ...prev,
                         encounter_note: event.generatedNote as string,
-                        patient_letter: event.letter as string,
                       }
                     : prev,
                 );
@@ -1145,7 +1136,6 @@ export function useEncounterGeneration({
               ? {
                   ...prev,
                   encounter_note: cachedPrev.generatedNote,
-                  patient_letter: cachedPrev.letter,
                 }
               : prev,
           );
@@ -1236,7 +1226,6 @@ export function useEncounterGeneration({
         const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
         setCachedTemplate(tid, {
           generatedNote: data.encounter_note,
-          letter: data.patient_letter || "",
         });
       }
 

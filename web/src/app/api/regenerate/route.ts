@@ -100,7 +100,7 @@ export async function POST(request: NextRequest) {
     // legacy transcript_chunks are kept as fallback for old encounters.
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("id, language, metadata, encounter_note, patient_letter")
+      .select("id, language, metadata, encounter_note")
       .eq("id", visitId)
       .single();
 
@@ -212,7 +212,6 @@ export async function POST(request: NextRequest) {
     let streamModels: readonly string[];
     let systemPrompt: string;
     let userMessage: string;
-    let reuseLetterFromVisit = false;
     let operationType: "regenerate" | "rerender" | "reformat" = "regenerate";
     let validatedFacts: ExtractedFacts = emptyExtractedFacts();
     let factWarnings: string[] = [];
@@ -239,7 +238,6 @@ export async function POST(request: NextRequest) {
       // because facts are already validated/resolved and section assignment
       // is deterministic — no information loss from HTML → text → LLM → HTML.
       validatedFacts = cachedValidatedFacts;
-      reuseLetterFromVisit = true;
       operationType = "rerender";
       streamModels = GENERATION_MODELS;
 
@@ -286,7 +284,6 @@ export async function POST(request: NextRequest) {
     } else if (isTemplateChange) {
       // ─── LEGACY FAST PATH: Prose reformat for old encounters without facts ───
       const sectionMap = parseNoteToSectionMap(existingNote!, oldTemplate!);
-      reuseLetterFromVisit = true;
       operationType = "reformat";
 
       const currentSections = Object.entries(sectionMap)
@@ -569,23 +566,14 @@ Rules:
           return;
         }
 
-        let letter: string;
-        let suggestedTitle: string;
-
-        if (reuseLetterFromVisit) {
-          // Reformat path — keep existing letter and title
-          letter = (visit.patient_letter as string) || "";
+        delete parsed.letter; // ignored (feature removed)
+        let suggestedTitle =
+          typeof parsed.title === "string" ? parsed.title : "";
+        delete parsed.title;
+        const isReformatPath =
+          operationType === "rerender" || operationType === "reformat";
+        if (isReformatPath) {
           suggestedTitle = "";
-          delete parsed.letter;
-          delete parsed.title;
-        } else {
-          letter =
-            typeof parsed.letter === "string"
-              ? parsed.letter
-              : JSON.stringify(parsed.letter || "");
-          delete parsed.letter;
-          suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
-          delete parsed.title;
         }
 
         const sectionContents: Record<string, string> = {};
@@ -612,7 +600,7 @@ Rules:
         // which was prone to hallucinating details not present in the
         // primary diagnosis. Skipped on the reformat path (we keep the
         // existing title there).
-        if (!reuseLetterFromVisit) {
+        if (!isReformatPath) {
           const titleFromIcd = await generateEncounterTitle(
             extractedIcdCodes,
             language,
@@ -671,7 +659,6 @@ Rules:
         // atomic merge RPC to prevent concurrent writers clobbering each other.
         const columnPayload: Record<string, unknown> = {
           encounter_note: generatedNote,
-          patient_letter: letter,
         };
         // Retry transient fetch failures — see lib/supabase/retry.ts.
         const { error: columnError } = await retrySupabaseCall(
@@ -725,7 +712,7 @@ Rules:
         if (saveError) {
           logger.error("Failed to save regenerated content:", saveError);
           logger.error(
-            `[regenerate] LOST NOTE visit=${visitId} letter_len=${letter.length} note_len=${generatedNote.length}`,
+            `[regenerate] LOST NOTE visit=${visitId} note_len=${generatedNote.length}`,
           );
           logger.error(
             `[regenerate] LOST NOTE BODY visit=${visitId}:\n${generatedNote}`,
@@ -753,7 +740,6 @@ Rules:
         sendEvent({
           type: "complete",
           generatedNote,
-          letter,
           suggestedTitle,
           usedChunks: usedChunkIds,
           templateId: template.id,

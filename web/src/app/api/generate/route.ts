@@ -737,7 +737,6 @@ export async function POST(request: NextRequest) {
         // Call generateFromTemplate with streaming section extraction
         const {
           generatedNote,
-          letter,
           suggestedTitle,
           extractedIcdCodes,
           systemPrompt,
@@ -810,13 +809,12 @@ export async function POST(request: NextRequest) {
         };
         const generationHistory = [...priorHistory, historyEntry].slice(-10);
 
-        // Save non-metadata columns (encounter_note, patient_letter, etc.)
-        // and metadata atomically via separate operations:
+        // Save non-metadata columns and metadata atomically via separate
+        // operations:
         // 1. Regular .update() for non-JSONB columns (last-writer-wins, safe)
         // 2. mergeVisitMetadata RPC for JSONB merge (atomic, no race)
         const columnPayload: Record<string, unknown> = {
           encounter_note: generatedNote,
-          patient_letter: letter,
           status: "to_review",
           ...(autoTitle ? { title: autoTitle } : {}),
         };
@@ -882,7 +880,7 @@ export async function POST(request: NextRequest) {
           // Last-ditch recovery log — the generated note is otherwise lost
           // to the user. Dump it so it can be rescued from server logs.
           logger.error(
-            `[generate] LOST NOTE visit=${visitId} letter_len=${letter.length} note_len=${generatedNote.length}`,
+            `[generate] LOST NOTE visit=${visitId} note_len=${generatedNote.length}`,
           );
           logger.error(
             `[generate] LOST NOTE BODY visit=${visitId}:\n${generatedNote}`,
@@ -898,7 +896,6 @@ export async function POST(request: NextRequest) {
         sendEvent({
           type: "complete",
           generatedNote,
-          letter,
           suggestedTitle,
           usedChunks,
           templateId: template.id,

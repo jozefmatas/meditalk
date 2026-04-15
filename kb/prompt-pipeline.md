@@ -47,7 +47,7 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
   Pass 2       Opus 4.6  (t=0)
   Generation   max_tokens: 8192
-               -> JSON: one key per section + letter + title
+               -> JSON: one key per section + title
                |
        ========|========  POST-PROCESSING  ========
                |
@@ -519,7 +519,7 @@ Source: [web/src/lib/anthropic.ts:88](web/src/lib/anthropic.ts#L88)
 - **Removed:** Title rules (title generated in a dedicated Haiku call)
 - **Removed:** Section routing rules 8a-8h (facts already pre-assigned to sections)
 
-**Keeps:** FACT VALUE FIDELITY (primary rule), condensed NEVER FABRICATE, directives, output language, formatting, JSON format, style guide, patient letter instruction.
+**Keeps:** FACT VALUE FIDELITY (primary rule), condensed NEVER FABRICATE, directives, output language, formatting, JSON format, style guide.
 
 Falls through to the full `buildTemplateSystemPrompt` when the template uses a custom `systemPrompt` — custom prompts bypass this optimisation.
 
@@ -543,9 +543,7 @@ CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL: ...
 4. OUTPUT LANGUAGE: Write ALL content in {language}.
 5. MISSING SECTIONS: Output empty string "".
 6. FORMATTING: Bullets for diagnoses/meds, narrative for history/exam.
-7. FORMAT: Return valid JSON with section keys + "letter" + "title".
-
-PATIENT LETTER: ... (via buildLetterInstruction)
+7. FORMAT: Return valid JSON with section keys + "title".
 
 TEMPLATE SECTIONS:
 {sections}
@@ -566,24 +564,6 @@ Used when validated facts are NOT available. Contains all rules including:
 - Section routing rules (8a-8h)
 
 Full prompt text unchanged from before — see `buildTemplateSystemPrompt()` in source.
-
-### 8.1a Patient letter instruction
-
-Source: [web/src/lib/anthropic.ts:59](web/src/lib/anthropic.ts#L59) — `buildLetterInstruction()`
-
-Extracted into a standalone function so letter generation rules can evolve independently from note generation:
-
-```
-PATIENT LETTER ("letter" key in JSON output):
-- Write in clear, simple {language} that a non-medical reader can understand.
-- Summarise the key findings, diagnoses, and recommended next steps.
-- Avoid jargon — translate medical terms into plain language.
-- Keep the tone warm, professional, and reassuring.
-- Do NOT include ICD codes in the letter.
-- Keep the letter concise — 3 to 6 sentences.
-```
-
-Both `buildFactBasedSystemPrompt` and `buildTemplateSystemPrompt` reference this function.
 
 ### 8.2 Enriched system prompt
 
@@ -704,7 +684,7 @@ DOCTOR'S DIRECTIVE FOR THIS FILE: Pouzi len echokg a poslednu liecbu
 
 ```
 Fill in each template section based ONLY on the information above. Return valid
-JSON with keys: "s_to", "s_oa", "s_ra", ..., "letter", and "title".
+JSON with keys: "s_to", "s_oa", "s_ra", ... and "title".
 ```
 
 ---
@@ -782,7 +762,7 @@ Uses cached validated facts from the original generation (persisted in `metadata
 
 **Condition:** Template change but NO cached `validated_facts` (old encounters generated before the fact pipeline existed).
 
-Uses the **same model fallback chain** (Opus -> Sonnet) to reformat the existing note prose into the new template layout. Doesn't re-run Pass 1 / Pass 1.5. Reuses existing patient letter and title.
+Uses the **same model fallback chain** (Opus -> Sonnet) to reformat the existing note prose into the new template layout. Doesn't re-run Pass 1 / Pass 1.5. Reuses existing title.
 
 The reformat prompt is simple:
 
@@ -917,7 +897,6 @@ title               text
 language            text (sk | cs | en)
 status              text (draft | to_review | finalized | archived)
 encounter_note      text     -- HTML note
-patient_letter      text     -- HTML letter
 metadata            jsonb    -- see below
 ```
 
@@ -953,7 +932,7 @@ metadata            jsonb    -- see below
 
 **Split save** to keep metadata writes atomic:
 
-1. **Column update** via `.update()` for non-JSONB: `encounter_note`, `patient_letter`, `title`, `status`
+1. **Column update** via `.update()` for non-JSONB: `encounter_note`, `title`, `status`
 2. **Atomic metadata merge** via `mergeVisitMetadata()` RPC for JSONB
 
 The column update goes through `retrySupabaseCall` from [web/src/lib/supabase/retry.ts](web/src/lib/supabase/retry.ts) — long Opus runs keep a Supabase keepalive connection idle past the Cloudflare 100s edge timeout.
@@ -971,7 +950,7 @@ The column update goes through `retrySupabaseCall` from [web/src/lib/supabase/re
 | File OCR (image / PDF)     | `claude-sonnet-4-6` (t=0, 8192 tokens)          | Image + PDF -> text                 | Deterministic, same quality tier as clinical pass     |
 | Pass 1 — Clinical analysis | `claude-sonnet-4-6` (t=0, 4096 tokens)          | Concepts, specialty, ICDs, clusters | Haiku couldn't distinguish anatomically-specific ICDs |
 | Pass 1.5 — Fact extraction | `claude-haiku-4-5-20251001` (t=0, 16384 tokens) | Grounded facts with evidence        | Cheap + fast + good enough at strict-rules JSON       |
-| Pass 2 — Generation        | `claude-opus-4-6` (t=0, 8192 tokens)            | Prose note + letter + title         | Opus handles multi-section structured generation best |
+| Pass 2 — Generation        | `claude-opus-4-6` (t=0, 8192 tokens)            | Prose note + title                  | Opus handles multi-section structured generation best |
 | Title generation           | `claude-haiku-4-5-20251001` (t=0, 64 tokens)    | Short title from ICDs               | Cheap, deterministic, no room to hallucinate          |
 | Structured rerender        | Same fallback chain as Pass 2                   | Template swap (with cached facts)   | Re-runs fact-to-section with new template             |
 | Legacy reformat            | Same fallback chain as Pass 2                   | Template swap (no cached facts)     | Pure prose reformat, no clinical reasoning            |
@@ -1006,7 +985,7 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)                 | Correction phrase detection (sk/cs/en), punctuation-bracketed negation, time-series preservation  |
 | [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                 | 38+ tests: EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism            |
 | [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                           | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`, `hasValidatedFacts` flag behavior        |
-| [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                  | `buildFactBasedSystemPrompt`, `buildLetterInstruction`, `buildTemplateSystemPrompt`               |
+| [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                  | `buildFactBasedSystemPrompt`, `buildTemplateSystemPrompt`                                         |
 | [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts) | Category-to-section mapping, abbreviation matching, unassigned fallback                           |
 | [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                     | SHA-256 stability, `diffFingerprints`                                                             |
 

@@ -4,7 +4,6 @@ import { useCallback, useRef } from "react";
 
 interface CachedTemplate {
   generatedNote: string;
-  letter: string;
 }
 
 export function useTemplateCache() {

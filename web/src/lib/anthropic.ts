@@ -51,23 +51,6 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 };
 
 /**
- * Build the patient-letter instruction block for the system prompt.
- *
- * Isolates letter generation rules from note generation so they can
- * be evolved independently (e.g. reading-level tuning, separate model).
- */
-export function buildLetterInstruction(language: SupportedLanguage): string {
-  const langLabel = LANGUAGE_LABELS[language];
-  return `PATIENT LETTER ("letter" key in JSON output):
-- Write in clear, simple ${langLabel} that a non-medical reader can understand.
-- Summarise the key findings, diagnoses, and recommended next steps from the note.
-- Avoid jargon — translate medical terms into plain language where possible.
-- Keep the tone warm, professional, and reassuring.
-- Do NOT include ICD codes in the letter.
-- Keep the letter concise — 3 to 6 sentences.`;
-}
-
-/**
  * Build a lean system prompt for the facts-present path.
  *
  * When validated facts have been pre-assigned to sections by the
@@ -146,10 +129,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 7. FORMAT: Return valid JSON with keys:
    - One key for each section ID listed below (string value, or "" if empty).
-   - A "letter" key (see PATIENT LETTER rules below).
    - A "title" key with a short encounter title (max 6 words) in {{language}}.
-
-${buildLetterInstruction(language)}
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
@@ -231,7 +211,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 3b. PER-FILE DIRECTIVES: Individual uploaded files may contain a line starting with "DOCTOR'S DIRECTIVE FOR THIS FILE:" immediately after the file header. This directive tells you exactly what to use from that specific file. For example, if the directive says "I only want the diagnosis", use ONLY diagnosis-related information from that file — ignore all other content (demographics, measurements, findings, medications, procedures, recommendations, etc.) even if it is present. Per-file directives are strict filters and take precedence over completeness.
 
-4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
 
 5. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
 
@@ -239,7 +219,6 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 7. FORMAT: Return valid JSON with the following keys:
    - One key for each section ID listed below, with the section content as a string value (or "" if no information).
-   - A "letter" key (see PATIENT LETTER rules below).
    - A "title" key with a short encounter title (max 6 words) in {{language}}.
      TITLE RULES:
      - The title MUST be consistent with the primary diagnosis in the assessment/conclusion section. Use the main ICD diagnosis description (or a close paraphrase) as the basis.
@@ -247,8 +226,6 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
      - Do NOT include anatomical localisation (anterior, lateral, inferior, left, right, wall-specific descriptors) unless it appears in the primary diagnosis description.
      - When in doubt, use a more general title that the codes actually support.
      Example — if the primary diagnosis is "I21 Akútny infarkt myokardu", the title should be "Akútny infarkt myokardu", NOT "Akútny STEMI laterálnej steny".
-
-${buildLetterInstruction(language)}
 
 8. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
 
@@ -347,7 +324,7 @@ export function buildTemplateUserMessage(
   }
 
   parts.push(
-    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}, "letter", and "title".`,
+    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")} and "title".`,
   );
 
   return parts.join("\n\n");
@@ -510,7 +487,6 @@ export async function generateFromTemplate(
   validatedFacts?: ExtractedFacts,
 ): Promise<{
   generatedNote: string;
-  letter: string;
   suggestedTitle: string;
   extractedIcdCodes: CandidateIcdCode[];
   /** Exact system prompt sent to the generator (for fingerprinting). */
@@ -629,13 +605,8 @@ export async function generateFromTemplate(
     throw new InsufficientContextError();
   }
 
-  // Extract letter and title, remove from section contents
-  const letter =
-    typeof parsed.letter === "string"
-      ? parsed.letter
-      : JSON.stringify(parsed.letter || "");
-  delete parsed.letter;
-
+  // Extract title, remove non-section keys from parsed output
+  delete parsed.letter; // ignored (feature removed)
   const suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
   delete parsed.title;
 
@@ -736,7 +707,6 @@ export async function generateFromTemplate(
 
   return {
     generatedNote,
-    letter,
     suggestedTitle: finalTitle,
     extractedIcdCodes,
     systemPrompt,

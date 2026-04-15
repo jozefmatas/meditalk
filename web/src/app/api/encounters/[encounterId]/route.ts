@@ -77,8 +77,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (body.language !== undefined) updateData.language = body.language;
     if (body.encounter_note !== undefined)
       updateData.encounter_note = body.encounter_note;
-    if (body.patient_letter !== undefined)
-      updateData.patient_letter = body.patient_letter;
     // Metadata is merged atomically via a PostgreSQL RPC to prevent
     // concurrent writers (auto-save, recording, generation) from clobbering
     // each other. Handle it separately from the regular column update.

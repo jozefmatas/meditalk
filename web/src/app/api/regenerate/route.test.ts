@@ -111,7 +111,6 @@ describe("POST /api/regenerate - validation", () => {
         language: "en",
         metadata: { files: [] },
         encounter_note: null,
-        patient_letter: null,
       },
       error: null,
     });
