@@ -58,9 +58,12 @@ import { logger } from "@/lib/logger";
  * indicate an actual self-correction in clinical speech. Over-matching
  * (e.g. bare "no") would drop legitimate facts.
  *
- * Note: bare "nie" (sk) / "ne" (cs) / "no" (en) CANNOT go in this list —
+ * Note: bare "nie" (sk) / "ne" (cs) CANNOT go in this list —
  * they are also common negations ("pacient nie je unavený"). For those,
- * see `RAW_CORRECTION_REGEXES` which require comma punctuation.
+ * see `RAW_CORRECTION_REGEX` which requires comma-bracketed punctuation.
+ * English "no" is NOT in the regex either — Slovak "no" means "well/so"
+ * (filler word) and would cause false positives. English corrections
+ * like "no wait" / "wait no" are covered by phrases above.
  */
 export const CORRECTION_PHRASES: Record<SupportedLanguage, string[]> = {
   sk: [
@@ -145,7 +148,7 @@ export const CORRECTION_PHRASES: Record<SupportedLanguage, string[]> = {
  * future ones without any per-locale wiring.
  */
 const RAW_CORRECTION_REGEX =
-  /[,;.:—–-]\s*(nie|ne|no|nein|non|nej|neni|nicht|ikke|inte|nix|niet)\s*[,;.:—–-]/iu;
+  /[,;.:—–-]\s*(nie|ne|nein|non|nej|neni|nicht|ikke|inte|nix|niet)\s*[,;.:—–-]/iu;
 
 /** Reason a fact was dropped by the resolver. */
 export type ResolutionReason = "correction_phrase";

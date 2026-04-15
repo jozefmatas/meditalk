@@ -40,14 +40,20 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     return (meta?.selected_icd_codes as IcdCode[]) || [];
   });
 
-  // Suggested codes from clinical analysis (raw, may have English descriptions)
+  // Suggested codes from clinical analysis — prefer the full pre-filter list
+  // (suggestedIcdCodes) so the doctor sees all candidates, not just the
+  // certain ones in the note. Falls back to candidateIcdCodes for older
+  // encounters generated before this field existed.
   const suggestedCodesRaw: IcdCode[] = (() => {
     const meta = visit.metadata as Record<string, unknown>;
     const analysis = meta?.clinical_analysis as
       | Record<string, unknown>
       | undefined;
-    if (!analysis?.candidateIcdCodes) return [];
-    return (analysis.candidateIcdCodes as IcdCode[]).map((c) => ({
+    const source =
+      (analysis?.suggestedIcdCodes as IcdCode[] | undefined) ??
+      (analysis?.candidateIcdCodes as IcdCode[] | undefined);
+    if (!source) return [];
+    return source.map((c) => ({
       code: c.code,
       description: c.description,
       confidence: c.confidence,

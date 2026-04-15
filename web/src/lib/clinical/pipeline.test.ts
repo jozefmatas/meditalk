@@ -86,12 +86,17 @@ describe("buildEnrichedSystemPrompt", () => {
     const e11Pos = result.indexOf("E11.9");
     const i10Pos = result.indexOf("I10 ");
     expect(e11Pos).toBeLessThan(i10Pos);
+    // Must forbid narrative text in Záver section
+    expect(result).toContain("MUST contain ONLY these ICD-10 code lines");
+    expect(result).toContain("no additional narrative text");
   });
 
-  it("omits ICD section when no candidate codes", () => {
+  it("includes explicit NO ICD instruction when no candidate codes", () => {
     const analysis = makeAnalysis({ candidateIcdCodes: [] });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en");
-    expect(result).not.toContain("ICD-10 BLOCK");
+    expect(result).not.toContain("ICD-10 BLOCK (VERBATIM)");
+    expect(result).toContain("Do NOT include ANY ICD-10 codes");
+    expect(result).toContain("Do NOT invent, guess, or add ICD codes");
   });
 
   it("includes matched concepts when present", () => {

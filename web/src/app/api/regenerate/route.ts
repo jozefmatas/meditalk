@@ -44,7 +44,7 @@ import {
   sseResponse,
   extractSectionsFromStream,
 } from "@/lib/api/sse";
-import type { ClinicalAnalysis } from "@/lib/clinical/types";
+import type { ClinicalAnalysis, CandidateIcdCode } from "@/lib/clinical/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
@@ -216,6 +216,10 @@ export async function POST(request: NextRequest) {
     let factWarnings: string[] = [];
     let factRemovedCount = 0;
     let factResolutionDropCount = 0;
+    // Full Pass 1 candidates (pre-filter) for the ICD panel suggestions.
+    // Set in the full path before Pass 1.7; for the fast path (reformat),
+    // preserved from the cached analysis if available.
+    let allCandidateIcdCodes: CandidateIcdCode[] = [];
 
     if (existingNote && oldTemplate && oldTemplateId !== template.id) {
       // ─── FAST PATH: Reformat existing note with Haiku ───
@@ -257,6 +261,11 @@ Rules:
           ...cachedAnalysis,
           usage: { inputTokens: 0, outputTokens: 0 },
         } as ClinicalAnalysis;
+        // Preserve suggestions from original generation
+        allCandidateIcdCodes =
+          (cachedAnalysis.suggestedIcdCodes as CandidateIcdCode[]) ??
+          clinicalAnalysis.candidateIcdCodes ??
+          [];
       }
     } else {
       // ─── FULL PATH: Generate from transcript with Opus ───
@@ -324,6 +333,9 @@ Rules:
           );
         }
       }
+
+      // Preserve the full candidate list before certainty filtering.
+      allCandidateIcdCodes = clinicalAnalysis?.candidateIcdCodes ?? [];
 
       // Pass 1.7 — Diagnosis certainty filter. See generate route for details.
       // Drops candidate ICD codes that are not lexically grounded in the
@@ -616,6 +628,7 @@ Rules:
                   secondarySpecialty: finalAnalysis.secondarySpecialty,
                   matchedConcepts: finalAnalysis.matchedConcepts,
                   candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  suggestedIcdCodes: allCandidateIcdCodes,
                   problemClusters: finalAnalysis.problemClusters,
                 },
               }
@@ -670,6 +683,7 @@ Rules:
                   inferredSpecialty: finalAnalysis.inferredSpecialty,
                   secondarySpecialty: finalAnalysis.secondarySpecialty,
                   candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  suggestedIcdCodes: allCandidateIcdCodes,
                   matchedConcepts: finalAnalysis.matchedConcepts,
                   problemClusters: finalAnalysis.problemClusters,
                 },

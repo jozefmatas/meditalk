@@ -238,7 +238,10 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
     ]);
   });
 
-  it("drops the earlier fact when followed by ', no,' in English", () => {
+  it("does NOT drop facts when English ', no,' appears (removed from regex — Slovak 'no' = filler)", () => {
+    // "no" was removed from RAW_CORRECTION_REGEX because Slovak "no"
+    // means "well/so" and caused false positive drops. English "no" as
+    // a correction is covered by phrases "no wait" / "wait no" instead.
     const input: FactExtractionInput = {
       chunks: ["Father died of MI, no, of a stroke."],
     };
@@ -249,26 +252,22 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       }),
     ]);
     const result = resolveFacts(facts, input, "en");
-    expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
-      "father died of stroke",
-    ]);
+    expect(result.counts.correctionDrops).toBe(0);
+    expect(result.resolvedFacts.familyHistory).toHaveLength(2);
   });
 
   it("works with an em-dash bracketing the negation (generic punctuation)", () => {
     const input: FactExtractionInput = {
-      chunks: ["Chest pain — no — shortness of breath."],
+      chunks: ["Bolesť hlavy — nie — dýchavica."],
     };
     const facts = bundle([
-      fact("chest pain", "Chest pain", { category: "symptoms" }),
-      fact("shortness of breath", "shortness of breath", {
-        category: "symptoms",
-      }),
+      fact("bolesť hlavy", "Bolesť hlavy", { category: "symptoms" }),
+      fact("dýchavica", "dýchavica", { category: "symptoms" }),
     ]);
-    const result = resolveFacts(facts, input, "en");
+    const result = resolveFacts(facts, input, "sk");
     expect(result.counts.correctionDrops).toBe(1);
     expect(result.resolvedFacts.symptoms.map((f) => f.value)).toEqual([
-      "shortness of breath",
+      "dýchavica",
     ]);
   });
 
@@ -294,6 +293,24 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
     expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "vater starb an schlaganfall",
     ]);
+  });
+
+  it("does NOT drop facts when Slovak 'no' (= well/so) appears as filler", () => {
+    // Slovak "no" means "well/so" — it's a common filler word in clinical
+    // speech: "bolesti na hrudníku, no, začali pred 2 hodinami" means
+    // "chest pain, well, started 2 hours ago." This must NOT trigger
+    // the correction detector.
+    const input: FactExtractionInput = {
+      chunks: ["Pacient má bolesti na hrudníku, no, začali pred 2 hodinami."],
+    };
+    const facts = bundle([
+      fact("bolesti na hrudníku", "bolesti na hrudníku", {
+        category: "symptoms",
+      }),
+    ]);
+    const result = resolveFacts(facts, input, "sk");
+    expect(result.counts.correctionDrops).toBe(0);
+    expect(result.resolvedFacts.symptoms).toHaveLength(1);
   });
 
   it("does NOT drop facts when 'nie' is an in-sentence negation (no comma bracket)", () => {
@@ -341,18 +358,18 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
 
   it("is case-insensitive for the negation token", () => {
     const input: FactExtractionInput = {
-      chunks: ["Father died of MI, NO, of a stroke."],
+      chunks: ["Otec zomrel na infarkt, NIE, na mozgovú mŕtvicu."],
     };
     const facts = bundle([
-      fact("father died of MI", "died of MI", { category: "familyHistory" }),
-      fact("father died of stroke", "of a stroke", {
+      fact("otec zomrel infarkt", "na infarkt", { category: "familyHistory" }),
+      fact("otec zomrel mozgová mŕtvica", "na mozgovú mŕtvicu", {
         category: "familyHistory",
       }),
     ]);
-    const result = resolveFacts(facts, input, "en");
+    const result = resolveFacts(facts, input, "sk");
     expect(result.counts.correctionDrops).toBe(1);
     expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
-      "father died of stroke",
+      "otec zomrel mozgová mŕtvica",
     ]);
   });
 });

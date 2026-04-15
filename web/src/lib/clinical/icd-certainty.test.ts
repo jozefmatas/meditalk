@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterCertainIcdCandidates,
   extractContentTokens,
+  SYNONYM_GROUPS,
 } from "./icd-certainty";
 import { emptyExtractedFacts } from "./fact-extraction";
 import type { ExtractedFact, ExtractedFacts } from "./fact-extraction";
@@ -16,7 +17,7 @@ function icd(
   return { code, description, confidence, sourceConceptIds: [] };
 }
 
-/** Helper: build a diagnoses-only or personalHistory-only fact bundle. */
+/** Helper: build a fact bundle with optional category overrides. */
 function bundle(
   diagnoses: string[] = [],
   personalHistory: string[] = [],
@@ -39,7 +40,22 @@ function bundle(
   if (other.symptoms) facts.symptoms = other.symptoms;
   if (other.findings) facts.findings = other.findings;
   if (other.measurements) facts.measurements = other.measurements;
+  if (other.medications) facts.medications = other.medications;
+  if (other.procedures) facts.procedures = other.procedures;
+  if (other.plan) facts.plan = other.plan;
   return facts;
+}
+
+/** Shorthand to build a fact for a given category. */
+function fact(
+  value: string,
+  category: ExtractedFact["category"],
+): ExtractedFact {
+  return {
+    category,
+    value,
+    source: { type: "transcript", sourceIndex: 0, evidence: value },
+  };
 }
 
 describe("extractContentTokens", () => {
@@ -135,20 +151,21 @@ describe("filterCertainIcdCandidates — user's EMS regression", () => {
 });
 
 describe("filterCertainIcdCandidates — empty fact set safety", () => {
-  it("drops EVERY candidate when there are no diagnosis or personalHistory facts", () => {
+  it("drops EVERY candidate when there are no grounding facts at all", () => {
     const candidates: CandidateIcdCode[] = [
       icd("I21.2", "Akútny infarkt myokardu"),
       icd("I10", "Esenciálna hypertenzia"),
     ];
+    // Only demographics/measurements — no grounding-relevant categories
     const facts = bundle([], [], {
-      chiefComplaint: [
+      measurements: [
         {
-          category: "chiefComplaint",
-          value: "bolesť na hrudníku",
+          category: "measurements",
+          value: "TK 180/100",
           source: {
             type: "transcript",
             sourceIndex: 0,
-            evidence: "bolesť",
+            evidence: "TK 180/100",
           },
         },
       ],
@@ -166,6 +183,191 @@ describe("filterCertainIcdCandidates — empty fact set safety", () => {
     expect(result.kept).toEqual([]);
     expect(result.dropped).toEqual([]);
     expect(result.counts).toEqual({ total: 0, kept: 0, dropped: 0 });
+  });
+});
+
+describe("filterCertainIcdCandidates — chiefComplaint grounding", () => {
+  it("grounds non-R-chapter disease codes via chiefComplaint", () => {
+    // When Haiku puts clinical impressions under chiefComplaint (e.g.
+    // "suspícia na NSTEMI"), ICD codes like I21.4 must be grounded.
+    const candidates = [
+      icd("I21.4", "Akútny subendokardiálny infarkt myokardu"),
+    ];
+    const facts = bundle([], [], {
+      chiefComplaint: [
+        {
+          category: "chiefComplaint",
+          value: "suspícia na akútny infarkt myokardu",
+          source: {
+            type: "transcript",
+            sourceIndex: 0,
+            evidence: "suspícia na akútny infarkt",
+          },
+        },
+      ],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I21.4"]);
+  });
+
+  it("does NOT ground R-chapter symptom codes via chiefComplaint", () => {
+    // R07.2 is a symptom code — even if chiefComplaint mentions chest
+    // pain, we do NOT promote the symptom code (only the disease code).
+    const candidates = [icd("R07.2", "Prekordiálna bolesť")];
+    const facts = bundle([], [], {
+      chiefComplaint: [
+        {
+          category: "chiefComplaint",
+          value: "bolesť na hrudníku",
+          source: {
+            type: "transcript",
+            sourceIndex: 0,
+            evidence: "bolesť na hrudníku",
+          },
+        },
+      ],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it("grounds I-chapter codes via chiefComplaint while dropping R-chapter from same set", () => {
+    // Mixed set: I25.8 (disease) should be grounded by chiefComplaint
+    // mentioning coronary disease; R07.2 (symptom) should NOT.
+    const candidates = [
+      icd("I25.8", "Iná forma chronickej ischemickej choroby srdca"),
+      icd("R07.2", "Prekordiálna bolesť"),
+    ];
+    const facts = bundle([], [], {
+      chiefComplaint: [
+        {
+          category: "chiefComplaint",
+          value: "chronická ischemická choroba srdca",
+          source: {
+            type: "transcript",
+            sourceIndex: 0,
+            evidence: "ischemická choroba srdca",
+          },
+        },
+      ],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I25.8"]);
+    expect(result.dropped.map((d) => d.candidate.code)).toEqual(["R07.2"]);
+  });
+});
+
+describe("filterCertainIcdCandidates — broad grounding for non-R codes", () => {
+  it("grounds disease codes via symptoms facts", () => {
+    // Haiku often puts conditions under symptoms. "hypertenzia" in symptoms
+    // must ground I10 for non-R codes.
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle([], [], {
+      symptoms: [fact("artériová hypertenzia", "symptoms")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10"]);
+  });
+
+  it("grounds disease codes via findings facts", () => {
+    const candidates = [
+      icd("I21.4", "Akútny subendokardiálny infarkt myokardu"),
+    ];
+    const facts = bundle([], [], {
+      findings: [fact("ST elevácie, akútny infarkt myokardu", "findings")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I21.4"]);
+  });
+
+  it("grounds disease codes via medications facts", () => {
+    // Medication fact containing condition name in context
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle([], [], {
+      medications: [
+        fact("antihypertenzíva - liečba hypertenzie", "medications"),
+      ],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10"]);
+  });
+
+  it("grounds disease codes via plan facts", () => {
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle([], [], {
+      plan: [fact("kontrola hypertenzie o 3 mesiace", "plan")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10"]);
+  });
+
+  it("does NOT ground R-chapter codes via symptoms", () => {
+    // R07.2 is symptom code — symptoms facts must NOT promote it
+    const candidates = [icd("R07.2", "Prekordiálna bolesť")];
+    const facts = bundle([], [], {
+      symptoms: [fact("bolesť na hrudníku", "symptoms")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it("does NOT ground R-chapter codes via findings or medications", () => {
+    const candidates = [icd("R51", "Bolesť hlavy")];
+    const facts = bundle([], [], {
+      findings: [fact("bolesť hlavy pri vyšetrení", "findings")],
+      medications: [fact("ibuprofen na bolesti hlavy", "medications")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it("does NOT ground any codes via measurements alone", () => {
+    // Measurements (labs, vitals) should never ground codes
+    const candidates = [
+      icd("E11.91", "Diabetes mellitus 2. typu: dekompenzovaný"),
+    ];
+    const facts = bundle([], [], {
+      measurements: [fact("glukóza 15 mmol/l", "measurements")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+});
+
+describe("filterCertainIcdCandidates — direct ICD code matching", () => {
+  it("grounds via literal ICD code in fact value", () => {
+    // Doctor dictated "diagnóza I10" — code appears directly in fact
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle(["diagnóza I10"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10"]);
+  });
+
+  it("grounds via ICD code with dot in fact value", () => {
+    const candidates = [
+      icd("I21.4", "Akútny subendokardiálny infarkt myokardu"),
+    ];
+    const facts = bundle(["dg. I21.4 - NSTEMI"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I21.4"]);
+  });
+
+  it("does NOT false-positive on partial code matches", () => {
+    // "I1" should not match "I10" — the code must appear fully
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle(["nejaká I1 hodnota"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
   });
 });
 
@@ -380,6 +582,122 @@ describe("filterCertainIcdCandidates — determinism and purity", () => {
     const facts = bundle(["infarkt myokardu", "hypertenzia"]);
     const result = filterCertainIcdCandidates(candidates, facts);
     expect(result.kept.map((c) => c.code)).toEqual(["I21.2", "I10"]);
+  });
+});
+
+describe("filterCertainIcdCandidates — synonym matching", () => {
+  it("grounds I10 'hypertenzia' via layperson 'krvný tlak' synonym", () => {
+    // "tlak" stem → synonym group → "hypert" stem → matches ICD description
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+    ];
+    const facts = bundle([], [], {
+      chiefComplaint: [fact("vysoký krvný tlak", "chiefComplaint")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10"]);
+  });
+
+  it("grounds E11 'diabetes' via layperson 'cukrovka' synonym", () => {
+    // "cukrov" stem → synonym group → "diabet" stem → matches ICD description
+    const candidates = [
+      icd("E11.9", "Diabetes mellitus 2. typu, bez komplikácií"),
+    ];
+    const facts = bundle(["cukrovka 2. typu"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["E11.9"]);
+  });
+
+  it("grounds I21 'infarkt' via layperson 'srdcový zával' synonym", () => {
+    // "zaval" stem → synonym group → "infark" stem → matches ICD description
+    const candidates = [icd("I21.2", "Akútny infarkt myokardu")];
+    const facts = bundle([], ["prekonaný srdcový zával"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I21.2"]);
+  });
+
+  it("works bidirectionally — ICD 'infarkt' matches fact 'zával'", () => {
+    // ICD token "infark" stem → synonym group → "zaval" stem → matches fact
+    const candidates = [
+      icd("I21.4", "Akútny subendokardiálny infarkt myokardu"),
+    ];
+    const facts = bundle([], [], {
+      symptoms: [fact("srdcový zával", "symptoms")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I21.4"]);
+  });
+
+  it("does NOT false-positive via synonyms on unrelated codes", () => {
+    // "krvný tlak" should ground hypertension (I10) but NOT unrelated E78
+    const candidates = [icd("E78.5", "Hyperlipidémia, bližšie neurčená")];
+    const facts = bundle([], [], {
+      chiefComplaint: [fact("vysoký krvný tlak", "chiefComplaint")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it("respects R-chapter strict grounding even with synonym match", () => {
+    // R-chapter codes use strict grounding (diagnoses + history only).
+    // Even if a synonym bridges a match, it must be from the right category.
+    const candidates = [icd("R07.3", "Iná bolesť na hrudníku")];
+    const facts = bundle([], [], {
+      symptoms: [fact("bolesť na hrudníku", "symptoms")],
+    });
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept).toHaveLength(0);
+  });
+
+  it("grounds multiple codes via different synonym groups in same fact set", () => {
+    // "krvný tlak" grounds I10, "cukrovka" grounds E11
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+      icd("E11.9", "Diabetes mellitus 2. typu, bez komplikácií"),
+    ];
+    const facts = bundle([], ["vysoký krvný tlak", "cukrovka"]);
+    const result = filterCertainIcdCandidates(candidates, facts);
+    expect(result.kept.map((c) => c.code)).toEqual(["I10", "E11.9"]);
+  });
+
+  it("synonym matching remains deterministic across repeated calls", () => {
+    const candidates = [
+      icd("I10", "Primárna esenciálna artériová hypertenzia"),
+      icd("E11.9", "Diabetes mellitus 2. typu, bez komplikácií"),
+      icd("E78.5", "Hyperlipidémia, bližšie neurčená"),
+    ];
+    const facts = bundle([], [], {
+      chiefComplaint: [fact("vysoký krvný tlak a cukrovka", "chiefComplaint")],
+    });
+    const r1 = filterCertainIcdCandidates(candidates, facts);
+    const r2 = filterCertainIcdCandidates(candidates, facts);
+    const r3 = filterCertainIcdCandidates(candidates, facts);
+    expect(r1).toEqual(r2);
+    expect(r2).toEqual(r3);
+  });
+});
+
+describe("SYNONYM_GROUPS — structural integrity", () => {
+  it("every group has at least 2 entries", () => {
+    for (const group of SYNONYM_GROUPS) {
+      expect(group.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("all entries are lowercase and ≤ STEM_LENGTH (6 chars)", () => {
+    for (const group of SYNONYM_GROUPS) {
+      for (const term of group) {
+        expect(term).toBe(term.toLowerCase());
+        expect(term.length).toBeLessThanOrEqual(6);
+      }
+    }
+  });
+
+  it("no duplicate entries within a group", () => {
+    for (const group of SYNONYM_GROUPS) {
+      const unique = new Set(group);
+      expect(unique.size).toBe(group.length);
+    }
   });
 });
 

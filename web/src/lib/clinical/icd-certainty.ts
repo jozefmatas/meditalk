@@ -23,18 +23,35 @@
  *
  * Core rule:
  *   A candidate ICD code is CERTAIN iff at least one token from a
- *   grounded `diagnoses` or history-subcategory fact substring-matches the
- *   normalized ICD description, OR a token from the ICD description
- *   substring-matches a grounded fact value. Symptoms, findings, chief
- *   complaint, and measurements are deliberately NOT used for grounding
- *   — if the only source is "patient has chest pain," we emit the
- *   underlying diagnosis (I21.2) but NOT the symptom code (R07.2).
+ *   grounding fact substring-matches the normalized ICD description,
+ *   OR a token from the ICD description substring-matches a grounding
+ *   fact value. An ICD code is also instantly grounded if its literal
+ *   code string (e.g. "I10") appears in any grounding fact value.
+ *
+ *   Grounding scope depends on the ICD chapter:
+ *   - Non-R codes (disease codes): ALL fact categories contribute
+ *     EXCEPT demographics and measurements. This is necessary because
+ *     Haiku often categorizes conditions under symptoms, findings, or
+ *     medications rather than diagnoses.
+ *   - R-chapter codes (symptom/sign codes R00-R99): STRICT grounding
+ *     via diagnoses + history subcategories only. This prevents "chest
+ *     pain" (symptom fact) from promoting R07.2 while allowing it to
+ *     promote I21.4 (disease code).
  *
  * Stem matching:
  *   Tokens longer than 6 chars are truncated to a 6-char stem so
  *   Slavic inflection (hypertenzia/hypertenzie, hypertenze) matches the
  *   same stem (`hypert`). This is crude but works across sk/cs/en
  *   without per-locale wiring.
+ *
+ * Synonym matching:
+ *   Stem matching handles inflection but NOT synonyms. Slovak/Czech
+ *   layperson terms often share zero lexical overlap with formal ICD
+ *   descriptions ("krvný tlak" vs "hypertenzia"). A small curated
+ *   synonym table maps between these, so a fact containing "tlak"
+ *   can ground ICD codes mentioning "hypert*" and vice versa.
+ *   False positives are gated by Pass 1's code selection — synonyms
+ *   only help codes that Pass 1 already identified as candidates.
  */
 import type { CandidateIcdCode } from "./types";
 import type { ExtractedFacts } from "./fact-extraction";
@@ -152,6 +169,55 @@ const CLINICAL_ABBREVS: ReadonlySet<string> = new Set([
 const STEM_LENGTH = 6;
 
 /**
+ * Clinical synonym groups for bridging layperson ↔ medical terminology.
+ * Each group contains normalized stems (≤ STEM_LENGTH chars) that are
+ * clinically equivalent. If a token's stem matches any entry in a group,
+ * all other entries become additional substring-match candidates.
+ *
+ * Why this is needed:
+ *   Slovak/Czech layperson terms share zero lexical overlap with formal
+ *   ICD descriptions. "krvný tlak" (blood pressure) → stem "tlak" has
+ *   no overlap with "hypertenzia" → stem "hypert". The synonym group
+ *   ["tlak", "hypert"] bridges this gap.
+ *
+ * Safety:
+ *   False positives are gated by Pass 1 — synonyms only help codes that
+ *   Pass 1 already selected. A fact about "atmosférický tlak" won't
+ *   promote I10 unless Pass 1 independently suggested I10 for that
+ *   encounter (which it wouldn't).
+ *
+ * Keep this table tight. Only add pairs where the lexical gap causes
+ * real production drops.
+ */
+export const SYNONYM_GROUPS: readonly (readonly string[])[] = [
+  ["tlak", "hypert", "tenzie"], // krvný tlak ↔ hypertenzia/hypertenze/hypertension
+  ["cukrov", "diabet"], // cukrovka ↔ diabetes mellitus
+  ["zaval", "infark"], // srdcový zával ↔ infarkt myokardu
+  ["mrtvic", "porazk"], // mŕtvica/porážka ↔ CMP (stroke)
+  ["astma", "asthma"], // astma (SK/CZ) ↔ asthma (EN)
+];
+
+/**
+ * Precomputed stem → synonym stems lookup.
+ * Built once at module load from SYNONYM_GROUPS.
+ */
+const SYNONYM_LOOKUP: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const group of SYNONYM_GROUPS) {
+    for (const term of group) {
+      const others = group.filter((t) => t !== term);
+      const existing = map.get(term);
+      if (existing) {
+        map.set(term, [...existing, ...others]);
+      } else {
+        map.set(term, [...others]);
+      }
+    }
+  }
+  return map;
+})();
+
+/**
  * Extract clinical content tokens from a piece of text. Splits on
  * whitespace after Unicode normalization, drops stop words, and drops
  * tokens shorter than 4 characters unless they are on the clinical
@@ -181,6 +247,10 @@ function stem(token: string): string {
  * Does any token from `aText` substring-match (after stemming) anywhere
  * in the normalized `bText`? Used bidirectionally — fact tokens against
  * ICD description, and ICD description tokens against fact value.
+ *
+ * Also checks clinical synonyms: if a stemmed token has entries in
+ * SYNONYM_LOOKUP, those synonym stems are tested as additional
+ * substring-match candidates against bText.
  */
 function tokensOverlapStemmed(aText: string, bText: string): boolean {
   const aTokens = extractContentTokens(aText);
@@ -191,30 +261,81 @@ function tokensOverlapStemmed(aText: string, bText: string): boolean {
     const s = stem(token);
     if (!s) continue;
     if (bNormalized.includes(s)) return true;
+    // Synonym expansion: if this stem has clinical synonyms, check those
+    const synonyms = SYNONYM_LOOKUP.get(s);
+    if (synonyms) {
+      for (const syn of synonyms) {
+        if (bNormalized.includes(syn)) return true;
+      }
+    }
   }
   return false;
 }
 
 /**
- * Is this candidate ICD code grounded in a diagnosis or history fact?
- * Checks both directions so the filter is tolerant to whichever side
- * carries the more specific terminology.
+ * Is this candidate ICD code grounded in clinical facts?
+ *
+ * Grounding scope:
+ *   - Non-R codes (disease codes I, E, J, K, …): ALL categories except
+ *     demographics and measurements. Haiku frequently categorizes
+ *     conditions under symptoms, findings, or medications rather than
+ *     diagnoses — excluding those categories caused ALL codes to be
+ *     dropped in production.
+ *   - R-chapter codes (R00-R99 symptom/sign codes): STRICT grounding
+ *     via diagnoses + history only. Prevents "chest pain" in symptoms
+ *     from promoting R07.2 while disease codes like I21.4 remain free
+ *     to match via any category.
+ *
+ * Additionally, if the literal ICD code string (e.g. "I10", "I21.4")
+ * appears in any grounding fact value, the candidate is instantly
+ * grounded — doctors often dictate codes directly.
  */
 function isCandidateGrounded(
   candidate: CandidateIcdCode,
   facts: ExtractedFacts,
 ): boolean {
-  const groundingFacts = [
-    ...facts.diagnoses,
-    ...facts.familyHistory,
-    ...facts.personalHistory,
-    ...facts.socialHistory,
-    ...facts.workHistory,
-    ...facts.substanceUse,
-    ...facts.epidemiologicalHistory,
-  ];
+  const isRChapter = candidate.code.startsWith("R");
+
+  // R-chapter: strict grounding (diagnoses + history only)
+  // Non-R: broad grounding (all except demographics + measurements)
+  const groundingFacts = isRChapter
+    ? [
+        ...facts.diagnoses,
+        ...facts.familyHistory,
+        ...facts.personalHistory,
+        ...facts.socialHistory,
+        ...facts.workHistory,
+        ...facts.substanceUse,
+        ...facts.epidemiologicalHistory,
+      ]
+    : [
+        ...facts.diagnoses,
+        ...facts.chiefComplaint,
+        ...facts.symptoms,
+        ...facts.findings,
+        ...facts.medications,
+        ...facts.procedures,
+        ...facts.plan,
+        ...facts.familyHistory,
+        ...facts.personalHistory,
+        ...facts.socialHistory,
+        ...facts.workHistory,
+        ...facts.substanceUse,
+        ...facts.epidemiologicalHistory,
+      ];
   if (groundingFacts.length === 0) return false;
 
+  // Check 1: Direct ICD code match — if any fact value mentions the
+  // code itself (e.g. "diagnóza I10", "dg. I21.4"), instant grounding.
+  const codeNorm = normalizeForMatch(candidate.code);
+  if (codeNorm) {
+    for (const fact of groundingFacts) {
+      const factNorm = normalizeForMatch(fact.value);
+      if (factNorm && factNorm.includes(codeNorm)) return true;
+    }
+  }
+
+  // Check 2: Bidirectional stem matching
   for (const fact of groundingFacts) {
     // Direction 1: fact tokens → ICD description
     if (tokensOverlapStemmed(fact.value, candidate.description)) {
@@ -247,8 +368,17 @@ export function filterCertainIcdCandidates(
   const kept: CandidateIcdCode[] = [];
   const dropped: DroppedIcdCandidate[] = [];
 
-  const hasDiagnosticFacts =
+  // Any fact category except demographics/measurements can contribute
+  // to grounding (for non-R codes). If there are zero such facts,
+  // every candidate is dropped with `no_diagnosis_facts`.
+  const hasGroundingFacts =
     facts.diagnoses.length > 0 ||
+    facts.chiefComplaint.length > 0 ||
+    facts.symptoms.length > 0 ||
+    facts.findings.length > 0 ||
+    facts.medications.length > 0 ||
+    facts.procedures.length > 0 ||
+    facts.plan.length > 0 ||
     facts.familyHistory.length > 0 ||
     facts.personalHistory.length > 0 ||
     facts.socialHistory.length > 0 ||
@@ -257,7 +387,7 @@ export function filterCertainIcdCandidates(
     facts.epidemiologicalHistory.length > 0;
 
   for (const candidate of candidates) {
-    if (!hasDiagnosticFacts) {
+    if (!hasGroundingFacts) {
       dropped.push({ candidate, reason: "no_diagnosis_facts" });
       continue;
     }

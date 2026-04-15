@@ -42,6 +42,9 @@ Select the most specific applicable codes. Include confidence level.
 TASK 5 — EXTRACT MEDICATION NAMES:
 List ALL medication/drug names mentioned in the transcript, exactly as spoken or written. Include brand names, generic names, and any dosage forms mentioned. Do not normalize or translate — preserve the original form.
 
+PER-FILE DIRECTIVES:
+Individual files in the input may contain a line starting with "DOCTOR'S DIRECTIVE FOR THIS FILE:". When present, this directive strictly limits what you may use from that file. You MUST only consider the parts of the file that the directive permits. Ignore all other content from that file for ALL tasks above — concept matching, specialty inference, problem clustering, ICD code suggestion, and medication extraction. Per-file directives are strict filters and take precedence over completeness.
+
 OUTPUT: Return ONLY valid JSON, no markdown, no explanation. Keep all string values short and simple — no embedded newlines or special characters:
 {
   "matchedConcepts": [

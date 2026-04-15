@@ -593,12 +593,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Preserve the full Pass 1 candidate list BEFORE certainty filtering.
+    // These are shown as suggestions in the ICD panel so the doctor can
+    // pick codes that the certainty filter dropped.
+    const allCandidateIcdCodes = clinicalAnalysis?.candidateIcdCodes ?? [];
+
     // Pass 1.7 — Diagnosis certainty filter. Drop any candidate ICD code
     // that isn't lexically grounded in the validated diagnosis/history facts.
     // This is the deterministic gate that eliminates run-to-run drift in
     // the final Záver: Opus only sees codes that survived this filter, and
     // the system prompt forbids it from inventing new ones.
     if (clinicalAnalysis && clinicalAnalysis.candidateIcdCodes.length > 0) {
+      // Debug: log fact values per category so we can trace grounding decisions
+      const factSummary: Record<string, string[]> = {};
+      for (const cat of [
+        "diagnoses",
+        "chiefComplaint",
+        "symptoms",
+        "findings",
+        "medications",
+        "personalHistory",
+        "plan",
+      ] as const) {
+        const facts = validatedFacts[cat];
+        if (facts.length > 0) {
+          factSummary[cat] = facts.map((f) => f.value);
+        }
+      }
+      logger.debug(
+        `[generate] ICD grounding facts:`,
+        JSON.stringify(factSummary, null, 2),
+      );
+
       const certainty = filterCertainIcdCandidates(
         clinicalAnalysis.candidateIcdCodes,
         validatedFacts,
@@ -791,6 +817,9 @@ export async function POST(request: NextRequest) {
                   secondarySpecialty: finalAnalysis.secondarySpecialty,
                   matchedConcepts: finalAnalysis.matchedConcepts,
                   candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  // Full Pass 1 candidates (pre-filter) for the ICD panel
+                  // so the doctor sees all suggestions, not just certain ones
+                  suggestedIcdCodes: allCandidateIcdCodes,
                   problemClusters: finalAnalysis.problemClusters,
                   mentionedMedications: finalAnalysis.mentionedMedications,
                 },
@@ -837,6 +866,7 @@ export async function POST(request: NextRequest) {
                   inferredSpecialty: finalAnalysis.inferredSpecialty,
                   secondarySpecialty: finalAnalysis.secondarySpecialty,
                   candidateIcdCodes: finalAnalysis.candidateIcdCodes,
+                  suggestedIcdCodes: allCandidateIcdCodes,
                   matchedConcepts: finalAnalysis.matchedConcepts,
                   problemClusters: finalAnalysis.problemClusters,
                   mentionedMedications: finalAnalysis.mentionedMedications,

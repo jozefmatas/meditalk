@@ -50,9 +50,10 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 │            → drop facts replaced by speaker corrections     │
 │              ("vlastne", "sorry, 2 ribs", ", nie,")        │
 │                                                             │
-│  Pass 1.7 ─ filterCertainIcdCandidates  pure TS  ◄── NEW   │
+│  Pass 1.7 ─ filterCertainIcdCandidates  pure TS             │
 │           → drop ICD candidates not lexically grounded      │
-│             in diagnoses/history-subcategory facts           │
+│             in diagnoses/chiefComplaint/history facts        │
+│             (R-chapter excluded from chiefComplaint)         │
 │                                                             │
 │  Prompt  ─ buildTemplateSystemPrompt + buildEnriched...     │
 │          → system prompt = template + specialty pack +      │
@@ -88,7 +89,7 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 **Key guarantees:**
 
 1. **Every fact has verbatim evidence.** Pass 1.5 refuses to emit a fact without a quote; Pass 1.6a drops any fact whose quote isn't in the source.
-2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in `diagnoses` or history-subcategory facts (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`); Pass 2.5 defensively strips any Opus snuck past the prompt.
+2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in validated facts. Non-R codes (disease codes) use **broad grounding** — all fact categories except `demographics` and `measurements`. R-chapter symptom codes (R00-R99) use **strict grounding** — only `diagnoses` + history subcategories. Clinical synonyms bridge layperson↔medical term gaps (e.g. "krvný tlak" ↔ "hypertenzia"). Direct ICD code matching instantly grounds codes dictated by name. Pass 2.5 defensively strips any Opus snuck past the prompt.
 3. **Same inputs → same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates. ICD codes are pre-rendered in sorted order (VERBATIM copy), facts are pre-assigned to template sections, and transcript is omitted when facts are present — Opus acts as a formatter, not a reasoner.
 4. **No hallucinated clinical content.** Opus receives pre-rendered ICD codes (VERBATIM block), pre-assigned facts (per-section), and no raw transcript to deviate from. The validated facts are the sole factual contract.
 
@@ -226,11 +227,11 @@ Two routes invoke the extractor:
 
 Extracted file texts become entries in `FactExtractionInput.files`, and also prepended to `clinicalInputParts` that Pass 1 sees. Each file keeps its own `sourceIndex` so the Pass 1.5 fact extractor can anchor evidence at `[file sourceIndex=N]`.
 
-When a file has a `context` value (see §2.6), all three prompt paths inject it as `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` immediately after the file header and before the extracted text. This applies to:
+When a file has a `context` value (see §2.6), all three prompt paths inject it as `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` immediately after the file header and before the extracted text. All three passes have explicit prompt instructions to respect directives:
 
-- `clinicalInputParts` in [generate/route.ts](web/src/app/api/generate/route.ts) (Pass 1 input)
-- `buildFactExtractionUserMessage` in [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) (Pass 1.5 input)
-- `buildTemplateUserMessage` in [anthropic.ts](web/src/lib/anthropic.ts) (Pass 2 input)
+- `clinicalInputParts` in [generate/route.ts](web/src/app/api/generate/route.ts) (Pass 1 input) — enforced via `PER-FILE DIRECTIVES` block in [prompts.ts](web/src/lib/clinical/prompts.ts) system prompt
+- `buildFactExtractionUserMessage` in [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) (Pass 1.5 input) — enforced via explicit user-message instruction
+- `buildTemplateUserMessage` in [anthropic.ts](web/src/lib/anthropic.ts) (Pass 2 input) — enforced via `PER-FILE DIRECTIVES` rule in system prompt
 
 ### 2.5 Upload-in-flight guard
 
@@ -519,7 +520,7 @@ Pure TypeScript. Drops facts that were replaced by the speaker. Rule-based, 100%
 **Detection:** for each fact, find its evidence quote in the source and look ahead ~120 chars for either:
 
 - A curated **correction phrase** (`"vlastne"`, `"pardon"`, `"opravujem sa"`, `"nie, skor"`, `"actually"`, `"sorry"`, `"i mean"`, `"correction"`, `"strike that"`, Czech/Slovak/English curated lists in [fact-resolver.ts:65-123](web/src/lib/clinical/fact-resolver.ts#L65)), or
-- A **punctuation-bracketed negation** matched by `/[,;.:—–-]\s*(nie|ne|no|nein|non|nej|neni|nicht)\s*[,;.:—–-]/iu`. This catches bare `, nie,` without swallowing legitimate negations that start a sentence.
+- A **punctuation-bracketed negation** matched by `/[,;.:—–-]\s*(nie|ne|nein|non|nej|neni|nicht|ikke|inte|nix|niet)\s*[,;.:—–-]/iu`. This catches bare `, nie,` without swallowing legitimate negations that start a sentence. Note: English `no` is **excluded** from this regex because Slovak `no` means "well/so" (filler word, extremely common in clinical speech) and caused false positive drops. English corrections like "no wait" / "wait no" are covered by the phrase-based detection instead.
 
 **What it does NOT do:** numeric last-mention-wins deduplication. That rule wrongly collapsed legitimate time-series (multiple BP readings at different times). Exact duplicates are already removed by `validateFacts`; nothing else should be merged here.
 
@@ -532,10 +533,10 @@ Output is a `ResolutionResult` with a list of `ResolutionEvent`s recording which
 
 ---
 
-## 8. Pass 1.7 — ICD Certainty Filter (NEW)
+## 8. Pass 1.7 — ICD Certainty Filter
 
 File: [web/src/lib/clinical/icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)
-Tests: [web/src/lib/clinical/icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts) — 27 tests, covering the user's EMS regression
+Tests: [web/src/lib/clinical/icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts) — 38+ tests covering EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism
 
 ### 8.1 Problem it solves
 
@@ -546,17 +547,45 @@ Concrete repro from the user:
 - Run 1: `I21.2 + I10 + R07.2 + E11.91` (chest-pain symptom code plus inferred decompensated DM)
 - Run 2: `I21.2 + I10` (clinically correct minimum)
 
-### 8.2 Rule
+### 8.2 Grounding rule (two-tier)
 
-A candidate ICD code is **certain** iff at least one token from a grounded `diagnoses` or history-subcategory fact (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`) substring-matches the normalized ICD description, OR a token from the ICD description substring-matches a grounded fact value. `chiefComplaint`, `symptoms`, `findings`, `measurements` are **deliberately NOT** used as grounding sources — if the only evidence is "chest pain" we emit the underlying MI (`I21.2`) but never the symptom code (`R07.2`).
+**Non-R codes (disease codes — I, E, J, K, …):** Broad grounding. ALL fact categories contribute EXCEPT `demographics` and `measurements`. This is necessary because Haiku often categorizes conditions under `symptoms`, `findings`, or `medications` rather than `diagnoses`.
+
+**R-chapter codes (symptom/sign codes R00-R99):** Strict grounding. Only `diagnoses` + history subcategories (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`). This prevents "chest pain" (symptom fact) from promoting R07.2 while allowing it to promote I21.4 (disease code).
+
+A candidate ICD code is **certain** iff at least one of these checks passes:
+
+1. **Direct code match:** The literal ICD code string (e.g. `"I10"`, `"I21.4"`) appears in any grounding fact value. Doctors often dictate codes directly ("diagnóza I10").
+2. **Stem match:** A token from a grounding fact value substring-matches (after 6-char stemming) the normalized ICD description, OR a token from the ICD description substring-matches a grounding fact value. Bidirectional matching ensures tolerance to whichever side carries more specific terminology.
+3. **Synonym match:** If a stemmed token has entries in the clinical synonym table (see §8.4), those synonym stems are tested as additional substring-match candidates.
 
 ### 8.3 Matcher internals
 
-- **Token extraction** ([icd-certainty.ts:163](web/src/lib/clinical/icd-certainty.ts#L163)): split normalized text on whitespace, drop a cross-locale stop-word set, drop tokens shorter than 4 chars unless they are on the clinical abbreviation whitelist (`IM`, `HT`, `DM`, `ACS`, `MI`, `IBS`, `CMP`, `TIA`, `CABG`, `PCI`, `COPD`, `CHOPN`, `STEMI`, `NSTEMI`, `ASTMA`, `ASTHMA`, `CHF`, `AFIB`, `AMI`, `CV`).
-- **Stemming** ([icd-certainty.ts:174](web/src/lib/clinical/icd-certainty.ts#L174)): truncate tokens longer than 6 chars to the first 6 so `hypertenzia`/`hypertenzie`/`hypertenze`/`hypertension` all share the stem `hypert`. This is crude but works across `sk`/`cs`/`en` without per-locale wiring.
-- **Bidirectional match** ([icd-certainty.ts:184](web/src/lib/clinical/icd-certainty.ts#L184)): check fact→ICD AND ICD→fact so the filter is tolerant to whichever side carries the more specific terminology.
+- **Token extraction** ([icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)): split normalized text on whitespace, drop a cross-locale stop-word set, drop tokens shorter than 4 chars unless they are on the clinical abbreviation whitelist (`IM`, `HT`, `DM`, `ACS`, `MI`, `IBS`, `CMP`, `TIA`, `CABG`, `PCI`, `COPD`, `CHOPN`, `STEMI`, `NSTEMI`, `ASTMA`, `ASTHMA`, `CHF`, `AFIB`, `AMI`, `CV`).
+- **Stemming** ([icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)): truncate tokens longer than 6 chars to the first 6 so `hypertenzia`/`hypertenzie`/`hypertenze`/`hypertension` all share the stem `hypert`. This is crude but works across `sk`/`cs`/`en` without per-locale wiring.
+- **Bidirectional match** ([icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)): check fact→ICD AND ICD→fact so the filter is tolerant to whichever side carries the more specific terminology.
 
-### 8.4 Output
+### 8.4 Clinical synonym table
+
+Stem matching handles inflection but NOT synonyms. Slovak/Czech layperson terms often share zero lexical overlap with formal ICD descriptions (e.g. "krvný tlak" vs "hypertenzia"). The `SYNONYM_GROUPS` table maps between these:
+
+| Group          | Stems                      | Bridges                                          |
+| -------------- | -------------------------- | ------------------------------------------------ |
+| Blood pressure | `tlak`, `hypert`, `tenzie` | krvný tlak ↔ hypertenzia/hypertenze/hypertension |
+| Diabetes       | `cukrov`, `diabet`         | cukrovka ↔ diabetes mellitus                     |
+| MI             | `zaval`, `infark`          | srdcový zával ↔ infarkt myokardu                 |
+| Stroke         | `mrtvic`, `porazk`         | mŕtvica/porážka ↔ CMP                            |
+| Asthma         | `astma`, `asthma`          | astma (SK/CZ) ↔ asthma (EN)                      |
+
+At module load, a `SYNONYM_LOOKUP` Map is precomputed from these groups for O(1) lookup. When `tokensOverlapStemmed` finds no direct stem match, it checks if the stem has synonyms and tests those against the target text.
+
+False positives are gated by Pass 1's code selection — synonyms only help codes that Pass 1 already identified as candidates. A fact about "atmosférický tlak" won't promote I10 unless Pass 1 independently suggested I10 for that encounter.
+
+### 8.5 Suggested vs. certain ICD codes
+
+The generate route preserves ALL pre-filter candidates from Pass 1 as `suggestedIcdCodes` in `clinical_analysis` metadata (separate from the filtered `candidateIcdCodes`). The ICD panel UI prefers `suggestedIcdCodes` so the doctor sees all candidates, not just the certain ones that appear in the note.
+
+### 8.6 Output
 
 ```ts
 interface CertaintyFilterResult {
@@ -567,20 +596,20 @@ interface CertaintyFilterResult {
 type DropReason = "no_diagnosis_facts" | "no_matching_token";
 ```
 
-### 8.5 Where it runs
+### 8.7 Where it runs
 
 In both routes, **immediately after** fact resolution and **before** `buildEnrichedSystemPrompt`:
 
-- [web/src/app/api/generate/route.ts:464-482](web/src/app/api/generate/route.ts#L464)
-- [web/src/app/api/regenerate/route.ts:283-299](web/src/app/api/regenerate/route.ts#L283)
+- [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts)
+- [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)
 
 The filter rewrites `clinicalAnalysis.candidateIcdCodes` in place so everything downstream (prompt, extraction, metadata) sees the filtered list.
 
-### 8.6 Guarantees
+### 8.8 Guarantees
 
 - **Pure function.** Does not mutate its inputs. Same inputs → same output every run.
 - **Confidence-independent.** A Pass 1 `high`-confidence candidate with no fact support is still dropped; a `low`-confidence candidate with fact support is kept.
-- **Empty-safe.** Empty diagnoses + history-subcategory facts → drop every candidate with reason `no_diagnosis_facts`. Safer to emit an empty Záver than hallucinated codes.
+- **Empty-safe.** When there are zero grounding facts (all categories except demographics/measurements empty) → drop every candidate with reason `no_diagnosis_facts`. When all candidates are dropped, `buildEnrichedSystemPrompt` adds an explicit "NO ICD CODES" instruction telling Opus to not include ANY ICD codes — preventing hallucinated codes in the output.
 
 ---
 
@@ -594,7 +623,7 @@ The base template prompt gets augmented with:
 
 1. **Specialty prompt pack** — addendum, terminology notes, emphasized sections from [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts). When the template declares a `specialties` field, the template specialty overrides Pass 1's `inferredSpecialty` — eliminates cross-run variance from LLM specialty detection.
 2. **Medication verification block** — exact names resolved against the approved medication index. Medications not found in the approved list are included using the doctor's exact dictated name without any warning label or annotation (no `[NEOVERENÝ LIEK]` markers in the output).
-3. **ICD-10 BLOCK (VERBATIM)** — the **filtered** list from Pass 1.7, pre-rendered by `buildPreRenderedIcdBlock()` which sorts candidates alphabetically by code and formats as `- {code} {description}`. The prompt instructs Opus to copy this block verbatim into the Záver/Assessment section — no reordering, adding, removing, or rephrasing. Confidence labels are excluded (internal metadata only).
+3. **ICD-10 BLOCK (VERBATIM)** — the **filtered** list from Pass 1.7, pre-rendered by `buildPreRenderedIcdBlock()` which sorts candidates alphabetically by code and formats as `- {code} {description}`. The prompt instructs Opus to copy this block verbatim into the Záver/Assessment section — no reordering, adding, removing, or rephrasing. Confidence labels are excluded (internal metadata only). When the candidate list is **empty** (all dropped by certainty filter), an explicit **"NO ICD CODES"** instruction is added instead, telling Opus to not include ANY ICD codes and not invent/guess codes based on clinical context.
 4. **Matched clinical concepts** and **problem clusters** — hints for structuring the Assessment section.
 
 ### 9.2 User message
@@ -777,13 +806,13 @@ File: [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)
 
 ### 14.1 Tables
 
-| Table               | Migrations                                                                                                                                                               | Purpose                                                                               |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `visits`            | [002](web/supabase/migrations/002_visits_schema.sql), [003](web/supabase/migrations/003_encounter_statuses.sql), [009](web/supabase/migrations/009_rename_soap_note.sql) | Main encounter record. Metadata is JSONB.                                             |
+| Table               | Migrations                                                                                                                                                               | Purpose                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `visits`            | [002](web/supabase/migrations/002_visits_schema.sql), [003](web/supabase/migrations/003_encounter_statuses.sql), [009](web/supabase/migrations/009_rename_soap_note.sql) | Main encounter record. Metadata is JSONB.                                                                                                                                           |
 | `transcript_chunks` | [002](web/supabase/migrations/002_visits_schema.sql)                                                                                                                     | Legacy chunk + embedding store (`vector(1536)`). Still used for similarity search on older encounters. Queries use `text-embedding-ada-002` (legacy model) to match stored vectors. |
-| `templates`         | [006](web/supabase/migrations/006_templates.sql)–[012](web/supabase/migrations/012_template_usage.sql)                                                                   | User-defined templates with i18n, style guide, usage tracking.                        |
-| `api_usage`         | [005](web/supabase/migrations/005_api_usage.sql)                                                                                                                         | Per-call token/cost log.                                                              |
-| `audit_logs`        | [013](web/supabase/migrations/013_audit_logs.sql), [014](web/supabase/migrations/014_auth_audit_trigger.sql)                                                             | User-action audit trail.                                                              |
+| `templates`         | [006](web/supabase/migrations/006_templates.sql)–[012](web/supabase/migrations/012_template_usage.sql)                                                                   | User-defined templates with i18n, style guide, usage tracking.                                                                                                                      |
+| `api_usage`         | [005](web/supabase/migrations/005_api_usage.sql)                                                                                                                         | Per-call token/cost log.                                                                                                                                                            |
+| `audit_logs`        | [013](web/supabase/migrations/013_audit_logs.sql), [014](web/supabase/migrations/014_auth_audit_trigger.sql)                                                             | User-action audit trail.                                                                                                                                                            |
 
 ### 14.2 Key `visits` columns
 
@@ -859,8 +888,8 @@ Everything in the clinical pipeline has unit tests in [web/src/lib/clinical/](we
 | [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                    | 27 tests including the user's EMS regression: candidates `[I21.2, I10, R07.2, E11.91, E78.5]` with diagnosis facts `["akútny infarkt myokardu", "artériová hypertenzia"]` → keeps exactly `[I21.2, I10]`. Also covers short-word whitelist, bidirectional stem matching, chapter strictness, determinism, and purity. |
 | [icd-validation.test.ts](web/src/lib/clinical/icd-validation.test.ts)                  | Canonical description replacement for hallucinated ICDs.                                                                                                                                                                                                                                                              |
 | [json-repair.test.ts](web/src/lib/clinical/json-repair.test.ts)                        | `extractJson` robust fallback parsing.                                                                                                                                                                                                                                                                                |
-| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                              | `buildEnrichedSystemPrompt` — specialty, pre-rendered ICD block (VERBATIM), concepts, medications blocks. `buildPreRenderedIcdBlock` — alphabetical sort, no confidence labels, determinism, immutability.                                                                                                             |
-| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts)    | `assignFactsToSections` — category-to-section mapping via context keywords and label abbreviations. `formatAssignedFactsForPrompt` — section-grouped output, unassigned fallback, ordering.                                                                                                                          |
+| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                              | `buildEnrichedSystemPrompt` — specialty, pre-rendered ICD block (VERBATIM), concepts, medications blocks. `buildPreRenderedIcdBlock` — alphabetical sort, no confidence labels, determinism, immutability.                                                                                                            |
+| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts)    | `assignFactsToSections` — category-to-section mapping via context keywords and label abbreviations. `formatAssignedFactsForPrompt` — section-grouped output, unassigned fallback, ordering.                                                                                                                           |
 | [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                        | SHA-256 stability, stable stringify, `diffFingerprints` component-level diff.                                                                                                                                                                                                                                         |
 | [wav-builder.test.ts](web/src/lib/wav-builder.test.ts)                                 | WAV header construction, PCM accumulation, `extractNewChunks` partial extraction, `resetExtraction`, `reset`.                                                                                                                                                                                                         |
 | [sources.test.ts](web/src/lib/encounters/sources.test.ts)                              | `getTranscript`, `getDoctorNotes`, `getFileTexts` — null/empty/happy-path, recording file exclusion.                                                                                                                                                                                                                  |
@@ -898,7 +927,7 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | Source                                                                          | Absorbed by                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pass 1 concept count drifting run-to-run (9 vs 7)                               | Downstream passes don't consume `matchedConcepts` as ground truth — only as hints.                                                                                                                                                                                                 |
-| Pass 1 ICD candidates including weak inferences from labs/symptoms              | **Pass 1.7** drops anything not grounded in `diagnoses`/`history`.                                                                                                                                                                                                                 |
+| Pass 1 ICD candidates including weak inferences from labs/symptoms              | **Pass 1.7** drops anything not grounded in `diagnoses`/`chiefComplaint`/`history`. R-chapter codes excluded from chiefComplaint grounding.                                                                                                                                        |
 | Pass 1.5 Haiku occasionally mislabeling `transcript` vs `file` source type      | Pass 1.6 cross-source fallback.                                                                                                                                                                                                                                                    |
 | Pass 1.5 Haiku paraphrasing the evidence slightly                               | Fuzzy matcher in `evidenceAppearsInSource`.                                                                                                                                                                                                                                        |
 | Pass 1.5 Haiku emitting both sides of a correction                              | Pass 1.6b correction-phrase detector.                                                                                                                                                                                                                                              |
@@ -915,7 +944,7 @@ All Anthropic calls use `temperature: 0`. None of the determinism guarantees com
 | `requestData()` corrupting mp4 container on Safari iOS (post-resume audio loss) | `requestData()` is **skipped on mp4** — `pause()` calls `recorder.pause()` directly; all data captured in one clean blob on `stop()`. Trade-off: no pause-time snapshot/upload on Safari. Non-mp4 browsers still use `requestData()` with feature-detection guard + 500ms timeout. |
 | `getSupportedMimeType()` returning `""` on exotic browsers (recorder crash)     | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`.                                                                                                                                                                                               |
 | Native foreground-service teardown disrupting WebView network (TypeError)       | `audioRecoveryPath = uploadedPath` safety net in `handleGenerate`/`handleAdjustGenerate` — server downloads and transcribes from storage when client-side transcription fails entirely.                                                                                            |
-| Server-side recovery re-transcribing audio that client already transcribed     | Double-transcription guard: `if (effectiveAudioPath && (audioPath \|\| !transcriptText))` — skips recovery when client sent `transcriptText` without `audioPath`, since the metadata audio path is the same blob the client already transcribed.                                   |
+| Server-side recovery re-transcribing audio that client already transcribed      | Double-transcription guard: `if (effectiveAudioPath && (audioPath \|\| !transcriptText))` — skips recovery when client sent `transcriptText` without `audioPath`, since the metadata audio path is the same blob the client already transcribed.                                   |
 | File context save racing with generation (directive lost)                       | `handleContextSave` tracks the PATCH promise in module-level `pendingContextSaves` Map. `handleGenerate`/`handleAdjustGenerate` call `await awaitPendingContextSave(visitId)` before `/api/generate` — guarantees per-file directives are in the DB before the server reads them.  |
 | Doctor notes auto-save failing silently                                         | `useSaveStatus` hook with visual indicator + single retry after 3s. Toast errors on recording.                                                                                                                                                                                     |
 | Server dying mid-generation (encounter stuck in "processing")                   | `generation_pending.startedAt` timestamp + client auto-correction resets to "started" after 3 min. Polling hook also has 180s timeout + `onPollTimeout` auto-resume (once per page load).                                                                                          |

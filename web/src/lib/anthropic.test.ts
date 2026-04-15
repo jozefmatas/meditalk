@@ -319,6 +319,19 @@ describe("buildTemplateSystemPrompt", () => {
     expect(prompt).toContain("(not further specified)");
   });
 
+  it("includes FACT VALUE FIDELITY rule for deterministic output", () => {
+    const prompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("FACT VALUE FIDELITY");
+    expect(prompt).toContain("formatting task, not a creative writing task");
+    expect(prompt).toContain("Do NOT rephrase, paraphrase, elaborate");
+    expect(prompt).toContain("Do NOT merge multiple facts");
+    expect(prompt).toContain("EXACT order they appear in the input");
+  });
+
   it("includes source-priority hierarchy", () => {
     const prompt = buildTemplateSystemPrompt(
       SIMPLE_TEMPLATE,
@@ -527,5 +540,38 @@ describe("buildTemplateUserMessage", () => {
     expect(msg).toContain("DOCTOR'S ADDITIONAL NOTES");
     expect(msg).toContain("UPLOADED FILE CONTENTS");
     expect(msg).toContain("Return valid JSON");
+  });
+
+  it("includes strict rules in the fact block header when facts are pre-assigned", async () => {
+    const { emptyExtractedFacts } = await import("./clinical/fact-extraction");
+    const validatedFacts = {
+      ...emptyExtractedFacts(),
+      symptoms: [
+        {
+          category: "symptoms" as const,
+          value: "headache for 3 days",
+          source: {
+            type: "transcript" as const,
+            sourceIndex: 0,
+            evidence: "headache",
+          },
+        },
+      ],
+    };
+    const sectionLabels = { subjective: "Subjective" };
+    const msg = buildTemplateUserMessage(
+      ["transcript chunk"],
+      SIMPLE_TEMPLATE,
+      undefined,
+      undefined,
+      validatedFacts,
+      sectionLabels,
+    );
+    expect(msg).toContain("PRE-ASSIGNED TO SECTIONS");
+    expect(msg).toContain("Preserve each fact's wording");
+    expect(msg).toContain("EXACT order shown below");
+    expect(msg).toContain("Do NOT merge facts");
+    // Transcript should be excluded when facts are present
+    expect(msg).not.toContain("[Chunk 1]:");
   });
 });

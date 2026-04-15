@@ -193,7 +193,11 @@ RULES:
   if (analysis.candidateIcdCodes.length > 0) {
     const icdBlock = buildPreRenderedIcdBlock(analysis.candidateIcdCodes);
     parts.push(
-      `\nICD-10 BLOCK (VERBATIM) — Copy the following block EXACTLY as-is into the Záver/Assessment section. Do NOT reorder, add, remove, rephrase, or modify any line. Do NOT add any other ICD codes. Every code below has been validated by a deterministic certainty filter — codes not in this list MUST NOT appear anywhere in your output:\n${icdBlock}`,
+      `\nICD-10 BLOCK (VERBATIM) — Copy the following block EXACTLY as-is into the Záver/Assessment section. The Záver/Assessment section MUST contain ONLY these ICD-10 code lines — no additional narrative text, clinical summary, impressions, or commentary. Do NOT reorder, add, remove, rephrase, or modify any line. Do NOT add any other ICD codes. Every code below has been validated by a deterministic certainty filter — codes not in this list MUST NOT appear anywhere in your output:\n${icdBlock}`,
+    );
+  } else {
+    parts.push(
+      `\nICD-10 CODES: No ICD-10 codes were identified with sufficient certainty for this encounter. Do NOT include ANY ICD-10 codes in your output. Do NOT invent, guess, or add ICD codes based on clinical context.`,
     );
   }
 

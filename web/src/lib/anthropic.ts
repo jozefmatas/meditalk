@@ -103,6 +103,14 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 2a. NEVER FABRICATE MISSING CLINICAL DIMENSIONS: If a numeric value appears in the source WITHOUT a unit or dimension (e.g. the patient says "fajčím 15" with no "cigariet/deň" and no "rokov"), you MUST NOT invent the missing dimension. "15 cigariet denne" is WRONG. "fajčí 15 rokov" is WRONG. The correct behaviour is to preserve the raw value and explicitly mark the ambiguity — write e.g. "fajčí 15 (bližšie nešpecifikované)" in Slovak, "kouří 15 (blíže nespecifikováno)" in Czech, or "smokes 15 (not further specified)" in English. The same principle applies to EVERY missing clinical dimension: frequency ("per day" vs "per week"), duration ("years" vs "months"), laterality (left/right), severity, dosage strength, route of administration, temporal anchor. If the source does not literally state it, do NOT fill it in — even if one interpretation is statistically more common. Correctness > completeness: a shorter, vaguer statement is always preferable to a confident fabrication. This rule overrides any stylistic preference for complete sentences.
 
+2b. FACT VALUE FIDELITY (when VALIDATED CLINICAL FACTS are provided): The pre-assigned facts are the sole source of clinical truth. Your job is to FORMAT them into the note, not to REWRITE them.
+   - Reproduce each fact's wording as closely as possible. Only adjust grammatical case, declension, or word order as minimally needed for natural {{language}} text.
+   - Do NOT rephrase, paraphrase, elaborate, summarize, or add explanatory context beyond what the fact states.
+   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement or bullet point.
+   - Present facts within each section in the EXACT order they appear in the input. Do not reorder facts.
+   - If a section has pre-assigned facts, its content MUST be derived exclusively from those facts — do not add information from other sections or from general clinical knowledge.
+   - The same facts must produce the same output text every time. Treat this as a formatting task, not a creative writing task.
+
 3. SOURCE PRIORITY (highest to lowest):
    1. Actual spoken transcript — always takes precedence
    2. Doctor's additional notes
@@ -183,7 +191,7 @@ export function buildTemplateUserMessage(
       );
       const factBlock = formatAssignedFactsForPrompt(assignment, sectionLabels);
       parts.push(
-        `VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS (place ONLY the listed facts into each section — do NOT move facts between sections, do NOT introduce clinical details that are not in this list):\n\n${factBlock}`,
+        `VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS:\nRULES:\n1. Place ONLY the listed facts into each section — do NOT move facts between sections.\n2. Do NOT introduce clinical details, context, or information not in this list.\n3. Preserve each fact's wording as closely as possible — only adjust grammar minimally.\n4. Present facts in the EXACT order shown below within each section. Do NOT reorder.\n5. Each fact = one distinct statement or bullet point. Do NOT merge facts into compound sentences.\n\n${factBlock}`,
       );
     } else {
       // Fallback: category-grouped facts without section assignment
