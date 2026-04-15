@@ -172,7 +172,7 @@ RULES:
 - Include both brand name and active ingredient
 - Do NOT add medications that are "commonly prescribed" for a condition unless they are explicitly mentioned in the source material
 - If a medication is marked [corrected from "..."], use the CORRECTED name (it was auto-matched from a misspelling)
-- If a medication is marked [not found in approved list], DO NOT include it in the clinical note — instead write "[NEOVERENÝ LIEK: name]" as a placeholder so the doctor can manually verify`);
+- If a medication is marked [not found in approved list], still include it in the clinical note using EXACTLY the name the doctor dictated — do NOT add any warning label, bracket, or annotation around it`);
   }
 
   // Add ICD code candidates

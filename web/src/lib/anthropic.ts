@@ -121,6 +121,21 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
      - When in doubt, use a more general title that the codes actually support.
      Example — if the primary diagnosis is "I21 Akútny infarkt myokardu", the title should be "Akútny infarkt myokardu", NOT "Akútny STEMI laterálnej steny".
 
+8. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
+
+   COMMON ABBREVIATIONS used in Slovak/Czech medical templates:
+   RA = Rodinná anamnéza (Family history) | OA = Osobná anamnéza (Personal/past medical history) | SA = Sociálna anamnéza (Social history — living situation, marital status, support system) | EA = Epidemiologická anamnéza (Epidemiological history — travel, exposures) | PA = Pracovná anamnéza (Work/occupational history — job, occupation, workplace exposures) | AA = Alergie (Allergies) | LA = Lieková anamnéza (Current medications — drug names, dosages, frequencies) | Ab = Abúzy (Substance use — tobacco, alcohol, recreational drugs) | TO = Terajšie ochorenie (History of present illness — chief complaint, symptom timeline, current episode narrative ONLY, NEVER medication lists)
+
+   HARD ROUTING RULES (violations are NEVER acceptable):
+   a) Medication/drug lists → ONLY in sections labeled LA, Meds, "Lieková anamnéza", "Aktuálna medikácia", or "Current medications". NEVER place medication lists in TO/HPI or any other section. The TO/HPI section is for the illness narrative only.
+   b) Substance use (smoking, tobacco, alcohol, drugs, "fajčí", "pije", "tabak", "alkohol") → ONLY in sections labeled Ab, Substances, "Abúzy", "Tabak", "Alkohol". NEVER place substance use in PA (work history) or SA (social history).
+   c) Work/occupation ("pracuje", "zamestnaný", "povolanie") → ONLY in sections labeled PA, OccHx, "Pracovná anamnéza", or "Work history". NEVER place work info in SA (social history).
+   d) Social circumstances (living situation, marital status, support system, "býva", "žije", "slobodný/ženatý") → ONLY in sections labeled SA, SHx, "Sociálna anamnéza", or "Social history". NEVER place social info in PA (work history).
+   e) Chief complaint and symptom timeline → ONLY in sections labeled TO, HPI, "Terajšie ochorenie", or "History of present illness".
+   f) Family history → ONLY in sections labeled RA, FHx, "Rodinná anamnéza", or "Family history".
+   g) Past medical/surgical history → ONLY in sections labeled OA, PMHx, "Osobná anamnéza", or "Past history".
+   h) Allergies → ONLY in sections labeled AA, "Alergie", or "Allergies".
+
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
 {{styleGuide}}`);

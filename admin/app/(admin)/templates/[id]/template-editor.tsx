@@ -1046,6 +1046,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             </div>
 
             <DndContext
+              id="template-sections"
               sensors={sensors}
               collisionDetection={closestCenter}
               onDragEnd={handleTopDragEnd}
@@ -1075,6 +1076,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
                       {section.subsections &&
                         section.subsections.length > 0 && (
                           <DndContext
+                            id={`template-subsections-${section.id}`}
                             sensors={sensors}
                             collisionDetection={closestCenter}
                             onDragEnd={handleSubDragEnd(topIndex)}

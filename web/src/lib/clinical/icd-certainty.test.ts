@@ -16,10 +16,10 @@ function icd(
   return { code, description, confidence, sourceConceptIds: [] };
 }
 
-/** Helper: build a diagnoses-only or history-only fact bundle. */
+/** Helper: build a diagnoses-only or personalHistory-only fact bundle. */
 function bundle(
   diagnoses: string[] = [],
-  history: string[] = [],
+  personalHistory: string[] = [],
   other: Partial<ExtractedFacts> = {},
 ): ExtractedFacts {
   const facts = emptyExtractedFacts();
@@ -32,7 +32,9 @@ function bundle(
     source: { type: "transcript", sourceIndex: 0, evidence: value },
   });
   facts.diagnoses = diagnoses.map((v) => makeFact(v, "diagnoses"));
-  facts.history = history.map((v) => makeFact(v, "history"));
+  facts.personalHistory = personalHistory.map((v) =>
+    makeFact(v, "personalHistory"),
+  );
   if (other.chiefComplaint) facts.chiefComplaint = other.chiefComplaint;
   if (other.symptoms) facts.symptoms = other.symptoms;
   if (other.findings) facts.findings = other.findings;
@@ -89,7 +91,7 @@ describe("filterCertainIcdCandidates — user's EMS regression", () => {
     const facts = bundle(
       // diagnoses facts the doctor actually dictated
       ["akútny infarkt myokardu", "artériová hypertenzia"],
-      // history
+      // personalHistory
       [],
       // other categories that should NOT count as grounding
       {
@@ -133,7 +135,7 @@ describe("filterCertainIcdCandidates — user's EMS regression", () => {
 });
 
 describe("filterCertainIcdCandidates — empty fact set safety", () => {
-  it("drops EVERY candidate when there are no diagnosis or history facts", () => {
+  it("drops EVERY candidate when there are no diagnosis or personalHistory facts", () => {
     const candidates: CandidateIcdCode[] = [
       icd("I21.2", "Akútny infarkt myokardu"),
       icd("I10", "Esenciálna hypertenzia"),
@@ -192,7 +194,7 @@ describe("filterCertainIcdCandidates — chapter strictness", () => {
 
   it("does NOT promote metabolic candidates via lab measurements alone", () => {
     // E11.91 diabetes decompensated should not be inferable from a
-    // glucose value alone. Only a diagnoses/history fact naming
+    // glucose value alone. Only a diagnoses/personalHistory fact naming
     // diabetes grounds E11.91.
     const candidates = [
       icd("E11.91", "Diabetes mellitus 2. typu: dekompenzovaný"),
@@ -223,8 +225,8 @@ describe("filterCertainIcdCandidates — chapter strictness", () => {
     expect(result.kept.map((c) => c.code)).toEqual(["E11.9"]);
   });
 
-  it("keeps a diagnosis candidate grounded in history facts", () => {
-    // Chronic/past conditions end up in `history`, not `diagnoses`.
+  it("keeps a diagnosis candidate grounded in personalHistory facts", () => {
+    // Chronic/past conditions end up in `personalHistory`, not `diagnoses`.
     // The filter must still accept them as grounding evidence.
     const candidates = [icd("I10", "Esenciálna hypertenzia")];
     const facts = bundle([], ["chronická artériová hypertenzia"]);

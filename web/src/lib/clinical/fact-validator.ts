@@ -355,11 +355,21 @@ function categoryLabel(category: FactCategory): string {
     case "diagnoses":
       return "Diagnoses";
     case "medications":
-      return "Medications";
+      return "Medications → section LA/Meds";
     case "procedures":
       return "Procedures";
-    case "history":
-      return "History";
+    case "familyHistory":
+      return "Family History → section RA";
+    case "personalHistory":
+      return "Personal History → section OA";
+    case "socialHistory":
+      return "Social History → section SA (NOT substance use, NOT work)";
+    case "workHistory":
+      return "Work History → section PA (NOT substance use)";
+    case "substanceUse":
+      return "Substance Use → section Ab (smoking, alcohol, drugs)";
+    case "epidemiologicalHistory":
+      return "Epidemiological History → section EA";
     case "plan":
       return "Plan";
   }

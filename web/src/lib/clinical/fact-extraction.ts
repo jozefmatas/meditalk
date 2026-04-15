@@ -56,7 +56,12 @@ export type FactCategory =
   | "diagnoses"
   | "medications"
   | "procedures"
-  | "history"
+  | "familyHistory"
+  | "personalHistory"
+  | "socialHistory"
+  | "workHistory"
+  | "substanceUse"
+  | "epidemiologicalHistory"
   | "plan";
 
 /** Output of Pass 1.5 fact extraction. */
@@ -69,7 +74,12 @@ export interface ExtractedFacts {
   diagnoses: ExtractedFact[];
   medications: ExtractedFact[];
   procedures: ExtractedFact[];
-  history: ExtractedFact[];
+  familyHistory: ExtractedFact[];
+  personalHistory: ExtractedFact[];
+  socialHistory: ExtractedFact[];
+  workHistory: ExtractedFact[];
+  substanceUse: ExtractedFact[];
+  epidemiologicalHistory: ExtractedFact[];
   plan: ExtractedFact[];
   /** Haiku token usage for this extraction call. */
   usage: { inputTokens: number; outputTokens: number };
@@ -85,7 +95,12 @@ export const FACT_CATEGORIES: readonly FactCategory[] = [
   "diagnoses",
   "medications",
   "procedures",
-  "history",
+  "familyHistory",
+  "personalHistory",
+  "socialHistory",
+  "workHistory",
+  "substanceUse",
+  "epidemiologicalHistory",
   "plan",
 ] as const;
 
@@ -106,7 +121,12 @@ export function emptyExtractedFacts(): ExtractedFacts {
     diagnoses: [],
     medications: [],
     procedures: [],
-    history: [],
+    familyHistory: [],
+    personalHistory: [],
+    socialHistory: [],
+    workHistory: [],
+    substanceUse: [],
+    epidemiologicalHistory: [],
     plan: [],
     usage: { inputTokens: 0, outputTokens: 0 },
   };
@@ -135,7 +155,13 @@ RULES:
 6. For diagnoses: copy the exact wording. Preserve uncertainty markers like "suspected", "possible", "rule out".
 7. For measurements (BP, HR, SpO2, temperature, lab values, weight, height): always include the unit as stated — and ONLY the unit as stated. If the source gives a number without a unit, see rule 13.
 8. Facts describing what the doctor or patient PLANS to do (follow-up, prescription, referral, lifestyle change, next visit) go in \`plan\`.
-9. Facts describing PAST events (previous surgeries, chronic conditions, family history, prior medications discontinued long ago) go in \`history\`.
+9. HISTORY SUBCATEGORY ROUTING — use the CORRECT subcategory for each fact:
+   - \`familyHistory\`: diseases of parents, siblings, grandparents. NEVER the patient's own conditions.
+   - \`personalHistory\`: the patient's OWN past conditions — prior surgeries, hospitalizations, chronic diseases, childhood illnesses.
+   - \`socialHistory\`: marital status, housing, living situation, social support. NEVER substance use, NEVER work/occupation.
+   - \`workHistory\`: current/past occupation, workplace exposures, occupational hazards. NEVER smoking/alcohol/drugs.
+   - \`substanceUse\`: smoking, alcohol, recreational drugs, ALL substance use. NEVER place these in \`workHistory\` or \`socialHistory\`.
+   - \`epidemiologicalHistory\`: travel history, contact with infections, tick bites, vaccinations.
 10. Write fact \`value\` fields in ${langLabel}. Keep them short (≤120 chars) and clinical — do not write prose sentences.
 11. A single source statement may produce multiple facts (one per distinct clinical datum), but the same fact MUST NOT appear in more than one category.
 12. EXTRACT EVERY DISTINCT MENTION — do NOT try to resolve self-corrections or contradictions yourself. If the speaker states a fact and then corrects themselves, emit BOTH mentions as separate fact entries, each with its own verbatim evidence quote pointing at the exact source phrase. This applies to EVERY correction shape: explicit phrases ("actually I mean", "sorry", "pardon", "vlastne", "opravujem sa"), bare punctuation-bracketed negations ("otec zomrel na infarkt, nie, na mozgovú mŕtvicu" — "father died of MI, no, of a stroke" — "1 broken rib, sorry, 2 broken ribs"), and any other structural hint that the speaker is replacing an earlier statement. A deterministic downstream step will detect the correction marker and drop the superseded mention. Your job is to be a faithful recorder, not an editor — so ALWAYS extract both the pre-correction value and the corrected value, every single time. Do NOT silently keep only the later one, and do NOT silently keep only the earlier one.
@@ -168,7 +194,12 @@ EXAMPLE (illustrative only — do not copy the content):
   "diagnoses": [],
   "medications": [],
   "procedures": [],
-  "history": [],
+  "familyHistory": [],
+  "personalHistory": [],
+  "socialHistory": [],
+  "workHistory": [],
+  "substanceUse": [],
+  "epidemiologicalHistory": [],
   "plan": []
 }`;
 }

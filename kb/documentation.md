@@ -149,10 +149,10 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 | Pass | Model | Purpose |
 |------|-------|---------|
 | **Pass 1** — Clinical Analysis | Sonnet 4.6 (temp=0) | Match clinical concepts, infer specialty, cluster problems, suggest ICD-10 codes, extract medication names |
-| **Pass 1.5** — Fact Extraction | Haiku 4.5 (temp=0) | Extract structured facts into 10 categories, each with verbatim evidence quote |
+| **Pass 1.5** — Fact Extraction | Haiku 4.5 (temp=0) | Extract structured facts into 15 categories (including 6 history subcategories for precise section routing), each with verbatim evidence quote |
 | **Pass 1.6a** — Fact Validation | Pure TypeScript | Verify evidence appears in claimed source, fuzzy matching, cross-source fallback, medication correction |
 | **Pass 1.6b** — Fact Resolution | Pure TypeScript | Detect speaker self-corrections, drop superseded facts |
-| **Pass 1.7** — ICD Certainty Filter | Pure TypeScript | Drop ICD candidates not grounded in diagnoses/history facts |
+| **Pass 1.7** — ICD Certainty Filter | Pure TypeScript | Drop ICD candidates not grounded in diagnoses/history-subcategory facts |
 | **Prompt Assembly** | — | Build system prompt (template + specialty pack + filtered ICDs + concepts) + user message (validated facts + sources) |
 | **Pass 2** — Generation | Opus 4.6 (temp=0) | Single call → JSON with one key per section + letter + title, streamed via SSE |
 | **Pass 2.5** — Post-Generation | Pure TypeScript | Strip ungrounded ICD codes from output, validate title |
@@ -199,7 +199,7 @@ Fingerprint diffing (SHA-256 over every pipeline component) detects whether diff
 
 - **Built-in** (static): SOAP + specialty variants in [web/src/lib/templates/default-templates.ts](web/src/lib/templates/default-templates.ts), marked `isSystem: true`
 - **User-defined**: Supabase `templates` table with custom sections, i18n labels, optional style guide, usage tracking
-- Each template has hierarchical sections with per-locale labels and optional context/guidance text
+- Each template has hierarchical sections with per-locale labels and optional context/guidance text. Focused templates (Cardiology, Internal Medicine, Neurology) use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.) with mandatory `context` fields explaining what content belongs in each section
 - `resolveTemplate(id)` looks up DB first → static fallback → default SOAP
 
 **Key files:**

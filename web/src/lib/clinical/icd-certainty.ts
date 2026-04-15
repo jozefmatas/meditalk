@@ -5,7 +5,8 @@
  * codes and Pass 1.5 extracts + validates + resolves clinical facts,
  * this module intersects the two: a candidate ICD code is only kept if
  * it is lexically grounded in at least one validated `diagnoses` or
- * `history` fact. Anything else is dropped before it ever reaches the
+ * history fact (familyHistory, personalHistory, etc.). Anything else is
+ * dropped before it ever reaches the
  * Opus generator prompt.
  *
  * Why this exists:
@@ -22,7 +23,7 @@
  *
  * Core rule:
  *   A candidate ICD code is CERTAIN iff at least one token from a
- *   grounded `diagnoses` or `history` fact substring-matches the
+ *   grounded `diagnoses` or history-subcategory fact substring-matches the
  *   normalized ICD description, OR a token from the ICD description
  *   substring-matches a grounded fact value. Symptoms, findings, chief
  *   complaint, and measurements are deliberately NOT used for grounding
@@ -203,7 +204,15 @@ function isCandidateGrounded(
   candidate: CandidateIcdCode,
   facts: ExtractedFacts,
 ): boolean {
-  const groundingFacts = [...facts.diagnoses, ...facts.history];
+  const groundingFacts = [
+    ...facts.diagnoses,
+    ...facts.familyHistory,
+    ...facts.personalHistory,
+    ...facts.socialHistory,
+    ...facts.workHistory,
+    ...facts.substanceUse,
+    ...facts.epidemiologicalHistory,
+  ];
   if (groundingFacts.length === 0) return false;
 
   for (const fact of groundingFacts) {
@@ -222,7 +231,7 @@ function isCandidateGrounded(
 
 /**
  * Filter a candidate ICD list down to codes that are lexically grounded
- * in at least one validated diagnosis or history fact. Pure function —
+ * in at least one validated diagnosis or history-subcategory fact. Pure function —
  * does not mutate inputs.
  *
  * Locale-agnostic: the underlying matcher uses NFKD normalization which
@@ -239,7 +248,13 @@ export function filterCertainIcdCandidates(
   const dropped: DroppedIcdCandidate[] = [];
 
   const hasDiagnosticFacts =
-    facts.diagnoses.length > 0 || facts.history.length > 0;
+    facts.diagnoses.length > 0 ||
+    facts.familyHistory.length > 0 ||
+    facts.personalHistory.length > 0 ||
+    facts.socialHistory.length > 0 ||
+    facts.workHistory.length > 0 ||
+    facts.substanceUse.length > 0 ||
+    facts.epidemiologicalHistory.length > 0;
 
   for (const candidate of candidates) {
     if (!hasDiagnosticFacts) {

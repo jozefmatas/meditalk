@@ -211,14 +211,14 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       ],
     };
     const facts = bundle([
-      fact("otec zomrel infarkt", "na infarkt", { category: "history" }),
+      fact("otec zomrel infarkt", "na infarkt", { category: "familyHistory" }),
       fact("otec zomrel mozgová mŕtvica", "na mozgovú mŕtvicu", {
-        category: "history",
+        category: "familyHistory",
       }),
     ]);
     const result = resolveFacts(facts, input, "sk");
     expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.history.map((f) => f.value)).toEqual([
+    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "otec zomrel mozgová mŕtvica",
     ]);
   });
@@ -228,12 +228,12 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       chunks: ["Otec zemřel na infarkt, ne, na mrtvici."],
     };
     const facts = bundle([
-      fact("otec zemřel infarkt", "na infarkt", { category: "history" }),
-      fact("otec zemřel mrtvice", "na mrtvici", { category: "history" }),
+      fact("otec zemřel infarkt", "na infarkt", { category: "familyHistory" }),
+      fact("otec zemřel mrtvice", "na mrtvici", { category: "familyHistory" }),
     ]);
     const result = resolveFacts(facts, input, "cs");
     expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.history.map((f) => f.value)).toEqual([
+    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "otec zemřel mrtvice",
     ]);
   });
@@ -243,12 +243,14 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       chunks: ["Father died of MI, no, of a stroke."],
     };
     const facts = bundle([
-      fact("father died of MI", "died of MI", { category: "history" }),
-      fact("father died of stroke", "of a stroke", { category: "history" }),
+      fact("father died of MI", "died of MI", { category: "familyHistory" }),
+      fact("father died of stroke", "of a stroke", {
+        category: "familyHistory",
+      }),
     ]);
     const result = resolveFacts(facts, input, "en");
     expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.history.map((f) => f.value)).toEqual([
+    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "father died of stroke",
     ]);
   });
@@ -277,9 +279,11 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       chunks: ["Vater starb an Infarkt, nein, an einem Schlaganfall."],
     };
     const facts = bundle([
-      fact("vater starb an infarkt", "an Infarkt", { category: "history" }),
+      fact("vater starb an infarkt", "an Infarkt", {
+        category: "familyHistory",
+      }),
       fact("vater starb an schlaganfall", "an einem Schlaganfall", {
-        category: "history",
+        category: "familyHistory",
       }),
     ]);
     // We pass `en` since the locale param doesn't need to match the text
@@ -287,7 +291,7 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
     // regex path is language-agnostic).
     const result = resolveFacts(facts, input, "en");
     expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.history.map((f) => f.value)).toEqual([
+    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "vater starb an schlaganfall",
     ]);
   });
@@ -340,12 +344,14 @@ describe("resolveFacts — locale-agnostic punctuation-bracketed negation", () =
       chunks: ["Father died of MI, NO, of a stroke."],
     };
     const facts = bundle([
-      fact("father died of MI", "died of MI", { category: "history" }),
-      fact("father died of stroke", "of a stroke", { category: "history" }),
+      fact("father died of MI", "died of MI", { category: "familyHistory" }),
+      fact("father died of stroke", "of a stroke", {
+        category: "familyHistory",
+      }),
     ]);
     const result = resolveFacts(facts, input, "en");
     expect(result.counts.correctionDrops).toBe(1);
-    expect(result.resolvedFacts.history.map((f) => f.value)).toEqual([
+    expect(result.resolvedFacts.familyHistory.map((f) => f.value)).toEqual([
       "father died of stroke",
     ]);
   });

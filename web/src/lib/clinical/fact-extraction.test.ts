@@ -19,7 +19,7 @@ describe("emptyExtractedFacts", () => {
 });
 
 describe("FACT_CATEGORIES", () => {
-  it("contains the 10 documented categories", () => {
+  it("contains the 15 documented categories", () => {
     expect(FACT_CATEGORIES).toEqual([
       "demographics",
       "chiefComplaint",
@@ -29,7 +29,12 @@ describe("FACT_CATEGORIES", () => {
       "diagnoses",
       "medications",
       "procedures",
-      "history",
+      "familyHistory",
+      "personalHistory",
+      "socialHistory",
+      "workHistory",
+      "substanceUse",
+      "epidemiologicalHistory",
       "plan",
     ]);
   });
@@ -56,7 +61,7 @@ describe("buildFactExtractionSystemPrompt", () => {
     expect(prompt).toMatch(/upgrade severity/i);
   });
 
-  it("lists the 10 categories as valid JSON keys", () => {
+  it("lists the 15 categories as valid JSON keys", () => {
     const prompt = buildFactExtractionSystemPrompt("en");
     for (const cat of FACT_CATEGORIES) {
       expect(prompt).toContain(cat);

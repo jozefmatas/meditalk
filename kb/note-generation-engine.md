@@ -1,6 +1,6 @@
 # MediTalk Note-Generation Engine
 
-_Last updated: 2026-04-14_
+_Last updated: 2026-04-15_
 
 This document is the **canonical reference** for how a medical encounter turns into a finalized clinical note in MediTalk. It exists so we can refine, refactor, and debug the pipeline without having to re-derive its shape from source code every time.
 
@@ -39,7 +39,7 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 │             inferredSpecialty, problemClusters              │
 │                                                             │
 │  Pass 1.5 ─ runFactExtraction         Haiku 4.5  (t=0)     │
-│           → ExtractedFacts (10 categories), each with       │
+│           → ExtractedFacts (15 categories), each with       │
 │             verbatim evidence quote pointing at a source    │
 │                                                             │
 │  Pass 1.6a ─ validateFacts            pure TS              │
@@ -52,7 +52,7 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 │                                                             │
 │  Pass 1.7 ─ filterCertainIcdCandidates  pure TS  ◄── NEW   │
 │           → drop ICD candidates not lexically grounded      │
-│             in diagnoses/history facts                      │
+│             in diagnoses/history-subcategory facts           │
 │                                                             │
 │  Prompt  ─ buildTemplateSystemPrompt + buildEnriched...     │
 │          → system prompt = template + specialty pack +      │
@@ -88,7 +88,7 @@ Read this first before touching anything in [web/src/app/api/generate/route.ts](
 **Key guarantees:**
 
 1. **Every fact has verbatim evidence.** Pass 1.5 refuses to emit a fact without a quote; Pass 1.6a drops any fact whose quote isn't in the source.
-2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in `diagnoses`/`history` facts; Pass 2.5 defensively strips any Opus snuck past the prompt.
+2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in `diagnoses` or history-subcategory facts (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`); Pass 2.5 defensively strips any Opus snuck past the prompt.
 3. **Same inputs → same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates.
 4. **No hallucinated clinical content.** Opus is told: _"these are the ONLY codes you may emit; the validated facts are the factual contract."_
 
@@ -336,7 +336,7 @@ Section-specific guidance takes precedence over general rules per the system pro
 
 `buildTemplateSystemPrompt(template, language, sectionLabels, sectionContexts)` produces the base prompt. It interpolates `{{sections}}`, `{{language}}`, `{{languageCode}}`, and optionally `{{styleGuide}}`, or returns the template's custom `systemPrompt` verbatim if one is set.
 
-The base prompt enforces core rules: insufficient context check, strict grounding, no-assumption mode, per-section priority, language lock, missing-section handling, formatting, JSON output shape (keys per section plus `letter` and `title`), title length/consistency rules.
+The base prompt enforces core rules: insufficient context check, strict grounding, no-assumption mode, per-section priority, language lock, missing-section handling, formatting, JSON output shape (keys per section plus `letter` and `title`), title length/consistency rules, and **section content routing** (rule 8) with abbreviation definitions and hard routing rules that map content types to specific section abbreviations (e.g. medications → LA, substance use → Ab, work → PA).
 
 ---
 
@@ -435,12 +435,17 @@ The user message numbers every source:
 
 ### 6.3 Output — `ExtractedFacts`
 
-Ten fixed categories, all arrays of `ExtractedFact`:
+Fifteen fixed categories, all arrays of `ExtractedFact`:
 
 ```
 demographics, chiefComplaint, symptoms, findings, measurements,
-diagnoses, medications, procedures, history, plan
+diagnoses, medications, procedures,
+familyHistory, personalHistory, socialHistory, workHistory,
+substanceUse, epidemiologicalHistory,
+plan
 ```
+
+The old single `history` category was split into 6 subcategories to enable precise routing to template sections (RA, OA, SA, PA, Ab, EA).
 
 ```ts
 interface ExtractedFact {
@@ -463,7 +468,7 @@ From [fact-extraction.ts:127-173](web/src/lib/clinical/fact-extraction.ts#L127-L
 3. Never upgrade severity (`"ACS"` stays `"ACS"`, never becomes `"STEMI"`).
 4. Preserve uncertainty markers (`"suspected"`, `"possible"`, `"rule out"`).
 5. Measurements: include units **as stated**, never invent units.
-6. Plan vs history vs diagnoses separation is strict.
+6. **History subcategory routing** is strict — each history fact must go into the correct subcategory: `familyHistory` (parents/siblings), `personalHistory` (patient's own past conditions), `socialHistory` (marital/housing), `workHistory` (occupation), `substanceUse` (smoking/alcohol/drugs), `epidemiologicalHistory` (travel/infections/vaccines). Hard negative rules prevent cross-contamination (e.g. substance use NEVER in workHistory or socialHistory).
 7. **Self-correction rule:** Emit BOTH the pre-correction and corrected value as separate facts, each with its own evidence. A deterministic downstream step (Pass 1.6b) decides which one to keep. Applies to `"actually"`, `"sorry"`, `"vlastne"`, `"opravujem sa"`, and punctuation-bracketed negations like `", nie,"`.
 8. **NO-ASSUMPTION mode:** If a numeric value is stated without a unit/dimension (`"fajčí 15"` with no `"cigariet/deň"` and no `"rokov"`), preserve the raw number and mark as `"(jednotka nešpecifikovaná)"` / `"(jednotka neuvedena)"` / `"(unit not specified)"` depending on locale. Never guess the most common interpretation.
 
@@ -543,7 +548,7 @@ Concrete repro from the user:
 
 ### 8.2 Rule
 
-A candidate ICD code is **certain** iff at least one token from a grounded `diagnoses` or `history` fact substring-matches the normalized ICD description, OR a token from the ICD description substring-matches a grounded fact value. `chiefComplaint`, `symptoms`, `findings`, `measurements` are **deliberately NOT** used as grounding sources — if the only evidence is "chest pain" we emit the underlying MI (`I21.2`) but never the symptom code (`R07.2`).
+A candidate ICD code is **certain** iff at least one token from a grounded `diagnoses` or history-subcategory fact (`familyHistory`, `personalHistory`, `socialHistory`, `workHistory`, `substanceUse`, `epidemiologicalHistory`) substring-matches the normalized ICD description, OR a token from the ICD description substring-matches a grounded fact value. `chiefComplaint`, `symptoms`, `findings`, `measurements` are **deliberately NOT** used as grounding sources — if the only evidence is "chest pain" we emit the underlying MI (`I21.2`) but never the symptom code (`R07.2`).
 
 ### 8.3 Matcher internals
 
@@ -575,7 +580,7 @@ The filter rewrites `clinicalAnalysis.candidateIcdCodes` in place so everything 
 
 - **Pure function.** Does not mutate its inputs. Same inputs → same output every run.
 - **Confidence-independent.** A Pass 1 `high`-confidence candidate with no fact support is still dropped; a `low`-confidence candidate with fact support is kept.
-- **Empty-safe.** Empty diagnoses + history facts → drop every candidate with reason `no_diagnosis_facts`. Safer to emit an empty Záver than hallucinated codes.
+- **Empty-safe.** Empty diagnoses + history-subcategory facts → drop every candidate with reason `no_diagnosis_facts`. Safer to emit an empty Záver than hallucinated codes.
 
 ---
 
@@ -588,7 +593,7 @@ File: [web/src/lib/clinical/pipeline.ts:123](web/src/lib/clinical/pipeline.ts#L1
 The base template prompt gets augmented with:
 
 1. **Specialty prompt pack** — addendum, terminology notes, emphasized sections from [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts).
-2. **Medication verification block** — exact names resolved against the approved medication index. Missing matches are included as warnings so Opus can hedge.
+2. **Medication verification block** — exact names resolved against the approved medication index. Medications not found in the approved list are included using the doctor's exact dictated name without any warning label or annotation (no `[NEOVERENÝ LIEK]` markers in the output).
 3. **CANDIDATE ICD-10 CODES** — the **filtered** list from Pass 1.7 with a hard constraint:
 
    > _"these are the ONLY codes you may emit in this report. Use EXACT descriptions as written below. Do NOT paraphrase, combine, or modify descriptions. Do NOT add any other ICD codes, even if labs, vital signs, or symptoms suggest them — any code not in this list has already been judged insufficiently grounded by a deterministic certainty filter and MUST NOT appear anywhere in your output"_
@@ -601,7 +606,7 @@ File: [web/src/lib/anthropic.ts:133](web/src/lib/anthropic.ts#L133) — `buildTe
 
 Block order:
 
-1. **VALIDATED CLINICAL FACTS** — `formatFactsForPrompt(validatedFacts)` renders the 10 categories as a terse bullet list. This is introduced as the _factual contract_: every statement in the report must trace back to one of these facts.
+1. **VALIDATED CLINICAL FACTS** — `formatFactsForPrompt(validatedFacts)` renders the 15 categories as a terse bullet list with routing hints (e.g. `"Medications → section LA/Meds"`, `"Substance Use → section Ab"`). This is introduced as the _factual contract_: every statement in the report must trace back to one of these facts.
 2. **SOURCE MATERIAL** — numbered transcript chunks. When facts are present, these are marked "phrasing and context reference only" — Opus should not extract new facts from them, only phrasing.
 3. **UPLOADED FILE CONTENTS** — numbered extracted texts. Each file with a `context` value gets a `DOCTOR'S DIRECTIVE FOR THIS FILE: <context>` line inserted between the file header and the extracted text.
 4. **DOCTOR'S ADDITIONAL NOTES** — verbatim.
