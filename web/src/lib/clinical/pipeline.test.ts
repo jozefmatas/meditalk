@@ -204,6 +204,104 @@ describe("buildEnrichedSystemPrompt", () => {
     expect(result).toContain("PROBLEM CLUSTERS");
     expect(result).toContain("VERIFIED MEDICATIONS");
   });
+
+  // ── hasValidatedFacts flag behavior ──
+
+  it("omits concepts when hasValidatedFacts is true", () => {
+    const analysis = makeAnalysis({
+      matchedConcepts: [
+        {
+          conceptId: "hypertension",
+          canonicalName: "Hypertension",
+          confidence: "high",
+          evidence: ["high blood pressure"],
+        },
+      ],
+    });
+    const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
+    expect(result).not.toContain("IDENTIFIED CLINICAL CONCEPTS");
+    expect(result).not.toContain("Hypertension");
+  });
+
+  it("omits problem clusters when hasValidatedFacts is true", () => {
+    const analysis = makeAnalysis({
+      problemClusters: [
+        {
+          label: "Cardiovascular",
+          conceptIds: ["hypertension", "dyslipidemia"],
+        },
+      ],
+    });
+    const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
+    expect(result).not.toContain("PROBLEM CLUSTERS");
+    expect(result).not.toContain("Cardiovascular");
+  });
+
+  it("still includes concepts when hasValidatedFacts is false", () => {
+    const analysis = makeAnalysis({
+      matchedConcepts: [
+        {
+          conceptId: "hypertension",
+          canonicalName: "Hypertension",
+          confidence: "high",
+          evidence: ["high blood pressure"],
+        },
+      ],
+    });
+    const result = buildEnrichedSystemPrompt(
+      BASE_PROMPT,
+      analysis,
+      "en",
+      false,
+    );
+    expect(result).toContain("IDENTIFIED CLINICAL CONCEPTS");
+  });
+
+  it("still includes specialty pack and ICD block with hasValidatedFacts", () => {
+    const analysis = makeAnalysis({
+      inferredSpecialty: "cardiology",
+      candidateIcdCodes: [
+        {
+          code: "I10",
+          description: "Essential hypertension",
+          confidence: "high",
+          sourceConceptIds: ["hypertension"],
+        },
+      ],
+    });
+    const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
+    expect(result).toContain("TERMINOLOGY");
+    expect(result).toContain("ICD-10 BLOCK (VERBATIM)");
+  });
+
+  it("uses condensed medication block when hasValidatedFacts is true", () => {
+    const analysis = makeAnalysis({
+      mentionedMedications: ["Metformin"],
+    });
+    const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
+    expect(result).toContain("VERIFIED MEDICATIONS");
+    // Should NOT contain the verbose rules
+    expect(result).not.toContain(
+      "Only include medications EXPLICITLY mentioned",
+    );
+    expect(result).not.toContain(
+      'Do NOT add medications that are "commonly prescribed"',
+    );
+  });
+
+  it("uses full medication rules when hasValidatedFacts is false", () => {
+    const analysis = makeAnalysis({
+      mentionedMedications: ["Metformin"],
+    });
+    const result = buildEnrichedSystemPrompt(
+      BASE_PROMPT,
+      analysis,
+      "en",
+      false,
+    );
+    expect(result).toContain("VERIFIED MEDICATIONS FROM APPROVED LIST");
+    expect(result).toContain("Only include medications EXPLICITLY mentioned");
+  });
 });
 
 describe("buildPreRenderedIcdBlock", () => {

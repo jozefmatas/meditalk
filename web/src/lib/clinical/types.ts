@@ -105,3 +105,31 @@ export interface MedicationEntry {
   name: string;
   activeIngredient: string;
 }
+
+/**
+ * Section render hint — tells the LLM how to render a section's content.
+ *
+ * Used by the fact-to-section pipeline to communicate rendering intent
+ * to Pass 2 without relying on the LLM to infer it from context.
+ *
+ *  - narrative:       Flowing prose paragraphs (e.g. history, examination)
+ *  - bullets:         Bulleted list of distinct items (e.g. medications, allergies)
+ *  - verbatim_block:  Pre-rendered block to copy exactly (e.g. ICD codes)
+ *  - empty:           Section has no content — output ""
+ */
+export type SectionRenderMode =
+  | "narrative"
+  | "bullets"
+  | "verbatim_block"
+  | "empty";
+
+/**
+ * Render contract for a single section — produced upstream, consumed by
+ * the prompt builder to tell Pass 2 exactly how to format each section.
+ */
+export interface SectionRenderHint {
+  sectionId: string;
+  renderMode: SectionRenderMode;
+  /** Pre-rendered content for verbatim_block mode (e.g. ICD block) */
+  lockedContent?: string;
+}

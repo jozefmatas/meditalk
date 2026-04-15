@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-15_
+_Last updated: 2026-04-16_
 
 How raw clinical data becomes a structured medical note. This document covers every LLM call, the exact prompt texts, the deterministic filters between them, and cost/speed characteristics. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -15,16 +15,14 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
   transcript + files + doctor notes
                |
-       ========|========  LLM CALLS  ========|========
-               |                              |
-  Pass 1       |   Sonnet 4.6  (t=0)          |  Embedding search
-  Clinical     |   max_tokens: 4096           |  (legacy only)
-  Analysis     |                              |
-               |                              |
-               v                              v
-  Pass 1.5     Haiku 4.5  (t=0)
-  Fact         max_tokens: 16384
-  Extraction   -> 15-category ExtractedFacts
+       ========|========  LLM CALLS (PARALLEL)  ========
+               |                |                |
+  Pass 1       | Sonnet 4.6    | Pass 1.5       | Embedding search
+  Clinical     | (t=0, 4096)   | Haiku 4.5      | (legacy only)
+  Analysis     |               | (t=0, 16384)   |
+               |               |                |
+               v               v                v
+               |  15-category ExtractedFacts
                |
        ========|========  DETERMINISTIC GATES  ========
                |
@@ -68,6 +66,7 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
 1. **Every fact has verbatim evidence.** Pass 1.5 refuses to emit a fact without a quote; Pass 1.6a drops any fact whose quote isn't in the source.
 2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in validated facts. Pass 2.5 defensively strips any Opus snuck past the prompt.
 3. **Same inputs -> same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates. ICD codes are pre-rendered in sorted order (VERBATIM copy), facts are pre-assigned to template sections, and transcript is omitted when facts are present — Opus acts as a formatter, not a reasoner.
+4. **Template changes are lossless.** Validated facts are persisted in `metadata.validated_facts`. When the user changes templates, the regenerate route re-runs fact-to-section assignment against the new template (structured rerender) instead of prose reformatting.
 
 ---
 
@@ -111,6 +110,8 @@ Two helpers flatten the hierarchy into what the prompt needs:
 - `buildSectionContextsFromTemplate(template, language)` -> `Record<sectionId, contextString>` for per-section guidance passed to Opus.
 
 Section-specific guidance takes precedence over general rules per the system prompt instructions.
+
+All 8 system templates have English `context` fields on every section and subsection (migration `20260416`). Contexts are consumed by the LLM, not shown to users — English is more token-efficient and language-agnostic. Example: `"Family history. Diseases of parents, siblings, grandparents. NEVER include the patient's own diseases here."`
 
 ---
 
@@ -206,14 +207,20 @@ interface ClinicalAnalysis {
 
 ### 2.6 Where it runs
 
-In parallel with the (legacy) embedding-based chunk retrieval:
+In a three-way `Promise.all` with the (legacy) embedding search **and** Pass 1.5 (when `transcriptText` is available):
 
 ```ts
-const [embeddingResult, rawClinicalAnalysis] = await Promise.all([
-  embeddingPromise,
-  clinicalPromise,
-]);
+// When transcriptText exists, start fact extraction early in parallel
+const earlyFactInput = transcriptText ? { chunks: [transcriptText], ... } : null;
+const factExtractionPromise = earlyFactInput
+  ? runFactExtraction(earlyFactInput, language, ctx).catch(() => null)
+  : Promise.resolve(null);
+
+const [embeddingResult, rawClinicalAnalysis, earlyRawFacts] =
+  await Promise.all([embeddingPromise, clinicalPromise, factExtractionPromise]);
 ```
+
+**Why this is safe:** Pass 1.5 doesn't depend on Pass 1 output — it reads raw sources. Pass 1 output is only used for ICD candidates and specialty, which are applied _after_ both complete. For legacy chunk-only encounters (no `transcriptText`), Pass 1.5 runs sequentially after Pass 1 as before.
 
 ---
 
@@ -477,89 +484,112 @@ plan          -> plan, odporuc, recommendation, terapia, liecba
 
 ## 8. Prompt Assembly for Pass 2
 
-### 8.1 Base system prompt
+### 8.1 Two system prompts
 
-Source: [web/src/lib/anthropic.ts:56](web/src/lib/anthropic.ts#L56) — `buildTemplateSystemPrompt()`
+Source: [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts)
 
-The base prompt is either the template's custom `systemPrompt` (with variable interpolation) or the default:
+There are now **two** system prompt builders. The pipeline chooses based on whether validated facts are present:
+
+```ts
+const hasValidatedFacts = !!(validatedFacts && countFacts(validatedFacts) > 0);
+let systemPrompt = hasValidatedFacts
+  ? buildFactBasedSystemPrompt(
+      template,
+      language,
+      sectionLabels,
+      sectionContexts,
+    )
+  : buildTemplateSystemPrompt(
+      template,
+      language,
+      sectionLabels,
+      sectionContexts,
+    );
+```
+
+#### `buildFactBasedSystemPrompt()` — lean prompt for the facts-present path
+
+Source: [web/src/lib/anthropic.ts:88](web/src/lib/anthropic.ts#L88)
+
+~60% shorter than the full prompt. Removes rules already enforced by upstream deterministic gates:
+
+- **Removed:** Insufficient context check (impossible when validated facts exist)
+- **Removed:** Verbose grounding / NO ASSUMPTION MODE (enforced by Pass 1.5 rules)
+- **Removed:** Source priority hierarchy (facts are the single source of truth)
+- **Removed:** Title rules (title generated in a dedicated Haiku call)
+- **Removed:** Section routing rules 8a-8h (facts already pre-assigned to sections)
+
+**Keeps:** FACT VALUE FIDELITY (primary rule), condensed NEVER FABRICATE, directives, output language, formatting, JSON format, style guide, patient letter instruction.
+
+Falls through to the full `buildTemplateSystemPrompt` when the template uses a custom `systemPrompt` — custom prompts bypass this optimisation.
 
 ```
 You are a medical documentation assistant. You MUST follow these rules strictly:
 
-CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL:
-If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes
-absolute precedence over any general rule.
+CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL: ...
 
-1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the input
-   contains enough meaningful clinical information. If too vague/short, return
-   ONLY: {"insufficient_context": true}
+1. FACT VALUE FIDELITY: The pre-assigned validated clinical facts are the sole
+   source of clinical truth. Your job is to FORMAT them into the note, not to
+   REWRITE them.
+   - Reproduce each fact's wording as closely as possible.
+   - Do NOT rephrase, paraphrase, elaborate, summarize, or add context.
+   - Do NOT merge multiple facts into compound sentences.
+   - Present facts in the EXACT order they appear in the input.
+   - If a section has pre-assigned facts, derive content exclusively from them.
+   - The same facts must produce the same output text every time.
 
-2. STRICT GROUNDING — NO ASSUMPTION MODE: Only use information explicitly present
-   in the provided transcript chunks, uploaded file contents, and doctor's notes.
-   Do NOT infer, assume, estimate, or hallucinate any medical facts.
+2. NEVER FABRICATE MISSING CLINICAL DIMENSIONS: ...
+3. DIRECTIVES: Doctor's notes and per-file directives are authoritative.
+4. OUTPUT LANGUAGE: Write ALL content in {language}.
+5. MISSING SECTIONS: Output empty string "".
+6. FORMATTING: Bullets for diagnoses/meds, narrative for history/exam.
+7. FORMAT: Return valid JSON with section keys + "letter" + "title".
 
-2a. NEVER FABRICATE MISSING CLINICAL DIMENSIONS: If a numeric value appears
-    WITHOUT a unit or dimension, you MUST NOT invent the missing dimension.
-    Write e.g. "fajci 15 (blizsie nespecifikovane)".
-
-2b. FACT VALUE FIDELITY (when VALIDATED CLINICAL FACTS are provided): The
-    pre-assigned facts are the sole source of clinical truth. Your job is to
-    FORMAT them into the note, not to REWRITE them.
-    - Reproduce each fact's wording as closely as possible.
-    - Do NOT rephrase, paraphrase, elaborate, summarize, or add context.
-    - Do NOT merge multiple facts into compound sentences.
-    - Present facts in the EXACT order they appear in the input.
-    - If a section has pre-assigned facts, derive content exclusively from them.
-    - The same facts must produce the same output text every time.
-
-3. SOURCE PRIORITY (highest to lowest):
-   1. Actual spoken transcript
-   2. Doctor's additional notes
-   3. Uploaded documents
-
-3a. DOCTOR NOTES AS DIRECTIVES: When doctor notes contain filtering/processing
-    instructions, treat them as authoritative and follow exactly.
-
-3b. PER-FILE DIRECTIVES: Individual files may have a "DOCTOR'S DIRECTIVE FOR
-    THIS FILE:" line. Only use the permitted information from that file.
-
-4. OUTPUT LANGUAGE: Write ALL content in {language}. Only exceptions: Latin
-   medical terminology and proper nouns.
-
-5. MISSING SECTIONS: Use empty string "" — no "Not stated" placeholders.
-
-6. FORMATTING: Use bullet points for diagnoses, ICD codes, medications, action
-   items. Code first, then name ("- I10 Esencialna hypertenzia"). Narrative for
-   history/examination.
-
-7. FORMAT: Return valid JSON with keys per section + "letter" + "title".
-   TITLE RULES:
-   - Consistent with primary diagnosis in assessment
-   - No severity qualifiers unless in source AND in the ICD description
-   - No anatomical localisation unless in the ICD description
-   - Max 6 words
-
-8. SECTION CONTENT ROUTING — MANDATORY placement rules:
-   HARD ROUTING RULES:
-   a) Medications -> ONLY in LA/Meds sections. NEVER in TO/HPI.
-   b) Substance use -> ONLY in Ab sections. NEVER in PA or SA.
-   c) Work/occupation -> ONLY in PA sections. NEVER in SA.
-   d) Social circumstances -> ONLY in SA sections. NEVER in PA.
-   e) Chief complaint/symptoms -> ONLY in TO/HPI sections.
-   f) Family history -> ONLY in RA sections.
-   g) Past medical history -> ONLY in OA sections.
-   h) Allergies -> ONLY in AA sections.
+PATIENT LETTER: ... (via buildLetterInstruction)
 
 TEMPLATE SECTIONS:
 {sections}
 {styleGuide}
 ```
 
+#### `buildTemplateSystemPrompt()` — full prompt for legacy path
+
+Source: [web/src/lib/anthropic.ts:166](web/src/lib/anthropic.ts#L166)
+
+Used when validated facts are NOT available. Contains all rules including:
+
+- Insufficient context check
+- NO ASSUMPTION MODE
+- Source priority hierarchy
+- FACT VALUE FIDELITY (conditional on facts being present)
+- Title rules
+- Section routing rules (8a-8h)
+
+Full prompt text unchanged from before — see `buildTemplateSystemPrompt()` in source.
+
+### 8.1a Patient letter instruction
+
+Source: [web/src/lib/anthropic.ts:59](web/src/lib/anthropic.ts#L59) — `buildLetterInstruction()`
+
+Extracted into a standalone function so letter generation rules can evolve independently from note generation:
+
+```
+PATIENT LETTER ("letter" key in JSON output):
+- Write in clear, simple {language} that a non-medical reader can understand.
+- Summarise the key findings, diagnoses, and recommended next steps.
+- Avoid jargon — translate medical terms into plain language.
+- Keep the tone warm, professional, and reassuring.
+- Do NOT include ICD codes in the letter.
+- Keep the letter concise — 3 to 6 sentences.
+```
+
+Both `buildFactBasedSystemPrompt` and `buildTemplateSystemPrompt` reference this function.
+
 ### 8.2 Enriched system prompt
 
 Source: [web/src/lib/clinical/pipeline.ts:137](web/src/lib/clinical/pipeline.ts#L137) — `buildEnrichedSystemPrompt()`
 
-The base gets augmented with four blocks:
+The base gets augmented with four blocks. The function now accepts a `hasValidatedFacts` flag which controls the verbosity of certain blocks:
 
 **1. Specialty prompt pack** (from [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts)):
 
@@ -571,7 +601,9 @@ EMPHASIZED SECTIONS: {pack.emphasizedSections}
 
 When the template declares a `specialties` field, the template specialty overrides Pass 1's `inferredSpecialty`.
 
-**2. Medication verification block:**
+**2. Medication verification block** — two modes:
+
+When `hasValidatedFacts` is **false** (full verbose rules):
 
 ```
 VERIFIED MEDICATIONS FROM APPROVED LIST (locale: sk):
@@ -582,6 +614,16 @@ RULES:
 - Use EXACT names from the VERIFIED list
 - If marked [corrected from "..."], use the CORRECTED name
 - If marked [not found in approved list], use EXACTLY the dictated name
+```
+
+When `hasValidatedFacts` is **true** (condensed — FACT VALUE FIDELITY already constrains the LLM):
+
+```
+VERIFIED MEDICATIONS (locale: sk):
+  Co-Prenessa 8 mg/2,5 mg (perindopril/indapamid)
+  Tamurox 0,4 mg (tamsulosin)
+Use corrected names where marked [corrected from "..."]. For [not found in
+approved list], use the dictated name without annotations.
 ```
 
 **3. ICD-10 BLOCK (VERBATIM)** — when candidates exist:
@@ -605,7 +647,9 @@ this encounter. Do NOT include ANY ICD-10 codes in your output. Do NOT invent,
 guess, or add ICD codes based on clinical context.
 ```
 
-**4. Clinical concepts and problem clusters:**
+**4. Clinical concepts and problem clusters** — **omitted when `hasValidatedFacts` is true:**
+
+These are advisory metadata useful for the grounding path but add unnecessary prompt tokens when the LLM is doing a pure formatting task over pre-assigned facts.
 
 ```
 IDENTIFIED CLINICAL CONCEPTS:
@@ -713,13 +757,32 @@ Output only the title, nothing else.
 
 ---
 
-## 11. Regenerate — Two Paths
+## 11. Regenerate — Three Paths
 
 File: [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts)
 
-### 11.1 Fast reformat path
+The regenerate route tracks its execution path via `operationType: "regenerate" | "rerender" | "reformat"` for usage logging and audit.
 
-Triggered when the only change is a new template selection. Uses the **same model fallback chain** (Opus -> Sonnet) to reformat the existing note into the new template layout. Doesn't re-run Pass 1 / Pass 1.5. Reuses existing patient letter and title.
+### 11.1 Structured rerender (preferred)
+
+**Condition:** Template change + cached `validated_facts` in metadata.
+
+Uses cached validated facts from the original generation (persisted in `metadata.validated_facts`) to re-render the note for the new template layout. This is more reliable than prose reformatting because it runs the same fact-to-section assignment pipeline:
+
+1. Load `validatedFacts` from metadata
+2. `assignFactsToSections()` with the **new** template's section labels/contexts
+3. `buildFactBasedSystemPrompt()` (lean prompt)
+4. `buildEnrichedSystemPrompt()` with `hasValidatedFacts: true`
+5. `buildTemplateUserMessage()` with facts — same as initial generation
+6. Generate via Opus (same fallback chain)
+
+**Does NOT re-run:** Pass 1, Pass 1.5, Pass 1.6a/b, Pass 1.7 — these only need to run once since facts and ICD codes are cached.
+
+### 11.2 Legacy reformat (fallback)
+
+**Condition:** Template change but NO cached `validated_facts` (old encounters generated before the fact pipeline existed).
+
+Uses the **same model fallback chain** (Opus -> Sonnet) to reformat the existing note prose into the new template layout. Doesn't re-run Pass 1 / Pass 1.5. Reuses existing patient letter and title.
 
 The reformat prompt is simple:
 
@@ -746,9 +809,9 @@ Reorganize into these target template sections:
 Return valid JSON.
 ```
 
-### 11.2 Full path
+### 11.3 Full path
 
-Identical pipeline to `/api/generate`. Optionally reuses cached `clinical_analysis` from metadata to skip Pass 1. Always runs Pass 1.5 through Pass 2.5.
+Identical pipeline to `/api/generate`. Optionally reuses cached `clinical_analysis` from metadata to skip Pass 1. Always runs Pass 1.5 through Pass 2.5. Now also uses `buildFactBasedSystemPrompt` when validated facts are present.
 
 ---
 
@@ -784,31 +847,33 @@ Assuming ~5min consultation, 1 uploaded PDF, generating in Slovak:
 
 **Opus dominates cost** at ~73% of the total. Everything else combined is ~$0.12.
 
-### 12.3 Pipeline timing (serial execution)
+### 12.3 Pipeline timing
 
 ```
                    0s        5s        10s       15s       20s       25s
                    |---------|---------|---------|---------|---------|
 Transcription      |=========|                                        ~3-8s
 File OCR                     |===|                                    ~2-4s
-                             \--- runs in parallel where possible ---/
+                             \--- runs in parallel ---/
 Pass 1 (Sonnet)    |=========|                                        ~3-6s
-Pass 1.5 (Haiku)             |=====|                                  ~4-8s
-Pass 1.6a/b, 1.7                   |=|                               <100ms
-Fact assignment                      |                                <10ms
-Pass 2 (Opus)                        |================|              ~10-25s
-Pass 2.5 + title                                      |=|            ~1-2s
+Pass 1.5 (Haiku)   |==========|  (parallel with Pass 1)              ~4-8s
+Embedding search   |=|           (parallel with both)                 ~1-2s
+Pass 1.6a/b, 1.7              |=|                                    <100ms
+Fact assignment                 |                                     <10ms
+Pass 2 (Opus)                   |================|                   ~10-25s
+Pass 2.5 + title                                  |=|                ~1-2s
                    |---------|---------|---------|---------|---------|
                    0s        5s        10s       15s       20s       25s
 ```
 
 **Key parallelism in the current pipeline:**
 
-- Pass 1 (Sonnet) runs in parallel with legacy embedding search
+- **Three-way `Promise.all`:** Pass 1 (Sonnet) + Pass 1.5 (Haiku) + legacy embedding search — all run concurrently when `transcriptText` is available. Saves ~4-8s wall time compared to serial execution.
+- For legacy chunk-only encounters (no `transcriptText`), Pass 1.5 runs sequentially after Pass 1
 - File extractions run in parallel with each other
 - Transcription happens client-side before the generate call
 
-**Total wall time:** ~15-35s depending on transcript length and model load
+**Total wall time:** ~12-30s depending on transcript length and model load
 
 ### 12.4 Optimization opportunities
 
@@ -816,19 +881,19 @@ Pass 2.5 + title                                      |=|            ~1-2s
 
 | Idea                                  | Savings                  | Complexity | Trade-off                                                                                                                                                                                                          |
 | ------------------------------------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Run Pass 1 + Pass 1.5 in parallel** | ~4-8s                    | Medium     | Pass 1.5 doesn't depend on Pass 1 output — it reads raw sources. Pass 1 output is only used for ICD candidates and specialty. Could run both, then apply Pass 1.7 filter after both complete.                      |
+| ~~Run Pass 1 + Pass 1.5 in parallel~~ | ~~~4-8s~~                | ~~Done~~   | **Implemented.** Three-way `Promise.all` when `transcriptText` available. See §2.6.                                                                                                                                |
 | **Cache Pass 1 by input hash**        | Skip ~3-6s on regenerate | Low        | Already partially done (cached `clinical_analysis` in metadata). Could content-address by transcript+files hash to skip the Sonnet call entirely on regenerate.                                                    |
 | **Stream Pass 2 start earlier**       | Perceived ~5s faster     | Low        | Start streaming Opus while Pass 1.7 is still running. The system prompt can be built incrementally — specialty and concepts are available from Pass 1, ICD block can be injected as a late user-message amendment. |
 | **Replace Opus with Sonnet 4.6**      | ~5-10s faster generation | Low        | Sonnet is 3-5x faster than Opus. Quality trade-off needs testing — Opus handles multi-section structured generation more reliably.                                                                                 |
 
 #### Cost optimizations
 
-| Idea                                            | Savings                                | Complexity | Trade-off                                                                                                                                                                         |
-| ----------------------------------------------- | -------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Replace Opus with Sonnet 4.6 for generation** | ~75% of Pass 2 cost (~$0.24/encounter) | Low        | Sonnet 4.6 is 5x cheaper on input, 5x cheaper on output. Quality trade-off: Opus produces better-structured, more natural Slovak medical prose. Could A/B test.                   |
-| **Prompt compression**                          | ~10-20% of Pass 2 cost                 | Medium     | The system prompt is ~2000 tokens. Could compress by removing redundant rules, using shorter phrasing. Diminishing returns — most tokens are in the user message (facts + files). |
-| **Skip Pass 1 when facts are sufficient**       | ~$0.04/encounter                       | Medium     | If Pass 1.5 extracts enough facts for the note, Pass 1's concepts/specialty/ICD hints become less critical. Could make Pass 1 conditional on encounter complexity.                |
-| **Shorter fact evidence quotes**                | ~15% of Pass 1.5 input tokens          | Low        | Currently 120-char max. Could reduce to 80 chars. Risk: evidence becomes too short for reliable validation in Pass 1.6a.                                                          |
+| Idea                                            | Savings                                | Complexity | Trade-off                                                                                                                                                          |
+| ----------------------------------------------- | -------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Replace Opus with Sonnet 4.6 for generation** | ~75% of Pass 2 cost (~$0.24/encounter) | Low        | Sonnet 4.6 is 5x cheaper on input, 5x cheaper on output. Quality trade-off: Opus produces better-structured, more natural Slovak medical prose. Could A/B test.    |
+| ~~Prompt compression~~                          | ~~~10-20% of Pass 2 cost~~             | ~~Done~~   | **Implemented.** `buildFactBasedSystemPrompt` is ~60% shorter for the facts-present path. See §8.1.                                                                |
+| **Skip Pass 1 when facts are sufficient**       | ~$0.04/encounter                       | Medium     | If Pass 1.5 extracts enough facts for the note, Pass 1's concepts/specialty/ICD hints become less critical. Could make Pass 1 conditional on encounter complexity. |
+| **Shorter fact evidence quotes**                | ~15% of Pass 1.5 input tokens          | Low        | Currently 120-char max. Could reduce to 80 chars. Risk: evidence becomes too short for reliable validation in Pass 1.6a.                                           |
 
 #### Quality optimizations
 
@@ -870,9 +935,16 @@ metadata            jsonb    -- see below
     "problemClusters": [...],
     "mentionedMedications": [...]
   },
+  "validated_facts": {                // persisted for structured rerender (§11.1)
+    "demographics": [...],
+    "chiefComplaint": [...],
+    "diagnoses": [...],
+    // ... all 15 categories
+  },
   "generation_fingerprint": { "composite": "sha256:...", "components": {...} },
   "generation_history": [
-    { "at": "2026-04-09T...", "operation": "generate", "fingerprint": {...} }
+    { "at": "2026-04-09T...", "operation": "generate", "fingerprint": {...} },
+    { "at": "2026-04-10T...", "operation": "rerender_template", ... }
   ]
 }
 ```
@@ -901,7 +973,8 @@ The column update goes through `retrySupabaseCall` from [web/src/lib/supabase/re
 | Pass 1.5 — Fact extraction | `claude-haiku-4-5-20251001` (t=0, 16384 tokens) | Grounded facts with evidence        | Cheap + fast + good enough at strict-rules JSON       |
 | Pass 2 — Generation        | `claude-opus-4-6` (t=0, 8192 tokens)            | Prose note + letter + title         | Opus handles multi-section structured generation best |
 | Title generation           | `claude-haiku-4-5-20251001` (t=0, 64 tokens)    | Short title from ICDs               | Cheap, deterministic, no room to hallucinate          |
-| Reformat (regen fast path) | Same fallback chain as Pass 2                   | Template swap                       | Pure reformat, no clinical reasoning                  |
+| Structured rerender        | Same fallback chain as Pass 2                   | Template swap (with cached facts)   | Re-runs fact-to-section with new template             |
+| Legacy reformat            | Same fallback chain as Pass 2                   | Template swap (no cached facts)     | Pure prose reformat, no clinical reasoning            |
 | Transcription              | `scribe_v2` (ElevenLabs)                        | Audio -> text                       | Better SK/CS than Whisper                             |
 
 All Anthropic calls use `temperature: 0`. The determinism guarantees come from the deterministic gates (Pass 1.6, 1.7, 2.5), not from temperature alone.
@@ -920,6 +993,7 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | Opus ignoring "only these ICDs" constraint      | **Pass 2.5** defensive strip                  |
 | Opus placing facts in wrong sections            | **Fact-to-section pre-assignment**            |
 | Opus rephrasing fact values                     | **FACT VALUE FIDELITY** rule in system prompt |
+| Template change losing fact structure           | **Structured rerender** from cached facts     |
 
 ---
 
@@ -931,7 +1005,8 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | [fact-validator.test.ts](web/src/lib/clinical/fact-validator.test.ts)               | `normalizeForMatch`, `evidenceAppearsInSource`, cross-source fallback, dedup, medication warnings |
 | [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)                 | Correction phrase detection (sk/cs/en), punctuation-bracketed negation, time-series preservation  |
 | [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                 | 38+ tests: EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism            |
-| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                           | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`                                           |
+| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                           | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`, `hasValidatedFacts` flag behavior        |
+| [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                  | `buildFactBasedSystemPrompt`, `buildLetterInstruction`, `buildTemplateSystemPrompt`               |
 | [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts) | Category-to-section mapping, abbreviation matching, unassigned fallback                           |
 | [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                     | SHA-256 stability, `diffFingerprints`                                                             |
 
@@ -939,19 +1014,19 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 
 ## 17. Where to Make Changes
 
-| Want to...                     | Touch this                                                                                                                                                                                     |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Change what Pass 1 extracts    | [prompts.ts](web/src/lib/clinical/prompts.ts) and [pipeline.ts](web/src/lib/clinical/pipeline.ts)                                                                                              |
-| Change what counts as a fact   | [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts)                                                                                                                                  |
-| Change how facts are validated | [fact-validator.ts](web/src/lib/clinical/fact-validator.ts)                                                                                                                                    |
-| Change correction detection    | [fact-resolver.ts](web/src/lib/clinical/fact-resolver.ts)                                                                                                                                      |
-| Change ICD certainty           | [icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)                                                                                                                                      |
-| Change the Opus system prompt  | [anthropic.ts](web/src/lib/anthropic.ts) `buildTemplateSystemPrompt` + [pipeline.ts](web/src/lib/clinical/pipeline.ts) `buildEnrichedSystemPrompt`                                             |
-| Change the Opus user message   | [anthropic.ts](web/src/lib/anthropic.ts) `buildTemplateUserMessage`                                                                                                                            |
-| Wire in a new pipeline stage   | Both [generate/route.ts](web/src/app/api/generate/route.ts) and [regenerate/route.ts](web/src/app/api/regenerate/route.ts)                                                                     |
-| Add a specialty prompt pack    | [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts)                                                                                                                              |
-| Add ICD synonym group          | [icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) `SYNONYM_GROUPS`                                                                                                                     |
-| Bump a model ID                | [pipeline.ts](web/src/lib/clinical/pipeline.ts), [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts), [anthropic.ts](web/src/lib/anthropic.ts), and [usage.ts](web/src/lib/usage.ts) |
+| Want to...                     | Touch this                                                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Change what Pass 1 extracts    | [prompts.ts](web/src/lib/clinical/prompts.ts) and [pipeline.ts](web/src/lib/clinical/pipeline.ts)                                                                                                       |
+| Change what counts as a fact   | [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts)                                                                                                                                           |
+| Change how facts are validated | [fact-validator.ts](web/src/lib/clinical/fact-validator.ts)                                                                                                                                             |
+| Change correction detection    | [fact-resolver.ts](web/src/lib/clinical/fact-resolver.ts)                                                                                                                                               |
+| Change ICD certainty           | [icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts)                                                                                                                                               |
+| Change the Opus system prompt  | [anthropic.ts](web/src/lib/anthropic.ts) `buildFactBasedSystemPrompt` (facts path) / `buildTemplateSystemPrompt` (legacy) + [pipeline.ts](web/src/lib/clinical/pipeline.ts) `buildEnrichedSystemPrompt` |
+| Change the Opus user message   | [anthropic.ts](web/src/lib/anthropic.ts) `buildTemplateUserMessage`                                                                                                                                     |
+| Wire in a new pipeline stage   | Both [generate/route.ts](web/src/app/api/generate/route.ts) and [regenerate/route.ts](web/src/app/api/regenerate/route.ts)                                                                              |
+| Add a specialty prompt pack    | [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts)                                                                                                                                       |
+| Add ICD synonym group          | [icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) `SYNONYM_GROUPS`                                                                                                                              |
+| Bump a model ID                | [pipeline.ts](web/src/lib/clinical/pipeline.ts), [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts), [anthropic.ts](web/src/lib/anthropic.ts), and [usage.ts](web/src/lib/usage.ts)          |
 
 ---
 

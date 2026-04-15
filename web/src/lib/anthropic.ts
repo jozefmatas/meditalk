@@ -51,7 +51,117 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
 };
 
 /**
+ * Build the patient-letter instruction block for the system prompt.
+ *
+ * Isolates letter generation rules from note generation so they can
+ * be evolved independently (e.g. reading-level tuning, separate model).
+ */
+export function buildLetterInstruction(language: SupportedLanguage): string {
+  const langLabel = LANGUAGE_LABELS[language];
+  return `PATIENT LETTER ("letter" key in JSON output):
+- Write in clear, simple ${langLabel} that a non-medical reader can understand.
+- Summarise the key findings, diagnoses, and recommended next steps from the note.
+- Avoid jargon — translate medical terms into plain language where possible.
+- Keep the tone warm, professional, and reassuring.
+- Do NOT include ICD codes in the letter.
+- Keep the letter concise — 3 to 6 sentences.`;
+}
+
+/**
+ * Build a lean system prompt for the facts-present path.
+ *
+ * When validated facts have been pre-assigned to sections by the
+ * deterministic pipeline (Pass 1.5 → 1.6a/b → fact-to-section), the
+ * LLM's job is purely *formatting*, not clinical reasoning. This prompt
+ * strips out ~60 % of the token budget by removing rules that are
+ * already enforced upstream:
+ *
+ *  - Insufficient context check → impossible when validated facts exist
+ *  - Verbose grounding / NO ASSUMPTION MODE → enforced by Pass 1.5 rules
+ *  - Source priority hierarchy → facts are the single source of truth
+ *  - Title rules → title generated in a dedicated Haiku call
+ *  - Section routing rules (8a-8h) → facts already pre-assigned to sections
+ *
+ * Falls through to the full `buildTemplateSystemPrompt` when the template
+ * uses a custom `systemPrompt` — custom prompts bypass this optimisation.
+ */
+export function buildFactBasedSystemPrompt(
+  template: Template,
+  language: SupportedLanguage,
+  sectionLabels: Record<string, string>,
+  sectionContexts?: Record<string, string>,
+): string {
+  const langLabel = LANGUAGE_LABELS[language];
+  const allIds = flattenSectionIds(template);
+
+  const sectionList = allIds
+    .map((id) => {
+      const label = sectionLabels[id] || id;
+      const context = sectionContexts?.[id];
+      if (context) {
+        return `- "${id}": ${label}\n  SECTION-SPECIFIC GUIDANCE (ALWAYS FOLLOW THIS): ${context}`;
+      }
+      return `- "${id}": ${label}`;
+    })
+    .join("\n");
+
+  const styleGuideBlock = template.styleGuide
+    ? `\n\nWRITING STYLE GUIDE:\nMimic the following writing style in your output. Match the tone, sentence structure, formatting preferences, abbreviation usage, and level of detail described below:\n${template.styleGuide}\n`
+    : "";
+
+  const interpolate = (prompt: string) =>
+    prompt
+      .replace(/\{\{sections\}\}/g, sectionList)
+      .replace(/\{\{language\}\}/g, langLabel)
+      .replace(/\{\{languageCode\}\}/g, language)
+      .replace(/\{\{styleGuide\}\}/g, styleGuideBlock);
+
+  // Custom prompts bypass the fact-based optimisation
+  if (template.systemPrompt) {
+    return interpolate(template.systemPrompt);
+  }
+
+  return interpolate(`You are a medical documentation assistant. You MUST follow these rules strictly:
+
+CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL:
+If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes absolute precedence over any general rule or instruction. Follow section-specific guidance exactly as written, even if it contradicts other rules.
+
+1. FACT VALUE FIDELITY: The pre-assigned validated clinical facts are the sole source of clinical truth. Your job is to FORMAT them into the note, not to REWRITE them.
+   - Reproduce each fact's wording as closely as possible. Only adjust grammatical case, declension, or word order as minimally needed for natural {{language}} text.
+   - Do NOT rephrase, paraphrase, elaborate, summarize, or add explanatory context beyond what the fact states.
+   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement or bullet point.
+   - Present facts within each section in the EXACT order they appear in the input. Do NOT reorder facts.
+   - If a section has pre-assigned facts, its content MUST be derived exclusively from those facts — do not add information from other sections or from general clinical knowledge.
+   - The same facts must produce the same output text every time. Treat this as a formatting task, not a creative writing task.
+
+2. NEVER FABRICATE MISSING CLINICAL DIMENSIONS: If a numeric value appears WITHOUT a unit or dimension, you MUST NOT invent the missing dimension. Preserve the raw value and mark the ambiguity — e.g. "fajčí 15 (bližšie nešpecifikované)". This applies to frequency, duration, laterality, severity, dosage, route, and temporal anchors. Correctness > completeness.
+
+3. DIRECTIVES: Doctor's additional notes and per-file directives (lines starting with "DOCTOR'S DIRECTIVE FOR THIS FILE:") are authoritative. Follow them as strict filters.
+
+4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. Only exceptions: established Latin/international medical terminology and proper nouns.
+
+5. MISSING SECTIONS: If a section has no relevant information, output an empty string "" for that key. Do NOT write placeholder text.
+
+6. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items. For diagnoses/ICD codes, put the code first, then the name. Narrative sections should remain as flowing prose.
+
+7. FORMAT: Return valid JSON with keys:
+   - One key for each section ID listed below (string value, or "" if empty).
+   - A "letter" key (see PATIENT LETTER rules below).
+   - A "title" key with a short encounter title (max 6 words) in {{language}}.
+
+${buildLetterInstruction(language)}
+
+TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
+{{sections}}
+{{styleGuide}}`);
+}
+
+/**
  * Build a system prompt for template-based generation.
+ *
+ * This is the full-featured prompt used when validated facts are NOT
+ * available (legacy path, or when fact extraction failed). It includes
+ * all grounding rules, section routing, title rules, etc.
  */
 export function buildTemplateSystemPrompt(
   template: Template,
@@ -129,7 +239,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 7. FORMAT: Return valid JSON with the following keys:
    - One key for each section ID listed below, with the section content as a string value (or "" if no information).
-   - A "letter" key with a patient-friendly summary letter.
+   - A "letter" key (see PATIENT LETTER rules below).
    - A "title" key with a short encounter title (max 6 words) in {{language}}.
      TITLE RULES:
      - The title MUST be consistent with the primary diagnosis in the assessment/conclusion section. Use the main ICD diagnosis description (or a close paraphrase) as the basis.
@@ -137,6 +247,8 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
      - Do NOT include anatomical localisation (anterior, lateral, inferior, left, right, wall-specific descriptors) unless it appears in the primary diagnosis description.
      - When in doubt, use a more general title that the codes actually support.
      Example — if the primary diagnosis is "I21 Akútny infarkt myokardu", the title should be "Akútny infarkt myokardu", NOT "Akútny STEMI laterálnej steny".
+
+${buildLetterInstruction(language)}
 
 8. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
 
@@ -418,13 +530,25 @@ export async function generateFromTemplate(
     sectionContexts,
   );
 
-  // Build system prompt, enriched with specialty context if analysis available
-  let systemPrompt = buildTemplateSystemPrompt(
-    template,
-    language,
-    sectionLabels,
-    sectionContexts,
+  // Build system prompt — use the lean fact-based prompt when validated
+  // facts are present (they've already been pre-assigned to sections by
+  // the deterministic pipeline), otherwise fall back to the full prompt.
+  const hasValidatedFacts = !!(
+    validatedFacts && countFacts(validatedFacts) > 0
   );
+  let systemPrompt = hasValidatedFacts
+    ? buildFactBasedSystemPrompt(
+        template,
+        language,
+        sectionLabels,
+        sectionContexts,
+      )
+    : buildTemplateSystemPrompt(
+        template,
+        language,
+        sectionLabels,
+        sectionContexts,
+      );
   if (clinicalAnalysis) {
     // When the template declares a specialty, use it instead of Pass 1's
     // inferred specialty — eliminates one source of cross-run variance.
@@ -441,6 +565,7 @@ export async function generateFromTemplate(
       systemPrompt,
       clinicalAnalysis,
       language,
+      hasValidatedFacts,
     );
   }
 

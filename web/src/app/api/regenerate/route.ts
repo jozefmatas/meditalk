@@ -6,6 +6,7 @@ import {
   anthropic,
   GENERATION_MODELS,
   MODEL_FALLBACK_DELAY,
+  buildFactBasedSystemPrompt,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
   generateEncounterTitle,
@@ -212,6 +213,7 @@ export async function POST(request: NextRequest) {
     let systemPrompt: string;
     let userMessage: string;
     let reuseLetterFromVisit = false;
+    let operationType: "regenerate" | "rerender" | "reformat" = "regenerate";
     let validatedFacts: ExtractedFacts = emptyExtractedFacts();
     let factWarnings: string[] = [];
     let factRemovedCount = 0;
@@ -221,10 +223,71 @@ export async function POST(request: NextRequest) {
     // preserved from the cached analysis if available.
     let allCandidateIcdCodes: CandidateIcdCode[] = [];
 
-    if (existingNote && oldTemplate && oldTemplateId !== template.id) {
-      // ─── FAST PATH: Reformat existing note with Haiku ───
-      const sectionMap = parseNoteToSectionMap(existingNote, oldTemplate);
+    // Check for cached validated facts from previous generation
+    const cachedValidatedFacts = visitMeta.validated_facts as
+      | ExtractedFacts
+      | undefined;
+    const hasCachedFacts =
+      cachedValidatedFacts && countFacts(cachedValidatedFacts) > 0;
+    const isTemplateChange =
+      existingNote && oldTemplate && oldTemplateId !== template.id;
+
+    if (isTemplateChange && hasCachedFacts) {
+      // ─── STRUCTURED PATH: Fact-based rerender with cached facts ───
+      // When validated facts exist from a prior generation, re-render them
+      // into the new template. This is more reliable than prose reformatting
+      // because facts are already validated/resolved and section assignment
+      // is deterministic — no information loss from HTML → text → LLM → HTML.
+      validatedFacts = cachedValidatedFacts;
       reuseLetterFromVisit = true;
+      operationType = "rerender";
+      streamModels = GENERATION_MODELS;
+
+      // Load cached analysis for enrichment (specialty, ICD, medications)
+      if (cachedAnalysis?.inferredSpecialty) {
+        clinicalAnalysis = {
+          ...cachedAnalysis,
+          usage: { inputTokens: 0, outputTokens: 0 },
+        } as ClinicalAnalysis;
+        allCandidateIcdCodes =
+          (cachedAnalysis.suggestedIcdCodes as CandidateIcdCode[]) ??
+          clinicalAnalysis.candidateIcdCodes ??
+          [];
+      }
+
+      // Use the lean fact-based prompt (same as the main generation path)
+      const basePrompt = buildFactBasedSystemPrompt(
+        template,
+        language,
+        sectionLabels,
+        sectionContexts,
+      );
+      systemPrompt = clinicalAnalysis
+        ? buildEnrichedSystemPrompt(
+            basePrompt,
+            clinicalAnalysis,
+            language,
+            true,
+          )
+        : basePrompt;
+      userMessage = buildTemplateUserMessage(
+        chunkContents,
+        template,
+        doctorNotes,
+        fileTexts,
+        validatedFacts,
+        sectionLabels,
+        sectionContexts,
+      );
+
+      logger.debug(
+        `[regenerate] Structured rerender — ${countFacts(validatedFacts)} cached facts, template ${oldTemplateId} → ${template.id}`,
+      );
+    } else if (isTemplateChange) {
+      // ─── LEGACY FAST PATH: Prose reformat for old encounters without facts ───
+      const sectionMap = parseNoteToSectionMap(existingNote!, oldTemplate!);
+      reuseLetterFromVisit = true;
+      operationType = "reformat";
 
       const currentSections = Object.entries(sectionMap)
         .filter(([, content]) => content.trim())
@@ -261,12 +324,15 @@ Rules:
           ...cachedAnalysis,
           usage: { inputTokens: 0, outputTokens: 0 },
         } as ClinicalAnalysis;
-        // Preserve suggestions from original generation
         allCandidateIcdCodes =
           (cachedAnalysis.suggestedIcdCodes as CandidateIcdCode[]) ??
           clinicalAnalysis.candidateIcdCodes ??
           [];
       }
+
+      logger.debug(
+        `[regenerate] Legacy prose reformat — no cached facts, template ${oldTemplateId} → ${template.id}`,
+      );
     } else {
       // ─── FULL PATH: Generate from transcript with Opus ───
       streamModels = GENERATION_MODELS;
@@ -355,17 +421,26 @@ Rules:
         };
       }
 
-      const baseSystemPrompt = buildTemplateSystemPrompt(
-        template,
-        language,
-        sectionLabels,
-        sectionContexts,
-      );
+      const hasFactsForPrompt = countFacts(validatedFacts) > 0;
+      const baseSystemPrompt = hasFactsForPrompt
+        ? buildFactBasedSystemPrompt(
+            template,
+            language,
+            sectionLabels,
+            sectionContexts,
+          )
+        : buildTemplateSystemPrompt(
+            template,
+            language,
+            sectionLabels,
+            sectionContexts,
+          );
       systemPrompt = clinicalAnalysis
         ? buildEnrichedSystemPrompt(
             baseSystemPrompt,
             clinicalAnalysis,
             language,
+            hasFactsForPrompt,
           )
         : baseSystemPrompt;
       userMessage = buildTemplateUserMessage(
@@ -373,7 +448,9 @@ Rules:
         template,
         doctorNotes,
         fileTexts,
-        countFacts(validatedFacts) > 0 ? validatedFacts : undefined,
+        hasFactsForPrompt ? validatedFacts : undefined,
+        sectionLabels,
+        sectionContexts,
       );
     }
 
@@ -584,9 +661,7 @@ Rules:
           : [];
         const historyEntry = {
           at: new Date().toISOString(),
-          operation: reuseLetterFromVisit
-            ? ("reformat" as const)
-            : ("regenerate" as const),
+          operation: operationType,
           fingerprint,
         };
         const generationHistory = [...priorHistory, historyEntry].slice(-10);
@@ -621,6 +696,10 @@ Rules:
           generation_pending: null,
           recording_session: null,
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          // Persist validated facts for future fact-based rerenders
+          ...(countFacts(validatedFacts) > 0
+            ? { validated_facts: validatedFacts }
+            : {}),
           ...(finalAnalysis
             ? {
                 clinical_analysis: {
@@ -662,9 +741,10 @@ Rules:
           visitId,
           provider: "anthropic",
           model: usedModel,
-          operation: reuseLetterFromVisit
-            ? "reformat_template"
-            : "generate_template",
+          operation:
+            operationType === "regenerate"
+              ? "generate_template"
+              : `${operationType}_template`,
           inputTokens,
           outputTokens,
         });

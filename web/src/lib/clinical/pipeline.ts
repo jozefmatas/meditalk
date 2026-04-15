@@ -133,11 +133,17 @@ export function buildPreRenderedIcdBlock(
 /**
  * Augment a base system prompt with specialty context, ICD codes,
  * matched concepts, and medication validation from clinical analysis.
+ *
+ * When `hasValidatedFacts` is true, concepts and problem clusters are
+ * omitted — they are advisory metadata useful for the grounding path
+ * but add unnecessary prompt tokens when the LLM is doing a pure
+ * formatting task over pre-assigned facts.
  */
 export function buildEnrichedSystemPrompt(
   baseSystemPrompt: string,
   analysis: ClinicalAnalysis,
   locale: SupportedLanguage,
+  hasValidatedFacts?: boolean,
 ): string {
   const parts: string[] = [baseSystemPrompt];
 
@@ -178,7 +184,15 @@ export function buildEnrichedSystemPrompt(
       }
     }
 
-    parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
+    if (hasValidatedFacts) {
+      // When facts are present, FACT VALUE FIDELITY already constrains the
+      // LLM to use only provided facts. The medication block only needs the
+      // lookup table and correction handling.
+      parts.push(`\nVERIFIED MEDICATIONS (locale: ${locale}):
+${resolvedMeds.join("\n")}
+Use corrected names where marked [corrected from "..."]. For [not found in approved list], use the dictated name without annotations.`);
+    } else {
+      parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
 ${resolvedMeds.join("\n")}
 RULES:
 - Only include medications EXPLICITLY mentioned in the transcript or documents
@@ -187,6 +201,7 @@ RULES:
 - Do NOT add medications that are "commonly prescribed" for a condition unless they are explicitly mentioned in the source material
 - If a medication is marked [corrected from "..."], use the CORRECTED name (it was auto-matched from a misspelling)
 - If a medication is marked [not found in approved list], still include it in the clinical note using EXACTLY the name the doctor dictated — do NOT add any warning label, bracket, or annotation around it`);
+    }
   }
 
   // Add pre-rendered ICD block — Opus must copy this verbatim
@@ -201,16 +216,18 @@ RULES:
     );
   }
 
-  // Add matched clinical concepts
-  if (analysis.matchedConcepts.length > 0) {
+  // Add matched clinical concepts (skip when facts are pre-assigned —
+  // concepts are advisory metadata that adds prompt tokens without
+  // improving output quality in the fact-based formatting path)
+  if (!hasValidatedFacts && analysis.matchedConcepts.length > 0) {
     const conceptList = analysis.matchedConcepts
       .map((c) => `  - ${c.canonicalName} (${c.confidence})`)
       .join("\n");
     parts.push(`\nIDENTIFIED CLINICAL CONCEPTS:\n${conceptList}`);
   }
 
-  // Add problem clusters
-  if (analysis.problemClusters.length > 0) {
+  // Add problem clusters (same reasoning as concepts)
+  if (!hasValidatedFacts && analysis.problemClusters.length > 0) {
     const clusterList = analysis.problemClusters
       .map((c) => `  - ${c.label}: ${c.conceptIds.join(", ")}`)
       .join("\n");

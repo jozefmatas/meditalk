@@ -429,8 +429,13 @@ export async function POST(request: NextRequest) {
     let usedChunks: string[] = [];
     const hasFileContent = fileTexts.length > 0;
 
-    // Build clinical input from all extracted text + doctor notes
+    // Build clinical input from all extracted text + doctor notes.
+    // When transcriptText is available, include it so Pass 1 (Sonnet)
+    // sees the full picture for specialty detection and ICD grounding.
     const clinicalInputParts: string[] = [];
+    if (transcriptText) {
+      clinicalInputParts.push(transcriptText);
+    }
     for (const ft of fileTexts) {
       const directive = ft.context
         ? `\nDOCTOR'S DIRECTIVE FOR THIS FILE: ${ft.context}`
@@ -441,7 +446,10 @@ export async function POST(request: NextRequest) {
       clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
     }
 
-    // Run embedding search and clinical analysis in parallel.
+    // Run embedding search, clinical analysis, and (when possible) fact
+    // extraction in parallel. When transcriptText is available the fact
+    // extraction input is fully known up-front so Pass 1.5 can start
+    // immediately without waiting for embedding results.
     // @deprecated transcript_chunks — new encounters store transcript in
     // metadata.transcript; this legacy path only fires for old encounters
     // created before the batch-only migration.
@@ -521,10 +529,36 @@ export async function POST(request: NextRequest) {
             })
         : Promise.resolve(null);
 
-    const [embeddingResult, rawClinicalAnalysis] = await Promise.all([
-      embeddingPromise,
-      clinicalPromise,
-    ]);
+    // When transcriptText is available, fact extraction input is known
+    // up-front so Pass 1.5 (Haiku) can start in parallel with Pass 1
+    // (Sonnet) — saves ~4-8s of wall time vs the sequential path.
+    // For legacy chunk encounters, fact extraction runs after embedding.
+    const earlyFactInput: FactExtractionInput | null = transcriptText
+      ? {
+          chunks: [transcriptText],
+          doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
+          files: fileTexts.length > 0 ? fileTexts : undefined,
+        }
+      : null;
+
+    const factExtractionPromise: Promise<ExtractedFacts | null> = earlyFactInput
+      ? runFactExtraction(earlyFactInput, language, { userId, visitId }).catch(
+          (err) => {
+            logger.warn(
+              "[generate] Parallel fact extraction failed, will retry sequentially:",
+              err,
+            );
+            return null;
+          },
+        )
+      : Promise.resolve(null);
+
+    const [embeddingResult, rawClinicalAnalysis, earlyRawFacts] =
+      await Promise.all([
+        embeddingPromise,
+        clinicalPromise,
+        factExtractionPromise,
+      ]);
     let clinicalAnalysis: ClinicalAnalysis | null = rawClinicalAnalysis;
 
     lap("parallel-done");
@@ -539,16 +573,16 @@ export async function POST(request: NextRequest) {
     // Use transcriptText if available (real-time streaming), otherwise use chunk contents
     const transcriptChunks = transcriptText ? [transcriptText] : chunkContents;
 
-    // Pass 1.5 — Structured fact extraction.
-    // Runs AFTER Pass 1 (we now know `transcriptChunks`) and BEFORE Opus.
-    // Always executes when there is any source material so Opus receives a
-    // validated factual contract. Failures are non-fatal: we fall back to an
-    // empty fact set and proceed with the current Pass 1 + Opus pipeline.
+    // Pass 1.5 — Structured fact extraction + deterministic validation.
+    // For transcriptText encounters, raw facts were extracted in parallel
+    // above (earlyRawFacts). For legacy chunk encounters, extraction runs
+    // sequentially here. Failures are non-fatal: we fall back to an empty
+    // fact set and proceed with the current pipeline.
     let validatedFacts: ExtractedFacts = emptyExtractedFacts();
     let factWarnings: string[] = [];
     let factRemovedCount = 0;
     let factResolutionDropCount = 0;
-    const factExtractionInput: FactExtractionInput = {
+    const factExtractionInput: FactExtractionInput = earlyFactInput ?? {
       chunks: transcriptChunks,
       doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
       files: fileTexts.length > 0 ? fileTexts : undefined,
@@ -559,11 +593,13 @@ export async function POST(request: NextRequest) {
       (factExtractionInput.files?.length ?? 0) > 0;
     if (hasAnyFactSource) {
       try {
-        const rawFacts = await runFactExtraction(
-          factExtractionInput,
-          language,
-          { userId, visitId },
-        );
+        // Use early results if available, otherwise run extraction now
+        const rawFacts =
+          earlyRawFacts ??
+          (await runFactExtraction(factExtractionInput, language, {
+            userId,
+            visitId,
+          }));
         const validation = validateFacts(rawFacts, factExtractionInput, {
           pass1: clinicalAnalysis,
           locale: language,
@@ -810,6 +846,12 @@ export async function POST(request: NextRequest) {
           recording_session: null,
           ...(transcriptText ? { transcript: transcriptText } : {}),
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          // Persist validated facts so future regeneration (template changes)
+          // can do a deterministic fact-based rerender instead of prose
+          // reformatting. Only stored when facts were actually extracted.
+          ...(countFacts(validatedFacts) > 0
+            ? { validated_facts: validatedFacts }
+            : {}),
           ...(finalAnalysis
             ? {
                 clinical_analysis: {

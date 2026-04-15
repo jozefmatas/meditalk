@@ -14,6 +14,8 @@ vi.mock("@/lib/env/client", () => ({
 }));
 
 import {
+  buildFactBasedSystemPrompt,
+  buildLetterInstruction,
   buildTemplateSystemPrompt,
   buildTemplateUserMessage,
   buildTitleSystemPrompt,
@@ -357,6 +359,213 @@ describe("buildTemplateSystemPrompt", () => {
     // Concrete STEMI counter-example proves the rule is spelled out
     expect(prompt).toContain("Akútny infarkt myokardu");
     expect(prompt).toContain("Akútny STEMI laterálnej steny");
+  });
+});
+
+describe("buildFactBasedSystemPrompt", () => {
+  it("includes FACT VALUE FIDELITY as the primary rule", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("FACT VALUE FIDELITY");
+    expect(prompt).toContain("formatting task, not a creative writing task");
+    expect(prompt).toContain("Do NOT rephrase, paraphrase, elaborate");
+  });
+
+  it("does NOT include INSUFFICIENT CONTEXT CHECK", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).not.toContain("INSUFFICIENT CONTEXT CHECK");
+    expect(prompt).not.toContain("insufficient_context");
+  });
+
+  it("does NOT include NO ASSUMPTION MODE verbose text", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).not.toContain("NO ASSUMPTION MODE");
+    expect(prompt).not.toContain("Do NOT upgrade diagnosis severity");
+  });
+
+  it("does NOT include SOURCE PRIORITY hierarchy", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).not.toContain("SOURCE PRIORITY");
+    expect(prompt).not.toContain("Actual spoken transcript");
+  });
+
+  it("does NOT include SECTION CONTENT ROUTING rules", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).not.toContain("SECTION CONTENT ROUTING");
+    expect(prompt).not.toContain("HARD ROUTING RULES");
+    expect(prompt).not.toContain("Lieková anamnéza");
+  });
+
+  it("does NOT include verbose TITLE RULES", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).not.toContain("TITLE RULES");
+    expect(prompt).not.toContain("consistent with the primary diagnosis");
+  });
+
+  it("includes NEVER FABRICATE MISSING CLINICAL DIMENSIONS (condensed)", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("NEVER FABRICATE MISSING CLINICAL DIMENSIONS");
+    expect(prompt).toMatch(/correctness > completeness/i);
+  });
+
+  it("includes output language, formatting, and JSON format rules", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("OUTPUT LANGUAGE");
+    expect(prompt).toContain("English");
+    expect(prompt).toContain("FORMATTING");
+    expect(prompt).toContain("Return valid JSON");
+    expect(prompt).toContain('"letter"');
+    expect(prompt).toContain('"title"');
+  });
+
+  it("includes section IDs and labels", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain('"subjective"');
+    expect(prompt).toContain('"objective"');
+    expect(prompt).toContain('"assessment"');
+    expect(prompt).toContain("Subjective");
+  });
+
+  it("includes section-specific guidance", () => {
+    const labels: Record<string, string> = {
+      history: "History",
+      present_illness: "Present Illness",
+      past_history: "Past History",
+      plan: "Plan",
+    };
+    const contexts: Record<string, string> = {
+      plan: "List medications and follow-up",
+    };
+    const prompt = buildFactBasedSystemPrompt(
+      TEMPLATE_WITH_SUBSECTIONS,
+      "en",
+      labels,
+      contexts,
+    );
+    expect(prompt).toContain("List medications and follow-up");
+    expect(prompt).toContain("SECTION-SPECIFIC GUIDANCE");
+  });
+
+  it("uses custom systemPrompt when provided (bypasses optimization)", () => {
+    const labels = { notes: "Notes" };
+    const prompt = buildFactBasedSystemPrompt(
+      TEMPLATE_WITH_CUSTOM_PROMPT,
+      "sk",
+      labels,
+    );
+    expect(prompt).toContain("Custom prompt for Slovak");
+    expect(prompt).not.toContain("FACT VALUE FIDELITY");
+  });
+
+  it("includes style guide when template has one", () => {
+    const labels = { notes: "Notes" };
+    const prompt = buildFactBasedSystemPrompt(
+      TEMPLATE_WITH_STYLE_GUIDE,
+      "en",
+      labels,
+    );
+    expect(prompt).toContain("WRITING STYLE GUIDE");
+    expect(prompt).toContain("telegraphic sentences");
+  });
+
+  it("includes patient letter instruction block", () => {
+    const prompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(prompt).toContain("PATIENT LETTER");
+    expect(prompt).toContain("non-medical reader");
+    expect(prompt).toContain("Do NOT include ICD codes");
+  });
+
+  it("is significantly shorter than the full system prompt", () => {
+    const factPrompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    const fullPrompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    // Fact-based prompt should be at least 30% shorter
+    expect(factPrompt.length).toBeLessThan(fullPrompt.length * 0.7);
+  });
+});
+
+describe("buildLetterInstruction", () => {
+  it("includes the language name", () => {
+    expect(buildLetterInstruction("en")).toContain("English");
+    expect(buildLetterInstruction("sk")).toContain("Slovak");
+    expect(buildLetterInstruction("cs")).toContain("Czech");
+  });
+
+  it("specifies patient-friendly, non-medical language", () => {
+    const instr = buildLetterInstruction("sk");
+    expect(instr).toContain("non-medical reader");
+    expect(instr).toContain("Avoid jargon");
+  });
+
+  it("forbids ICD codes in the letter", () => {
+    const instr = buildLetterInstruction("en");
+    expect(instr).toContain("Do NOT include ICD codes");
+  });
+
+  it("specifies concise length", () => {
+    const instr = buildLetterInstruction("en");
+    expect(instr).toContain("3 to 6 sentences");
+  });
+
+  it("is included in both fact-based and full system prompts", () => {
+    const factPrompt = buildFactBasedSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    const fullPrompt = buildTemplateSystemPrompt(
+      SIMPLE_TEMPLATE,
+      "en",
+      SECTION_LABELS,
+    );
+    expect(factPrompt).toContain("PATIENT LETTER");
+    expect(fullPrompt).toContain("PATIENT LETTER");
   });
 });
 

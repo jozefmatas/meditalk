@@ -20,6 +20,7 @@ type Operation =
   | "generate_template_refine"
   | "generate_title"
   | "reformat_template"
+  | "rerender_template"
   | "clinical_analysis"
   | "fact_extraction"
   | "embed"
