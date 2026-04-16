@@ -215,7 +215,7 @@ Fingerprint diffing (SHA-256 over every pipeline component) detects whether diff
 
 - **Built-in** (static): SOAP + specialty variants in [web/src/lib/templates/default-templates.ts](web/src/lib/templates/default-templates.ts), marked `isSystem: true`
 - **User-defined**: Supabase `templates` table with custom sections, i18n labels, optional style guide, usage tracking
-- Each template has hierarchical sections with per-locale labels and mandatory `context` fields (English) explaining what content belongs in each section. All 8 system templates have context on every section and subsection (added via migration `20260416_add_global_section_contexts.sql`). Focused templates use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.)
+- Each template has hierarchical sections with per-locale labels and mandatory `context` fields (English) explaining what content belongs in each section. All 8 system templates have context on every section and subsection (added via migration `20260416_add_global_section_contexts.sql`, refined by `20260419_fix_oa_la_section_contexts.sql`). Key routing rule: OA (past medical history) explicitly excludes medications; LA (current medications) is the sole location for all drug names and dosing. Focused templates use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.)
 - `resolveTemplate(id)` looks up DB first → static fallback → default SOAP
 
 **Key files:**
@@ -320,7 +320,7 @@ All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` mer
 | Table               | Purpose                                                       |
 | ------------------- | ------------------------------------------------------------- |
 | `templates`         | User-defined templates with i18n, style guide, usage tracking |
-| `api_usage`         | Per-call token/cost log                                       |
+| `api_usage`         | Per-call token/cost log; aggregated via SQL RPCs (`aggregate_usage_by_user`, `aggregate_usage_by_visit`, `get_dashboard_usage_totals`, `aggregate_usage_by_model`, `aggregate_usage_by_operation`) to avoid Supabase 1000-row default limit |
 | `audit_logs`        | User-action audit trail                                       |
 | `transcript_chunks` | Legacy chunk + embedding store (deprecated)                   |
 

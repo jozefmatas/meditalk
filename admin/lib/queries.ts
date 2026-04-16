@@ -34,115 +34,78 @@ export interface DashboardStats {
 export async function getDashboardStats(): Promise<DashboardStats> {
   const sb = supabaseAdmin();
 
-  const { data: rows, error } = await sb
-    .from("api_usage")
-    .select(
-      "provider, model, operation, input_tokens, output_tokens, cost_usd, duration_seconds, visit_id",
-    );
+  const emptyStats: DashboardStats = {
+    totalCost: 0,
+    totalRequests: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalEncounters: 0,
+    avgCostPerEncounter: 0,
+    totalRecordingMinutes: 0,
+    costPerRecordingMinute: 0,
+    avgTimePerEncounterSeconds: 0,
+    byModel: [],
+    byOperation: [],
+  };
 
-  if (error || !rows) {
-    logger.error("[admin] getDashboardStats error:", error?.message);
-    return {
-      totalCost: 0,
-      totalRequests: 0,
-      totalInputTokens: 0,
-      totalOutputTokens: 0,
-      totalEncounters: 0,
-      avgCostPerEncounter: 0,
-      totalRecordingMinutes: 0,
-      costPerRecordingMinute: 0,
-      avgTimePerEncounterSeconds: 0,
-      byModel: [],
-      byOperation: [],
-    };
+  // Use SQL aggregation (RPCs) to avoid Supabase 1000-row default limit
+  const [totalsRes, modelRes, opRes] = await Promise.all([
+    sb.rpc("get_dashboard_usage_totals"),
+    sb.rpc("aggregate_usage_by_model"),
+    sb.rpc("aggregate_usage_by_operation"),
+  ]);
+
+  if (totalsRes.error) {
+    logger.error(
+      "[admin] getDashboardStats totals error:",
+      totalsRes.error.message,
+    );
+    return emptyStats;
   }
 
-  const totalCost = rows.reduce((s, r) => s + Number(r.cost_usd), 0);
-  const totalRequests = rows.length;
-  const totalInputTokens = rows.reduce((s, r) => s + (r.input_tokens ?? 0), 0);
-  const totalOutputTokens = rows.reduce(
-    (s, r) => s + (r.output_tokens ?? 0),
-    0,
+  const t = totalsRes.data?.[0];
+  if (!t) return emptyStats;
+
+  const totalCost = Number(t.total_cost);
+  const totalRequests = Number(t.total_requests);
+  const totalEncounters = Number(t.unique_visit_count);
+  const totalRecordingSeconds = Number(t.total_recording_seconds);
+  const totalRecordingMinutes = totalRecordingSeconds / 60;
+
+  const byModel: ModelBreakdown[] = (modelRes.data ?? []).map(
+    (r: Record<string, unknown>) => ({
+      provider: String(r.provider),
+      model: String(r.model),
+      requests: Number(r.requests),
+      input_tokens: Number(r.input_tokens),
+      output_tokens: Number(r.output_tokens),
+      total_cost: Number(r.total_cost),
+      total_duration_seconds: Number(r.total_duration_seconds),
+    }),
   );
 
-  // Unique encounters (visit_ids)
-  const visitIds = new Set<string>();
-  for (const r of rows) {
-    if (r.visit_id) visitIds.add(r.visit_id);
-  }
-  const totalEncounters = visitIds.size;
-  const avgCostPerEncounter =
-    totalEncounters > 0 ? totalCost / totalEncounters : 0;
-
-  // Total recording minutes (from Scribe transcription duration)
-  let totalRecordingSeconds = 0;
-  for (const r of rows) {
-    if (r.operation === "transcribe" && r.duration_seconds) {
-      totalRecordingSeconds += Number(r.duration_seconds);
-    }
-  }
-  const totalRecordingMinutes = totalRecordingSeconds / 60;
-  const costPerRecordingMinute =
-    totalRecordingMinutes > 0 ? totalCost / totalRecordingMinutes : 0;
-  const avgTimePerEncounterSeconds =
-    totalEncounters > 0 ? totalRecordingSeconds / totalEncounters : 0;
-
-  // By model
-  const modelMap = new Map<string, ModelBreakdown>();
-  for (const r of rows) {
-    const key = `${r.provider}:${r.model}`;
-    const existing = modelMap.get(key);
-    if (existing) {
-      existing.requests++;
-      existing.input_tokens += r.input_tokens ?? 0;
-      existing.output_tokens += r.output_tokens ?? 0;
-      existing.total_cost += Number(r.cost_usd);
-      existing.total_duration_seconds += r.duration_seconds ?? 0;
-    } else {
-      modelMap.set(key, {
-        provider: r.provider,
-        model: r.model,
-        requests: 1,
-        input_tokens: r.input_tokens ?? 0,
-        output_tokens: r.output_tokens ?? 0,
-        total_cost: Number(r.cost_usd),
-        total_duration_seconds: r.duration_seconds ?? 0,
-      });
-    }
-  }
-
-  // By operation
-  const opMap = new Map<string, OperationBreakdown>();
-  for (const r of rows) {
-    const existing = opMap.get(r.operation);
-    if (existing) {
-      existing.requests++;
-      existing.total_cost += Number(r.cost_usd);
-    } else {
-      opMap.set(r.operation, {
-        operation: r.operation,
-        requests: 1,
-        total_cost: Number(r.cost_usd),
-      });
-    }
-  }
+  const byOperation: OperationBreakdown[] = (opRes.data ?? []).map(
+    (r: Record<string, unknown>) => ({
+      operation: String(r.operation),
+      requests: Number(r.requests),
+      total_cost: Number(r.total_cost),
+    }),
+  );
 
   return {
     totalCost,
     totalRequests,
-    totalInputTokens,
-    totalOutputTokens,
+    totalInputTokens: Number(t.total_input_tokens),
+    totalOutputTokens: Number(t.total_output_tokens),
     totalEncounters,
-    avgCostPerEncounter,
+    avgCostPerEncounter: totalEncounters > 0 ? totalCost / totalEncounters : 0,
     totalRecordingMinutes,
-    costPerRecordingMinute,
-    avgTimePerEncounterSeconds,
-    byModel: Array.from(modelMap.values()).sort(
-      (a, b) => b.total_cost - a.total_cost,
-    ),
-    byOperation: Array.from(opMap.values()).sort(
-      (a, b) => b.total_cost - a.total_cost,
-    ),
+    costPerRecordingMinute:
+      totalRecordingMinutes > 0 ? totalCost / totalRecordingMinutes : 0,
+    avgTimePerEncounterSeconds:
+      totalEncounters > 0 ? totalRecordingSeconds / totalEncounters : 0,
+    byModel,
+    byOperation,
   };
 }
 
@@ -158,31 +121,27 @@ export interface UserRow {
 export async function getUsers(): Promise<UserRow[]> {
   const sb = supabaseAdmin();
 
-  // Get all users from auth
-  const { data: authData, error: authError } = await sb.auth.admin.listUsers();
-  if (authError) throw authError;
+  // Fetch auth users and SQL-aggregated usage in parallel
+  const [authRes, usageRes] = await Promise.all([
+    sb.auth.admin.listUsers(),
+    sb.rpc("aggregate_usage_by_user"),
+  ]);
 
-  // Get aggregated usage per user
-  const { data: usageRows, error: usageError } = await sb
-    .from("api_usage")
-    .select("user_id, cost_usd");
+  if (authRes.error) throw authRes.error;
 
-  if (usageError) {
-    logger.error("[admin] getUsers usage error:", usageError.message);
+  if (usageRes.error) {
+    logger.error("[admin] getUsers usage error:", usageRes.error.message);
   }
 
   const userUsage = new Map<string, { requests: number; cost: number }>();
-  for (const r of usageRows ?? []) {
-    const existing = userUsage.get(r.user_id);
-    if (existing) {
-      existing.requests++;
-      existing.cost += Number(r.cost_usd);
-    } else {
-      userUsage.set(r.user_id, { requests: 1, cost: Number(r.cost_usd) });
-    }
+  for (const r of usageRes.data ?? []) {
+    userUsage.set(String(r.user_id), {
+      requests: Number(r.requests),
+      cost: Number(r.total_cost),
+    });
   }
 
-  return authData.users
+  return authRes.data.users
     .map((u) => {
       const usage = userUsage.get(u.id) ?? { requests: 0, cost: 0 };
       return {
@@ -235,46 +194,39 @@ export interface EncounterRow {
 export async function getEncounters(): Promise<EncounterRow[]> {
   const sb = supabaseAdmin();
 
-  // Fetch visits
-  const { data: visits, error: visitError } = await sb
-    .from("visits")
-    .select("id, title, patient_name, visit_date, status, user_id")
-    .order("visit_date", { ascending: false });
+  // Fetch visits, SQL-aggregated usage, and user emails in parallel
+  const [visitRes, usageRes, authRes] = await Promise.all([
+    sb
+      .from("visits")
+      .select("id, title, patient_name, visit_date, status, user_id")
+      .order("visit_date", { ascending: false }),
+    sb.rpc("aggregate_usage_by_visit"),
+    sb.auth.admin.listUsers(),
+  ]);
 
-  if (visitError || !visits) {
-    logger.error("[admin] getEncounters error:", visitError?.message);
+  if (visitRes.error || !visitRes.data) {
+    logger.error("[admin] getEncounters error:", visitRes.error?.message);
     return [];
   }
 
-  // Fetch usage grouped by visit_id
-  const { data: usageRows, error: usageError } = await sb
-    .from("api_usage")
-    .select("visit_id, cost_usd");
-
-  if (usageError) {
-    logger.error("[admin] getEncounters usage error:", usageError.message);
+  if (usageRes.error) {
+    logger.error("[admin] getEncounters usage error:", usageRes.error.message);
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
-  for (const r of usageRows ?? []) {
-    if (!r.visit_id) continue;
-    const existing = visitUsage.get(r.visit_id);
-    if (existing) {
-      existing.requests++;
-      existing.cost += Number(r.cost_usd);
-    } else {
-      visitUsage.set(r.visit_id, { requests: 1, cost: Number(r.cost_usd) });
-    }
+  for (const r of usageRes.data ?? []) {
+    visitUsage.set(String(r.visit_id), {
+      requests: Number(r.requests),
+      cost: Number(r.total_cost),
+    });
   }
 
-  // Get user emails
-  const { data: authData } = await sb.auth.admin.listUsers();
   const emailMap = new Map<string, string>();
-  for (const u of authData?.users ?? []) {
+  for (const u of authRes.data?.users ?? []) {
     emailMap.set(u.id, u.email ?? "");
   }
 
-  return visits.map((v) => {
+  return visitRes.data.map((v) => {
     const usage = visitUsage.get(v.id) ?? { requests: 0, cost: 0 };
     return {
       id: v.id,
@@ -359,41 +311,37 @@ export async function getUserEncounters(
 ): Promise<EncounterRow[]> {
   const sb = supabaseAdmin();
 
-  const { data: visits, error: visitError } = await sb
-    .from("visits")
-    .select("id, title, patient_name, visit_date, status, user_id")
-    .eq("user_id", userId)
-    .order("visit_date", { ascending: false });
+  // Fetch visits and SQL-aggregated usage in parallel
+  const [visitRes, usageRes] = await Promise.all([
+    sb
+      .from("visits")
+      .select("id, title, patient_name, visit_date, status, user_id")
+      .eq("user_id", userId)
+      .order("visit_date", { ascending: false }),
+    sb.rpc("aggregate_usage_by_visit"),
+  ]);
 
-  if (visitError || !visits) {
-    logger.error("[admin] getUserEncounters error:", visitError?.message);
+  if (visitRes.error || !visitRes.data) {
+    logger.error("[admin] getUserEncounters error:", visitRes.error?.message);
     return [];
   }
 
-  const visitIds = visits.map((v) => v.id);
-
-  const { data: usageRows, error: usageError } = await sb
-    .from("api_usage")
-    .select("visit_id, cost_usd")
-    .in("visit_id", visitIds);
-
-  if (usageError) {
-    logger.error("[admin] getUserEncounters usage error:", usageError.message);
+  if (usageRes.error) {
+    logger.error(
+      "[admin] getUserEncounters usage error:",
+      usageRes.error.message,
+    );
   }
 
   const visitUsage = new Map<string, { requests: number; cost: number }>();
-  for (const r of usageRows ?? []) {
-    if (!r.visit_id) continue;
-    const existing = visitUsage.get(r.visit_id);
-    if (existing) {
-      existing.requests++;
-      existing.cost += Number(r.cost_usd);
-    } else {
-      visitUsage.set(r.visit_id, { requests: 1, cost: Number(r.cost_usd) });
-    }
+  for (const r of usageRes.data ?? []) {
+    visitUsage.set(String(r.visit_id), {
+      requests: Number(r.requests),
+      cost: Number(r.total_cost),
+    });
   }
 
-  return visits.map((v) => {
+  return visitRes.data.map((v) => {
     const usage = visitUsage.get(v.id) ?? { requests: 0, cost: 0 };
     return {
       id: v.id,
@@ -412,32 +360,47 @@ export async function getUserEncounters(
 export async function getUserDetail(userId: string): Promise<UserDetail> {
   const sb = supabaseAdmin();
 
-  const { data: authData, error: authError } =
-    await sb.auth.admin.getUserById(userId);
-  if (authError) throw authError;
+  // Fetch auth, accurate totals (RPC), and recent rows in parallel
+  const [authRes, totalsRes, rowsRes] = await Promise.all([
+    sb.auth.admin.getUserById(userId),
+    sb.rpc("aggregate_usage_by_user"),
+    sb
+      .from("api_usage")
+      .select(
+        "id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at",
+      )
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(200),
+  ]);
 
-  const { data: usageRows, error: usageError } = await sb
-    .from("api_usage")
-    .select(
-      "id, operation, model, provider, input_tokens, output_tokens, cost_usd, duration_seconds, created_at",
-    )
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(200);
+  if (authRes.error) throw authRes.error;
 
-  if (usageError) {
-    logger.error("[admin] getUserDetail usage error:", usageError.message);
+  if (totalsRes.error) {
+    logger.error(
+      "[admin] getUserDetail totals error:",
+      totalsRes.error.message,
+    );
+  }
+  if (rowsRes.error) {
+    logger.error("[admin] getUserDetail rows error:", rowsRes.error.message);
   }
 
-  const safeRows = usageRows ?? [];
-  const totalCost = safeRows.reduce((s, r) => s + Number(r.cost_usd), 0);
+  // Find this user's totals from the aggregated results
+  const userTotals = (totalsRes.data ?? []).find(
+    (r: Record<string, unknown>) => String(r.user_id) === userId,
+  );
+  const totalCost = userTotals ? Number(userTotals.total_cost) : 0;
+  const totalRequests = userTotals ? Number(userTotals.requests) : 0;
+
+  const safeRows = rowsRes.data ?? [];
 
   return {
-    id: authData.user.id,
-    email: authData.user.email ?? "",
-    created_at: authData.user.created_at,
+    id: authRes.data.user.id,
+    email: authRes.data.user.email ?? "",
+    created_at: authRes.data.user.created_at,
     totalCost,
-    totalRequests: safeRows.length,
+    totalRequests,
     usage: safeRows.map((r) => ({
       ...r,
       cost_usd: Number(r.cost_usd),
