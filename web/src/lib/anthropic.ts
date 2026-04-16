@@ -127,9 +127,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 6. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items. For diagnoses/ICD codes, put the code first, then the name. Narrative sections should remain as flowing prose.
 
-7. FORMAT: Return valid JSON with keys:
-   - One key for each section ID listed below (string value, or "" if empty).
-   - A "title" key with a short encounter title (max 6 words) in {{language}}.
+7. FORMAT: Return valid JSON with one key for each section ID listed below (string value, or "" if empty). No other keys.
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
@@ -211,21 +209,13 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 3b. PER-FILE DIRECTIVES: Individual uploaded files may contain a line starting with "DOCTOR'S DIRECTIVE FOR THIS FILE:" immediately after the file header. This directive tells you exactly what to use from that specific file. For example, if the directive says "I only want the diagnosis", use ONLY diagnosis-related information from that file — ignore all other content (demographics, measurements, findings, medications, procedures, recommendations, etc.) even if it is present. Per-file directives are strict filters and take precedence over completeness.
 
-4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+4. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
 
 5. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
 
 6. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items — they are much easier to scan. For diagnoses/ICD codes, put the code first, then the name (e.g. "- I10 Esenciálna hypertenzia"). For plans and recommendations, use one bullet per action. Narrative sections (history, examination findings) should remain as flowing prose paragraphs — do not bullet-ify everything.
 
-7. FORMAT: Return valid JSON with the following keys:
-   - One key for each section ID listed below, with the section content as a string value (or "" if no information).
-   - A "title" key with a short encounter title (max 6 words) in {{language}}.
-     TITLE RULES:
-     - The title MUST be consistent with the primary diagnosis in the assessment/conclusion section. Use the main ICD diagnosis description (or a close paraphrase) as the basis.
-     - Do NOT include severity qualifiers (STEMI, non-STEMI, malignant, benign, acute, chronic) unless the exact qualifier appears in the source material AND in the primary diagnosis code's description.
-     - Do NOT include anatomical localisation (anterior, lateral, inferior, left, right, wall-specific descriptors) unless it appears in the primary diagnosis description.
-     - When in doubt, use a more general title that the codes actually support.
-     Example — if the primary diagnosis is "I21 Akútny infarkt myokardu", the title should be "Akútny infarkt myokardu", NOT "Akútny STEMI laterálnej steny".
+7. FORMAT: Return valid JSON with one key for each section ID listed below, with the section content as a string value (or "" if no information). No other keys. Title is generated separately — do NOT include a "title" key.
 
 8. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
 
@@ -324,7 +314,7 @@ export function buildTemplateUserMessage(
   }
 
   parts.push(
-    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")} and "title".`,
+    `Fill in each template section based ONLY on the information above. Return valid JSON with keys: ${allIds.map((id) => `"${id}"`).join(", ")}.`,
   );
 
   return parts.join("\n\n");
@@ -605,9 +595,8 @@ export async function generateFromTemplate(
     throw new InsufficientContextError();
   }
 
-  // Extract title, remove non-section keys from parsed output
-  delete parsed.letter; // ignored (feature removed)
-  const suggestedTitle = typeof parsed.title === "string" ? parsed.title : "";
+  // Defensive cleanup — remove non-section keys the model may still emit
+  delete parsed.letter;
   delete parsed.title;
 
   // Fill section contents (empty string for missing keys)
@@ -696,8 +685,7 @@ export async function generateFromTemplate(
     language,
     ctx,
   );
-  const finalTitle =
-    titleFromIcd || extractedIcdCodes[0]?.description || suggestedTitle;
+  const finalTitle = titleFromIcd || extractedIcdCodes[0]?.description || "";
 
   const generatedNote = buildTemplateHtml(
     template,

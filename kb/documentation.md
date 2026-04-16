@@ -168,7 +168,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 | **Pass 1.7** — ICD Certainty Filter | Pure TypeScript     | Drop ICD candidates not grounded in diagnoses/history-subcategory facts                                                                          |
 | **Prompt Assembly**                 | Pure TypeScript     | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
 | **Pass 2** — Generation             | Opus 4.6 (temp=0)   | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE                                          |
-| **Pass 2.5** — Post-Generation      | Pure TypeScript     | Strip ungrounded ICD codes from output, validate title                                                                                           |
+| **Pass 2.5** — Post-Generation      | Pure TypeScript     | Strip ungrounded ICD codes from output                                                                                                           |
 
 ### Streaming Protocol (SSE events):
 
@@ -427,7 +427,7 @@ Separate Next.js app at `admin/`:
 | File OCR (image/PDF)       | Sonnet 4.6 (temp=0)                            | Image + PDF → text                  |
 | Pass 1 — Clinical analysis | Sonnet 4.6 (temp=0)                            | Concepts, specialty, ICDs, clusters |
 | Pass 1.5 — Fact extraction | Haiku 4.5 (temp=0)                             | Grounded facts with evidence        |
-| Pass 2 — Generation        | Opus 4.6 (temp=0, fallbacks: Sonnet 4.6/4.5/4) | Prose note + letter + title         |
+| Pass 2 — Generation        | Opus 4.6 (temp=0, fallbacks: Sonnet 4.6/4.5/4) | Prose note (no title)               |
 | Reformat (regen fast path) | Haiku 4.5                                      | Template swap                       |
 | Transcription              | Scribe v2 (ElevenLabs)                         | Audio → text                        |
 

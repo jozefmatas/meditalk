@@ -566,15 +566,11 @@ Rules:
           return;
         }
 
-        delete parsed.letter; // ignored (feature removed)
-        let suggestedTitle =
-          typeof parsed.title === "string" ? parsed.title : "";
+        // Defensive cleanup — remove non-section keys the model may still emit
+        delete parsed.letter;
         delete parsed.title;
         const isReformatPath =
           operationType === "rerender" || operationType === "reformat";
-        if (isReformatPath) {
-          suggestedTitle = "";
-        }
 
         const sectionContents: Record<string, string> = {};
         for (const id of allIds) {
@@ -600,6 +596,7 @@ Rules:
         // which was prone to hallucinating details not present in the
         // primary diagnosis. Skipped on the reformat path (we keep the
         // existing title there).
+        let suggestedTitle = "";
         if (!isReformatPath) {
           const titleFromIcd = await generateEncounterTitle(
             extractedIcdCodes,
@@ -607,7 +604,7 @@ Rules:
             { userId, visitId },
           );
           suggestedTitle =
-            titleFromIcd || extractedIcdCodes[0]?.description || suggestedTitle;
+            titleFromIcd || extractedIcdCodes[0]?.description || "";
         }
 
         // Defensive copy — never mutate cachedAnalysis or clinicalAnalysis.

@@ -345,19 +345,16 @@ describe("buildTemplateSystemPrompt", () => {
     expect(prompt).toContain("Uploaded documents");
   });
 
-  it("includes TITLE RULES that bind title to primary diagnosis", () => {
+  it("does NOT include TITLE RULES (title is generated separately)", () => {
     const prompt = buildTemplateSystemPrompt(
       SIMPLE_TEMPLATE,
       "en",
       SECTION_LABELS,
     );
-    expect(prompt).toContain("TITLE RULES");
-    expect(prompt).toContain("consistent with the primary diagnosis");
-    expect(prompt).toContain("Do NOT include severity qualifiers");
-    expect(prompt).toContain("Do NOT include anatomical localisation");
-    // Concrete STEMI counter-example proves the rule is spelled out
-    expect(prompt).toContain("Akútny infarkt myokardu");
-    expect(prompt).toContain("Akútny STEMI laterálnej steny");
+    expect(prompt).not.toContain("TITLE RULES");
+    expect(prompt).not.toContain('A "title" key');
+    expect(prompt).toContain("Title is generated separately");
+    expect(prompt).toContain("do NOT include");
   });
 });
 
@@ -445,7 +442,7 @@ describe("buildFactBasedSystemPrompt", () => {
     expect(prompt).toContain("FORMATTING");
     expect(prompt).toContain("Return valid JSON");
     expect(prompt).not.toContain('"letter"');
-    expect(prompt).toContain('"title"');
+    expect(prompt).not.toContain('"title"');
   });
 
   it("includes section IDs and labels", () => {
@@ -674,7 +671,7 @@ describe("buildTemplateUserMessage", () => {
     expect(msg).toContain('"objective"');
     expect(msg).toContain('"assessment"');
     expect(msg).not.toContain('"letter"');
-    expect(msg).toContain('"title"');
+    expect(msg).not.toContain('"title"');
   });
 
   it("handles empty chunks array", () => {
