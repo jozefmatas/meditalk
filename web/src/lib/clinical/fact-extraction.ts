@@ -43,7 +43,7 @@ export interface SourceReference {
 /** A single extracted clinical fact with mandatory source reference. */
 export interface ExtractedFact {
   category: FactCategory;
-  /** The fact itself in clinical language, short (≤120 chars). */
+  /** The fact itself in clinical language (≤120 chars; ≤400 for chiefComplaint, ≤250 for findings). */
   value: string;
   source: SourceReference;
 }
@@ -153,7 +153,7 @@ RULES:
 2. Every fact MUST include a source reference with a short VERBATIM evidence quote (≤120 chars) copied from the source material. Quote the exact wording, do not paraphrase.
 3. If you cannot find evidence for a fact, do NOT include it. Missing is better than hallucinated.
 4. Do NOT interpret, diagnose, or upgrade severity. Extract exactly what is stated. If the source says "ACS", the diagnosis value stays "ACS" — never rewrite to "STEMI" or "non-STEMI".
-5. For medications: extract the exact name and dosing schedule as mentioned. Include dosage strength (mg, mcg, ml) ONLY if a specific number + unit is EXPLICITLY stated in the source. If the source says "Rytmonorm 1-0-1" with no mg value, the value MUST be "Rytmonorm 1-0-1" — do NOT add "150 mg" or any other strength. NEVER look up "common dosages" from medical knowledge. A wrong dosage is far more dangerous than a missing dosage.
+5. For medications: extract ALL medications mentioned — both chronic/home medications AND medications administered during this encounter (e.g. Heparin given by ambulance, Aspirin given in ED, morphine for pain relief). Extract the exact name and dosing schedule as mentioned. Include dosage strength (mg, mcg, ml) ONLY if a specific number + unit is EXPLICITLY stated in the source. If the source says "Rytmonorm 1-0-1" with no mg value, the value MUST be "Rytmonorm 1-0-1" — do NOT add "150 mg" or any other strength. NEVER look up "common dosages" from medical knowledge. A wrong dosage is far more dangerous than a missing dosage.
 6. For diagnoses: copy the exact wording. Preserve uncertainty markers like "suspected", "possible", "rule out".
 7. For measurements (BP, HR, SpO2, temperature, lab values, weight, height): always include the unit as stated — and ONLY the unit as stated. If the source gives a number without a unit, see rule 13.
 8. Facts describing what the doctor or patient PLANS to do (follow-up, prescription, referral, lifestyle change, next visit) go in \`plan\`.
@@ -164,7 +164,11 @@ RULES:
    - \`workHistory\`: current/past occupation, workplace exposures, occupational hazards. NEVER smoking/alcohol/drugs.
    - \`substanceUse\`: smoking, alcohol, recreational drugs, ALL substance use. NEVER place these in \`workHistory\` or \`socialHistory\`.
    - \`epidemiologicalHistory\`: travel history, contact with infections, tick bites, vaccinations.
-10. Write fact \`value\` fields in ${langLabel}. Keep them short (≤120 chars) and clinical — do not write prose sentences.
+10. Write fact \`value\` fields in ${langLabel}. Use clinical phrasing, not prose sentences.
+    CHARACTER LIMITS PER CATEGORY:
+    - chiefComplaint: ≤400 chars — capture the FULL temporal narrative of the present illness (onset, progression, character changes, associated symptoms in chronological order). This is the HPI/TO anchor — a single rich fact is better than many atomic fragments.
+    - findings: ≤250 chars — group related exam findings together (e.g. "GCS 15, orientovaný, spolupracuje, ružová pokožka, kapilárny návrat pod 2s").
+    - ALL other categories: ≤120 chars — keep them short and atomic.
 11. A single source statement may produce multiple facts (one per distinct clinical datum), but the same fact MUST NOT appear in more than one category.
 12. EXTRACT EVERY DISTINCT MENTION — do NOT try to resolve self-corrections or contradictions yourself. If the speaker states a fact and then corrects themselves, emit BOTH mentions as separate fact entries, each with its own verbatim evidence quote pointing at the exact source phrase. This applies to EVERY correction shape: explicit phrases ("actually I mean", "sorry", "pardon", "vlastne", "opravujem sa"), bare punctuation-bracketed negations ("otec zomrel na infarkt, nie, na mozgovú mŕtvicu" — "father died of MI, no, of a stroke" — "1 broken rib, sorry, 2 broken ribs"), and any other structural hint that the speaker is replacing an earlier statement. A deterministic downstream step will detect the correction marker and drop the superseded mention. Your job is to be a faithful recorder, not an editor — so ALWAYS extract both the pre-correction value and the corrected value, every single time. Do NOT silently keep only the later one, and do NOT silently keep only the earlier one.
 13. NO ASSUMPTION MODE — NEVER invent missing clinical dimensions. If a numeric value is stated WITHOUT a unit or dimension (e.g. "fajčí 15" with no "cigariet/deň" and no "rokov", "pije 3" with no "pohárov/deň", "mal 2" with no indication of what), you MUST preserve the raw value verbatim and MUST NOT guess the unit. Do NOT default to the most common interpretation (smoking 15 ≠ 15/day, smoking 15 ≠ 15 years — both are fabrication). Do NOT silently drop the fact either. Instead, emit a single fact whose \`value\` contains the bare number together with the subject (e.g. "fajčí 15 (jednotka nešpecifikovaná)", "pije 3 (jednotka nešpecifikovaná)"), and whose evidence is the exact verbatim quote. In ${langLabel} use the ambiguity marker "(jednotka nešpecifikovaná)" in Slovak, "(jednotka neuvedena)" in Czech, or "(unit not specified)" in English. The same rule applies to any missing clinical dimension: frequency, duration, laterality, severity, dosage strength, route — if it is not in the source, do NOT invent it.

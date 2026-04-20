@@ -102,3 +102,4 @@ export type {
   ClassificationResult,
   ClassifiedCandidate,
 } from "./assessment-classifier";
+export { enforceContentRouting } from "./section-routing-validator";

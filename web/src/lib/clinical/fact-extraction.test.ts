@@ -104,6 +104,14 @@ describe("buildFactExtractionSystemPrompt", () => {
     expect(prompt).toMatch(/duration/i);
     expect(prompt).toMatch(/laterality/i);
   });
+
+  it("specifies per-category character limits", () => {
+    const prompt = buildFactExtractionSystemPrompt("sk");
+    expect(prompt).toContain("CHARACTER LIMITS PER CATEGORY");
+    expect(prompt).toMatch(/chiefComplaint.*≤400/);
+    expect(prompt).toMatch(/findings.*≤250/);
+    expect(prompt).toMatch(/other categories.*≤120/i);
+  });
 });
 
 describe("buildFactExtractionUserMessage", () => {

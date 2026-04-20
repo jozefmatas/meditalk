@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-20 (Phase 1 safety: PHI scrub, medication normalization, assessment classifier, visit_date, defensive output scrub)_
+_Last updated: 2026-04-20 (Phase 1 safety: PHI scrub, medication normalization, assessment classifier, visit_date, defensive output scrub, section routing validator, richer fact extraction, TO/HPI routing)_
 
 How raw clinical data becomes a structured medical note. This document covers every LLM call, the exact prompt texts, the deterministic filters between them, and cost/speed characteristics. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -64,6 +64,10 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
   Pass B       clearParentSections    pure TS
                -> force "" on sections with subsections
+               |
+  Pass C       enforceContentRouting  pure TS
+               -> strip misrouted meds/substance/allergy content
+               -> cross-section dedup (OA↔LA, SA↔Ab, EA↔AA)
                |
   Pass 2.1     scrubPhi (output)      pure TS
                -> defensive PHI scrub on generated section values
@@ -151,7 +155,17 @@ Deterministic regex-based removal of personally identifiable information from `t
 - Long numeric IDs (9-12 digits, not already caught above) → `[PATIENT_ID]`
 - Known patient ID string (exact match) → `[PATIENT_ID]`
 
-**Preserves:** ages, clinical dates, ICD codes, blood pressure, medication dosages.
+**Preserves:** ages, clinical dates, ICD codes, blood pressure, medication dosages, clinical scores.
+
+**Address scrubbing** detects Slovak/Czech postal code + city patterns (`821 03 Bratislava-Ružinov`) and street addresses with keyword prefixes (`ul. Hlavná 15`) or slash-notation house numbers (`Exnárova 3121/3`). Protections prevent false positives on:
+
+- Blood pressure (`TK 150/95 mmHg`, `Krvný tlak 165/75`)
+- All-caps clinical abbreviations ≤6 chars (`GCS 15/15`, `NIHSS 4/42`, `EKG 12/15`)
+- Clinical measurement words (`Zornice 3/3`, `Zorničky 4/4`) via diacritics-normalized lookup
+- Values followed by clinical units (`mmHg`, `bpm`, etc.)
+- Values preceded by clinical keywords (`systol`, `diastol`, `pulz`, etc.)
+
+**Audit trail:** `scrubPhi()` returns a `PhiAudit` object with `totalRedactions` and per-type `counts` (name, birthNumber, phone, email, address, numericId).
 
 ---
 
@@ -302,7 +316,8 @@ RULES:
    - workHistory: occupation, workplace exposures. NEVER smoking/alcohol.
    - substanceUse: smoking, alcohol, drugs. NEVER in workHistory or socialHistory.
    - epidemiologicalHistory: travel, infections, tick bites, vaccinations.
-10. Write fact `value` fields in {language}. Keep them short (<=120 chars).
+10. Write fact `value` fields in {language}. Per-category char limits:
+    chiefComplaint ≤400, findings ≤250, all others ≤120.
 11. A single source statement may produce multiple facts, but the same fact MUST
     NOT appear in more than one category.
 12. EXTRACT EVERY DISTINCT MENTION — do NOT try to resolve self-corrections
@@ -517,8 +532,8 @@ Before facts reach Opus, this module assigns each fact to a concrete template se
 
 ```
 demographics  -> demograf, demographic, udaje o pacient
-chiefComplaint -> dovod, reason, chief complaint
-symptoms      -> symptom, priznak, complaints
+chiefComplaint -> dovod, reason, chief complaint, to, terajsie, hpi, present illness, dovod kontakt
+symptoms      -> symptom, priznak, complaints, to, terajsie
 findings      -> nalez, finding, status praesens, physical exam
 measurements  -> meranie, measurement, vital, laborator
 diagnoses     -> diagnoz, zaver, assessment, conclusion
@@ -776,7 +791,15 @@ After Opus returns:
 
 1. **Pass A — Bullet stripping** — `stripBulletMarkers()` defensively removes leading `- `, `• `, `* `, `– `, `— ` from all lines in every section value. The model frequently ignores no-bullet prompt instructions, so this guarantees clean output regardless of model compliance.
 2. **Pass B — Parent section clearing** — `collectParentSectionIds()` identifies template sections with subsections (e.g. Anamnézy with RA, OA, SA...) and forces their content to `""`. All content must live in subsections only.
-3. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text. **Skipped when `hasValidatedFacts` is true** — the ICD block was pre-rendered by `buildPreRenderedIcdBlock` and the doctor's original wording is preserved.
+3. **Pass C — Section routing validator** — `enforceContentRouting()` ([section-routing-validator.ts](web/src/lib/clinical/section-routing-validator.ts)) deterministically strips misrouted content from sections. Only runs when `hasValidatedFacts` is true. Six rules:
+   - **Rule 1:** Medication blocks (3+ consecutive dosage lines, or header + 2+) stripped from non-LA, non-plan sections. Preserves narrative medication mentions with historical context (e.g. "v minulosti užíval Warfarin, vysadený pre krvácanie").
+   - **Rule 2:** Substance use content (fajčí, alkohol, drogy, etc.) stripped from non-Ab sections.
+   - **Rule 3:** Allergy content (alergie, precitlivelosť, etc.) stripped from non-AA sections.
+   - **Rule 4:** Cross-section dedup OA↔LA — identical non-trivial lines (>20 chars) appearing in both are stripped from OA, kept in LA.
+   - **Rule 5:** Cross-section dedup SA↔Ab — identical lines stripped from SA, kept in Ab.
+   - **Rule 6:** Cross-section dedup EA↔AA — identical lines stripped from EA, kept in AA.
+   Section classification uses `ABBREVIATION_ROLE_MAP` (exact label match: la→medications, ab→substanceUse, aa→allergies, ea→epidemiological, oa→personalHistory, sa→socialHistory) and `ROLE_PATTERNS` (substring match on label/context).
+4. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text. **Skipped when `hasValidatedFacts` is true** — the ICD block was pre-rendered by `buildPreRenderedIcdBlock` and the doctor's original wording is preserved.
 4. **Pass 2.1 — Defensive PHI scrub** — re-applies `scrubPhi()` to each generated section value. Even though input was scrubbed (Pass 1.1), the LLM might reconstruct PHI from partial clues. The PHI scrubber now protects blood pressure values from false-positive address matching (e.g. "Tlak 138/84 mmHg" was being matched by `STREET_SLASH_HOUSE_REGEX`).
 5. **ICD code extraction** — `extractIcdCodesFromSections()` scans generated text for `CODE Description` lines (no bullet prefix required — regex uses optional bullet marker).
 6. **Pass 2.5 defensive filter** — intersects extracted codes with the pre-filtered candidate set. Strips unauthorized codes from both the sidebar list AND the section text.
@@ -1045,6 +1068,9 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | Pass 1.5 emitting both sides of a correction    | **Pass 1.6b** correction-phrase detector      |
 | Opus ignoring "only these ICDs" constraint      | **Pass 2.5** defensive strip                  |
 | Opus placing facts in wrong sections            | **Fact-to-section pre-assignment**            |
+| Opus injecting med lists into OA/SA             | **Pass C** `enforceContentRouting()` post-proc |
+| Opus placing substance use in SA instead of Ab  | **Pass C** substance use stripping             |
+| Opus placing allergies in EA/OA instead of AA   | **Pass C** allergy content stripping           |
 | Opus rephrasing fact values                     | **FACT VALUE FIDELITY** rule in system prompt |
 | Opus emitting bullet points despite instruction | **Pass A** `stripBulletMarkers()` post-proc   |
 | Opus writing content in parent sections         | **Pass B** parent-section clearing            |
@@ -1062,8 +1088,12 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                 | 38+ tests: EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism            |
 | [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                           | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`, `hasValidatedFacts` flag behavior        |
 | [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                  | `buildFactBasedSystemPrompt`, `buildTemplateSystemPrompt`                                         |
-| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts) | Category-to-section mapping, abbreviation matching, unassigned fallback                           |
+| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts) | Category-to-section mapping, abbreviation matching, TO/HPI routing, unassigned fallback           |
 | [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                     | SHA-256 stability, `diffFingerprints`                                                             |
+| [phi-scrubber.test.ts](web/src/lib/clinical/phi-scrubber.test.ts)                   | Name, birth number, phone, email, address scrubbing; clinical value preservation (GCS, BP, pupils) |
+| [section-routing-validator.test.ts](web/src/lib/clinical/section-routing-validator.test.ts) | All 6 routing rules, med block thresholds, narrative context preservation, immutability    |
+| [assessment-classifier.test.ts](web/src/lib/clinical/assessment-classifier.test.ts) | Active/chronic/background tiering, cap enforcement, overflow handling                             |
+| [medication-normalizer.test.ts](web/src/lib/clinical/medication-normalizer.test.ts) | `parseMedicationFact`/`reconstructMedicationValue`, dose/frequency preservation                   |
 
 ---
 
@@ -1081,6 +1111,8 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | Wire in a new pipeline stage   | Both [generate/route.ts](web/src/app/api/generate/route.ts) and [regenerate/route.ts](web/src/app/api/regenerate/route.ts)                                                                              |
 | Add a specialty prompt pack    | [specialty-prompts.ts](web/src/lib/clinical/specialty-prompts.ts)                                                                                                                                       |
 | Add ICD synonym group          | [icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) `SYNONYM_GROUPS`                                                                                                                              |
+| Change section routing rules   | [section-routing-validator.ts](web/src/lib/clinical/section-routing-validator.ts) — Pass C rules, keyword lists, section role classification                                                            |
+| Change PHI scrubbing rules     | [phi-scrubber.ts](web/src/lib/clinical/phi-scrubber.ts) — regex patterns, clinical value protections                                                                                                    |
 | Bump a model ID                | [pipeline.ts](web/src/lib/clinical/pipeline.ts), [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts), [anthropic.ts](web/src/lib/anthropic.ts), and [usage.ts](web/src/lib/usage.ts)          |
 
 ---

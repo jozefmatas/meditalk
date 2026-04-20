@@ -24,6 +24,7 @@ import {
   formatAssignedFactsForPrompt,
 } from "./clinical/fact-section-assigner";
 import { scrubPhi } from "./clinical/phi-scrubber";
+import { enforceContentRouting } from "./clinical/section-routing-validator";
 import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
@@ -727,6 +728,21 @@ export async function generateFromTemplate(
   const parentIds = collectParentSectionIds(template.sections);
   for (const id of parentIds) {
     sectionContents[id] = "";
+  }
+
+  // Post-processing Pass C — enforce section content routing.
+  // Opus reads raw file content and may inject medication lists into OA or
+  // substance use details into SA. Strip misrouted content deterministically.
+  // Only runs when validated facts are present (legacy path gives Opus full latitude).
+  if (hasValidatedFacts) {
+    const routed = enforceContentRouting(
+      sectionContents,
+      sectionLabels,
+      sectionContexts,
+    );
+    for (const id of allIds) {
+      sectionContents[id] = routed[id] ?? sectionContents[id];
+    }
   }
 
   // Validate ICD descriptions against canonical CSV data.

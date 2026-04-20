@@ -181,6 +181,36 @@ describe("scrubPhi", () => {
       expect(scrubbed).toBe(original);
     });
 
+    it("does NOT scrub GCS scores (all-caps clinical abbreviation)", () => {
+      const original = "GCS 15/15, orientovaný";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+    });
+
+    it("does NOT scrub NIHSS scores", () => {
+      const original = "NIHSS 4/42";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+    });
+
+    it("does NOT scrub EKG timestamps", () => {
+      const original = "EKG 12/15 - sinusový rytmus";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+    });
+
+    it("does NOT scrub pupil sizes (Zornice 3/3)", () => {
+      const original = "Zornice 3/3, reaktívne";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+    });
+
+    it("does NOT scrub pupil sizes with diacritics (Zorničky 4/4)", () => {
+      const original = "Zorničky 4/4";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+    });
+
     it("does NOT scrub BP in clinical context with krvný keyword", () => {
       const original = "Krvný tlak 165/75 mmHg";
       const { scrubbed } = scrubPhi(original);

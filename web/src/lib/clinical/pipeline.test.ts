@@ -257,7 +257,7 @@ describe("buildEnrichedSystemPrompt", () => {
     expect(result).toContain("IDENTIFIED CLINICAL CONCEPTS");
   });
 
-  it("still includes specialty pack and ICD block with hasValidatedFacts", () => {
+  it("skips specialty pack but keeps ICD block with hasValidatedFacts", () => {
     const analysis = makeAnalysis({
       inferredSpecialty: "cardiology",
       candidateIcdCodes: [
@@ -270,7 +270,10 @@ describe("buildEnrichedSystemPrompt", () => {
       ],
     });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
-    expect(result).toContain("TERMINOLOGY");
+    // Specialty addendum is noise when formatting pre-extracted facts
+    expect(result).not.toContain("TERMINOLOGY");
+    expect(result).not.toContain("EMPHASIZED SECTIONS");
+    // ICD block is always essential
     expect(result).toContain("ICD-10 BLOCK (VERBATIM)");
   });
 

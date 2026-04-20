@@ -26,7 +26,7 @@ function makeFact(category: string, value: string): ExtractedFact {
 function buildFacts(entries: Record<string, string[]>): ExtractedFacts {
   const facts = emptyExtractedFacts();
   for (const [category, values] of Object.entries(entries)) {
-    (facts as Record<string, unknown>)[category] = values.map((v) =>
+    (facts as unknown as Record<string, unknown>)[category] = values.map((v) =>
       makeFact(category, v),
     );
   }

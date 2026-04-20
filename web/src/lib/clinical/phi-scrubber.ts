@@ -111,6 +111,20 @@ const STREET_SLASH_HOUSE_REGEX = /[A-ZÀ-ž][\wÀ-ž]{2,}\s+\d{1,5}\/\d{1,5}/g;
 const LONG_NUMERIC_REGEX = /\b\d{9,12}\b/g;
 
 /**
+ * Clinical measurement words that use number/number notation (normalized).
+ * e.g. "Zornice 3/3" (pupil sizes) — not an address.
+ */
+const CLINICAL_MEASUREMENT_WORDS = new Set([
+  "zornice",
+  "zornicky",
+  "pupils",
+  "pupily",
+  "pupilla",
+  "pupillae",
+  "reaktivita",
+]);
+
+/**
  * Patterns that should NOT be scrubbed — clinical values, dates, ICD codes.
  * Used to protect against false positives from the generic numeric ID pattern.
  */
@@ -235,6 +249,23 @@ export function scrubPhi(
   result = result.replace(STREET_SLASH_HOUSE_REGEX, (match, offset) => {
     const before = result.slice(Math.max(0, offset - 1), offset);
     if (before === "[") return match;
+
+    // Extract the word portion of the match (before the digits)
+    const wordMatch = match.match(/^([A-ZÀ-ž][\wÀ-ž]*)\s/);
+    const word = wordMatch?.[1] ?? "";
+
+    // All-caps abbreviation (≤6 chars) → likely clinical, not street name
+    // e.g. "GCS 15/15", "EKG 12/15", "NIHSS 4/42", "BMI 25/30"
+    if (word.length <= 6 && word === word.toUpperCase()) return match;
+
+    // Known clinical measurement words that use number/number notation
+    // e.g. "Zornice 3/3" (pupil sizes), "Zorničky 4/4"
+    const wordNorm = word
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    if (CLINICAL_MEASUREMENT_WORDS.has(wordNorm)) return match;
+
     // Check if followed by clinical units — likely a measurement, not address
     const after = result.slice(
       offset + match.length,
@@ -245,7 +276,7 @@ export function scrubPhi(
     // Check if preceded by blood-pressure or clinical keywords
     const contextBefore = result.slice(Math.max(0, offset - 25), offset);
     if (
-      /(?:TK|tlak|krvný|systol|diastol|pulz|frekvencia|hmotnosť|výška)\s*$/i.test(
+      /(?:TK|tlak|krvný|systol|diastol|pulz|frekvencia|hmotnosť|výška|GCS|NIHSS|EKG|ECG|BMI|MMSE|MRC|APACHE|skore|score)\s*$/i.test(
         contextBefore,
       )
     )

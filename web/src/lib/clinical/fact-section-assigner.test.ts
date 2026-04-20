@@ -250,3 +250,80 @@ describe("formatAssignedFactsForPrompt", () => {
     expect(raPos).toBeLessThan(laPos);
   });
 });
+
+describe("assignFactsToSections — TO/HPI routing", () => {
+  it("assigns chiefComplaint to TO section via exact label match", () => {
+    const labels = { s_to: "TO", s_la: "LA" };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "bolesť na hrudníku od rána")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    expect(result["s_to"]).toHaveLength(1);
+    expect(result["s_to"]![0].value).toBe("bolesť na hrudníku od rána");
+  });
+
+  it("assigns chiefComplaint to 'Terajšie ochorenie' section via context", () => {
+    const labels = { s_to: "Terajšie ochorenie", s_la: "LA" };
+    const contexts = {
+      s_to: "Terajšie ochorenie (History of present illness).",
+      s_la: "Lieková anamnéza.",
+    };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "tlaková bolesť od 13:00")],
+    });
+    const result = assignFactsToSections(facts, labels, contexts);
+    expect(result["s_to"]).toHaveLength(1);
+  });
+
+  it("assigns chiefComplaint to HPI section via label match", () => {
+    const labels = { s_hpi: "HPI", s_la: "LA" };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "chest pain since morning")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    expect(result["s_hpi"]).toHaveLength(1);
+  });
+
+  it("assigns chiefComplaint to 'History of Present Illness' section", () => {
+    const labels = { s_hpi: "History of Present Illness", s_la: "LA" };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "chest pain since morning")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    expect(result["s_hpi"]).toHaveLength(1);
+  });
+
+  it("assigns chiefComplaint to 'Dôvod kontaktu' section", () => {
+    const labels = { s_dk: "Dôvod kontaktu", s_la: "LA" };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "pálenie záhy")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    expect(result["s_dk"]).toHaveLength(1);
+  });
+
+  it("chiefComplaint takes priority over symptoms for TO section", () => {
+    const labels = { s_to: "TO" };
+    const facts = makeFacts({
+      chiefComplaint: [fact("chiefComplaint", "bolesť na hrudníku od rána")],
+      symptoms: [fact("symptoms", "dýchavičnosť")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    // chiefComplaint should be assigned to TO (first match wins due to FACT_CATEGORIES order)
+    expect(result["s_to"]).toBeDefined();
+    const categories = result["s_to"]!.map((f) => f.category);
+    expect(categories).toContain("chiefComplaint");
+    // symptoms also route to TO
+    expect(categories).toContain("symptoms");
+  });
+
+  it("assigns symptoms to TO section when no chiefComplaint facts exist", () => {
+    const labels = { s_to: "TO" };
+    const facts = makeFacts({
+      symptoms: [fact("symptoms", "dýchavičnosť pri námahe")],
+    });
+    const result = assignFactsToSections(facts, labels);
+    expect(result["s_to"]).toHaveLength(1);
+    expect(result["s_to"]![0].category).toBe("symptoms");
+  });
+});

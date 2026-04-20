@@ -147,16 +147,21 @@ export function buildEnrichedSystemPrompt(
 ): string {
   const parts: string[] = [baseSystemPrompt];
 
-  // Add specialty prompt pack
-  const pack = getSpecialtyPromptPack(analysis.inferredSpecialty);
-  if (pack) {
-    parts.push(`\n${pack.systemPromptAddendum}`);
-    parts.push(`\nTERMINOLOGY: ${pack.terminologyNotes}`);
+  // Add specialty prompt pack — skip when facts are pre-assigned because
+  // the addendum asks Opus to document things (e.g. "heart sounds: S1/S2
+  // quality, murmurs…") that it can't add when it's only formatting
+  // pre-extracted facts. Including it dilutes the important rules.
+  if (!hasValidatedFacts) {
+    const pack = getSpecialtyPromptPack(analysis.inferredSpecialty);
+    if (pack) {
+      parts.push(`\n${pack.systemPromptAddendum}`);
+      parts.push(`\nTERMINOLOGY: ${pack.terminologyNotes}`);
 
-    if (pack.emphasizedSections.length > 0) {
-      parts.push(
-        `\nEMPHASIZED SECTIONS: Pay special attention to these sections for this specialty: ${pack.emphasizedSections.join(", ")}. Provide more detail in these sections when information is available.`,
-      );
+      if (pack.emphasizedSections.length > 0) {
+        parts.push(
+          `\nEMPHASIZED SECTIONS: Pay special attention to these sections for this specialty: ${pack.emphasizedSections.join(", ")}. Provide more detail in these sections when information is available.`,
+        );
+      }
     }
   }
 

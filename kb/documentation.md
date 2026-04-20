@@ -1,6 +1,6 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-14_
+_Last updated: 2026-04-20_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
@@ -161,7 +161,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 
 | Pass                                     | Model               | Purpose                                                                                                                                          |
 | ---------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Pass 1.1** — PHI Scrub                 | Pure TypeScript     | Remove patient name, birth number, phone, email from all inputs before any LLM call                                                              |
+| **Pass 1.1** — PHI Scrub                 | Pure TypeScript     | Remove patient name, birth number, phone, email, addresses from all inputs before any LLM call; protects clinical values (BP, GCS, pupils)       |
 | **Pass 1** — Clinical Analysis           | Sonnet 4.6 (temp=0) | Match clinical concepts, infer specialty, cluster problems, suggest ICD-10 codes, extract medication names                                       |
 | **Pass 1.5** — Fact Extraction           | Haiku 4.5 (temp=0)  | Extract structured facts into 15 categories with verbatim evidence; visit_date injected for temporal resolution                                  |
 | **Pass 1.6a** — Fact Validation          | Pure TypeScript     | Verify evidence in source, cross-source fallback, base-name-only medication correction (preserves dose/freq)                                     |
@@ -170,6 +170,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 | **Pass 1.8** — Assessment Classification | Pure TypeScript     | Tier ICD candidates (active/chronic/background), cap at 4+5, exclude background                                                                  |
 | **Prompt Assembly**                      | Pure TypeScript     | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
 | **Pass 2** — Generation                  | Opus 4.6 (temp=0)   | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE                                          |
+| **Pass C** — Section Routing Validator   | Pure TypeScript     | Strip misrouted meds/substance/allergy content; cross-section dedup (OA↔LA, SA↔Ab, EA↔AA)                                                       |
 | **Pass 2.1** — Output PHI Scrub          | Pure TypeScript     | Defensive re-scrub of generated section values                                                                                                   |
 | **Pass 2.5** — Post-Generation           | Pure TypeScript     | Strip ungrounded ICD codes from output                                                                                                           |
 
@@ -201,6 +202,7 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 - [web/src/lib/clinical/icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) — Pass 1.7
 - [web/src/lib/clinical/assessment-classifier.ts](web/src/lib/clinical/assessment-classifier.ts) — Pass 1.8
 - [web/src/lib/clinical/fact-section-assigner.ts](web/src/lib/clinical/fact-section-assigner.ts) — deterministic fact-to-section assignment
+- [web/src/lib/clinical/section-routing-validator.ts](web/src/lib/clinical/section-routing-validator.ts) — Pass C section routing
 - [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts) — Pass 2 + prompt builders + Pass 2.1/2.5
 - [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
 
@@ -208,9 +210,10 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 
 ## 7. Regeneration
 
-Two paths via [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts):
+Three paths via [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts):
 
-- **Fast reformat** — only template changed → Haiku reformats existing note into new layout, no re-analysis
+- **Structured rerender** (preferred) — template changed + cached `validated_facts` → re-runs fact-to-section assignment with new template, no re-analysis
+- **Fast reformat** (legacy) — template changed but no cached facts → Haiku reformats existing note into new layout
 - **Full path** — content changed → identical pipeline to generate, optionally reuses cached `clinical_analysis` from metadata to skip Pass 1
 
 Fingerprint diffing (SHA-256 over every pipeline component) detects whether differences between runs are from prompt changes (our code) or LLM sampling variance (model noise).
@@ -221,7 +224,7 @@ Fingerprint diffing (SHA-256 over every pipeline component) detects whether diff
 
 - **Built-in** (static): SOAP + specialty variants in [web/src/lib/templates/default-templates.ts](web/src/lib/templates/default-templates.ts), marked `isSystem: true`
 - **User-defined**: Supabase `templates` table with custom sections, i18n labels, optional style guide, usage tracking
-- Each template has hierarchical sections with per-locale labels and mandatory `context` fields (English) explaining what content belongs in each section. All 8 system templates have context on every section and subsection (added via migration `20260416_add_global_section_contexts.sql`, refined by `20260419_fix_oa_la_section_contexts.sql`). Key routing rule: OA (past medical history) explicitly excludes medications; LA (current medications) is the sole location for all drug names and dosing. Focused templates use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.)
+- Each template has hierarchical sections with per-locale labels and mandatory `context` fields (English) explaining what content belongs in each section. All 8 system templates have context on every section and subsection (added via migration `20260416_add_global_section_contexts.sql`, refined by `20260419_fix_oa_la_section_contexts.sql` and `20260420_fix_la_ea_section_contexts.sql`). Key routing rules: OA (past medical history) explicitly excludes medications; LA (current medications) is the sole location for all drug names and dosing, including emergency/administered medications; EA (epidemiological history) explicitly excludes allergy content. Focused templates use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.)
 - `resolveTemplate(id)` looks up DB first → static fallback → default SOAP
 
 **Key files:**
@@ -442,16 +445,18 @@ Separate Next.js app at `admin/`:
 ## 17. Key Guarantees
 
 1. **Every fact has verbatim evidence** — Pass 1.5 requires quotes; Pass 1.6a drops unverifiable facts
-2. **Every ICD code is grounded and pre-rendered** — Pass 1.7 drops ungrounded candidates; `buildPreRenderedIcdBlock` sorts and formats them; Opus copies the block VERBATIM; Pass 2.5 defensively strips any Opus snuck past
-3. **Deterministic pipeline** — LLM non-determinism absorbed by pure-TypeScript gates (1.6a, 1.6b, 1.7, fact-section-assigner, pre-rendered ICD, 2.5). Template specialty overrides Pass 1 inference. Transcript omitted when facts present.
+2. **Every ICD code is grounded and pre-rendered** — Pass 1.7 drops ungrounded candidates; Pass 1.8 tiers by relevance; `buildPreRenderedIcdBlock` sorts and formats them; Opus copies the block VERBATIM; Pass 2.5 defensively strips any Opus snuck past
+3. **Deterministic pipeline** — LLM non-determinism absorbed by pure-TypeScript gates (1.6a, 1.6b, 1.7, 1.8, fact-section-assigner, pre-rendered ICD, Pass C, 2.5). Template specialty overrides Pass 1 inference. Transcript omitted when facts present.
 4. **No hallucinated clinical content** — Opus told "validated facts are the factual contract"
-5. **Atomic metadata** — concurrent writers can't clobber each other thanks to JSONB merge RPC
+5. **No cross-section contamination** — Pass C strips misrouted medications, substance use, and allergy content from wrong sections
+6. **No PHI reaches LLMs** — Pass 1.1 scrubs inputs; Pass 2.1 defensively re-scrubs outputs
+7. **Atomic metadata** — concurrent writers can't clobber each other thanks to JSONB merge RPC
 
 ---
 
 ## 18. Testing
 
-- **617 tests** across the clinical pipeline, hooks, utilities
+- **790+ tests** across the clinical pipeline, hooks, utilities
 - Every clinical module has matching `*.test.ts`
 - Route-level integration tests for `/api/generate` and `/api/regenerate`
 - Lint (ESLint) + Prettier enforced on every commit
