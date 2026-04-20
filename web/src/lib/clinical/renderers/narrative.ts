@@ -31,6 +31,7 @@ import {
 import { extractJson } from "../json-repair";
 import { extractSectionsFromStream } from "../../api/sse";
 import { logUsage, type UsageContext } from "../../usage";
+import { checkFactCoverage } from "../fact-coverage";
 
 const OPUS_MODEL = "claude-opus-4-6";
 
@@ -54,29 +55,31 @@ export interface NarrativeTargetSection {
 
 function buildSystemPrompt(language: SupportedLanguage): string {
   const lang = LANG[language];
-  return `You are a clinical narrative formatter writing in ${lang}.
+  return `You are a clinical narrative FORMATTER writing in ${lang}. You are NOT a summarizer, NOT a decision-maker, NOT a reasoner. Your job is to turn a list of pre-committed clinical facts into readable prose without losing or altering a single one.
 
-INPUT: A JSON object with one entry per section. Each entry lists
-pre-assigned clinical facts, each marked as AFFIRMED or NEGATED, plus
-optional NARRATIVE EVIDENCE — short source snippets you may consult
-for tone/phrasing only.
+INPUT: A JSON object with one entry per section. Each entry lists pre-assigned clinical facts, each marked as AFFIRMED or NEGATED, plus optional NARRATIVE EVIDENCE — short source snippets you may consult for tone/phrasing only.
 
-OUTPUT: A JSON object with the same section IDs as keys and flowing
-${lang} prose as values. No bullets, no ICD codes, no section headings
-inside values, no Markdown. If a section has no facts, output "".
+OUTPUT: A JSON object with the same section IDs as keys and flowing ${lang} prose as values. No bullets, no ICD codes, no section headings inside values, no Markdown. If a section has no facts, output "".
 
-RULES:
-1. Do NOT add clinical facts that aren't in the provided list. No
-   diseases from general knowledge, no seasonal / chronicity context
-   unless an explicit fact says so.
-2. Reorder for chronological / grammatical flow, but preserve each
-   fact's meaning. Negated facts must render as proper ${lang}
-   negations ("bez ...", "neguje ...", "no ...", "denies ...").
-3. Do NOT list medications, diagnoses, labs, vitals, allergies, past
-   history, or family history — those sections render separately.
-4. The NARRATIVE EVIDENCE snippets are FOR TONE ONLY. Do not quote
-   them verbatim or extract new clinical content from them.
-5. Return valid JSON. No prose, no Markdown, no comments.`;
+NON-NEGOTIABLE RULES (violations are failures, not style disagreements):
+
+1. PRESERVE EVERY FACT. Every [AFFIRMED] and every [NEGATED] entry in the input MUST appear in the output prose. You may NOT drop a fact because it "seems irrelevant", "doesn't fit the narrative", or is "redundant". If the input has 12 facts, the output paragraph must reference all 12. Count the facts before you write and count them again after.
+
+2. NEVER REINTERPRET MEANING. "alkohol príležitostne" stays "alkohol príležitostne" (occasional use) — it MUST NOT become "neguje alkohol" (denies alcohol). "fajčí 15 (jednotka nešpecifikovaná)" stays that exact phrase. A negated fact stays negated. An affirmed fact stays affirmed. Semantic inversion is forbidden.
+
+3. NEVER INVENT. No diseases from general knowledge. No seasonal context ("v peľovej sezóne"). No chronicity qualifiers ("chronické pokašľávanie") unless a fact explicitly says so. If it isn't in the input, it doesn't exist.
+
+4. Reorder for chronological / grammatical flow is allowed. Rewording for natural ${lang} sentence structure is allowed. Everything else — adding, dropping, combining, reinterpreting — is forbidden.
+
+5. Negated facts render as proper ${lang} negations ("bez ...", "neguje ...", "no ...", "denies ..."). Never emit the literal string "[NEGATED]" or "[AFFIRMED]".
+
+6. Do NOT list medications, diagnoses, labs, vitals, allergies, past history, or family history — those sections render separately via deterministic pipelines.
+
+7. NARRATIVE EVIDENCE snippets are FOR TONE ONLY. Do not quote them verbatim. Do not extract new clinical content from them.
+
+8. Return valid JSON. No prose outside the JSON. No Markdown. No comments.
+
+If you would otherwise drop a fact to improve readability: stop. Write awkward prose that keeps the fact instead. Losing a fact is a correctness failure; awkward prose is a style issue that can be cleaned up later.`;
 }
 
 function formatFactForPrompt(f: FactRef): string {
@@ -226,6 +229,34 @@ export async function renderNarrativeFromModel(
     const v = parsed[s.id];
     contents[s.id] = typeof v === "string" ? v : "";
   }
+
+  // Fact-coverage assertion — every [AFFIRMED] / [NEGATED] fact that
+  // went in must appear in the rendered prose. When Opus drops facts
+  // (typically happens on dense TO/Plan inputs where it "summarizes"),
+  // we log it so the failure is visible in telemetry.
+  const expected: Record<string, FactRef[]> = {};
+  for (const s of sections) {
+    const facts =
+      s.role === "chiefComplaint"
+        ? model.currentEncounter.hpiFacts
+        : model.currentEncounter.planItems;
+    expected[s.id] = facts;
+  }
+  const coverage = checkFactCoverage({ expected, rendered: contents });
+  if (!coverage.passed) {
+    logger.warn(
+      `[narrative-renderer] fact-coverage below threshold — ${coverage.dropped.length} fact(s) dropped by Opus`,
+      {
+        perSection: coverage.perSection,
+        dropped: coverage.dropped.slice(0, 8).map((d) => ({
+          sectionId: d.sectionId,
+          value: d.fact.value,
+          missing: d.missingTokens,
+        })),
+      },
+    );
+  }
+
   return {
     contents,
     usage: {

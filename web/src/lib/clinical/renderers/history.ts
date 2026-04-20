@@ -29,24 +29,26 @@ function normalizeForDedup(s: string): string {
  * with more context.
  */
 function dedupBySubject(refs: FactRef[]): FactRef[] {
-  const kept: FactRef[] = [];
+  // Dedup by the full normalized fact value. Two items that normalize
+  // identically are collapsed (longer original wins); anything that
+  // differs by even one content word stays as a distinct fact.
+  //
+  // Deliberately lenient — we'd rather render a near-duplicate than
+  // accidentally drop a legitimate separate item (e.g. "alergia na
+  // Candibene" and "alergia na mukolytiká" share the first two tokens
+  // but are different allergens; "alkohol príležitostne" and "alkohol
+  // nepije" are inverted but still rare — let them both ship rather
+  // than risk collapsing "alergia na penicilín" + "alergia na
+  // amoxicilín" into one).
   const seen = new Map<string, FactRef>();
   for (const r of refs) {
-    const first3 = normalizeForDedup(r.value).split(/[\s,:.]+/).slice(0, 2).join(" ");
-    const existing = seen.get(first3);
-    if (!existing) {
-      seen.set(first3, r);
-      kept.push(r);
-      continue;
-    }
-    if (r.value.length > existing.value.length) {
-      // Replace the earlier shorter variant with the longer one.
-      const idx = kept.indexOf(existing);
-      if (idx >= 0) kept[idx] = r;
-      seen.set(first3, r);
+    const key = normalizeForDedup(r.value);
+    const existing = seen.get(key);
+    if (!existing || r.value.length > existing.value.length) {
+      seen.set(key, r);
     }
   }
-  return kept;
+  return Array.from(seen.values());
 }
 
 /** Render a list of fact refs as "A, B, C." with period. */
