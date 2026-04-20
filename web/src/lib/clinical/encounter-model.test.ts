@@ -160,10 +160,7 @@ describe("buildEncounterModel — objective partitioning", () => {
     const model = buildEncounterModel({
       language: "sk",
       facts: facts(
-        fact(
-          "findings",
-          "EKG 12-zvodové: SR SF 68/min, ST elevácia v aVL a I",
-        ),
+        fact("findings", "EKG 12-zvodové: SR SF 68/min, ST elevácia v aVL a I"),
         fact(
           "findings",
           "RTG hrudníka: pľúcny parenchým bez čerstvých ložiskových zmien",
@@ -209,7 +206,9 @@ describe("buildEncounterModel — problem classification", () => {
     ).toBe(false);
     // I48 stays as supporting (distinct active diagnosis)
     expect(
-      model.currentEncounter.supportingProblems.some((p) => p.icdCode === "I48"),
+      model.currentEncounter.supportingProblems.some(
+        (p) => p.icdCode === "I48",
+      ),
     ).toBe(true);
   });
 

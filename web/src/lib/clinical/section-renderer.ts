@@ -29,7 +29,6 @@ import { renderObjectiveSection } from "./renderers/objective";
 import {
   renderAllergiesSection,
   renderHabitsSection,
-  renderFamilyHistorySection,
   renderPersonalHistorySection,
   renderSocialHistorySection,
   renderEpidemiologicalSection,
@@ -585,15 +584,14 @@ export async function renderSections(
     sectionLabels,
     options?.sectionContexts,
   );
-  const PROMOTABLE_TO_DETERMINISTIC: ReadonlySet<SectionRole> = new Set<
-    SectionRole
-  >([
-    "allergies",
-    "substanceUse",
-    "personalHistory",
-    "socialHistory",
-    "epidemiological",
-  ]);
+  const PROMOTABLE_TO_DETERMINISTIC: ReadonlySet<SectionRole> =
+    new Set<SectionRole>([
+      "allergies",
+      "substanceUse",
+      "personalHistory",
+      "socialHistory",
+      "epidemiological",
+    ]);
   const tiers: SectionTier[] = options?.encounterModel
     ? rawTiers.map((t) =>
         PROMOTABLE_TO_DETERMINISTIC.has(t.role)
@@ -637,15 +635,10 @@ export async function renderSections(
     } else if (section.role === "substanceUse" && options?.encounterModel) {
       result[section.id] = renderHabitsSection(options.encounterModel);
     } else if (section.role === "personalHistory" && options?.encounterModel) {
-      result[section.id] = renderPersonalHistorySection(
-        options.encounterModel,
-      );
+      result[section.id] = renderPersonalHistorySection(options.encounterModel);
     } else if (section.role === "socialHistory" && options?.encounterModel) {
       result[section.id] = renderSocialHistorySection(options.encounterModel);
-    } else if (
-      section.role === "epidemiological" &&
-      options?.encounterModel
-    ) {
+    } else if (section.role === "epidemiological" && options?.encounterModel) {
       result[section.id] = renderEpidemiologicalSection(options.encounterModel);
     } else if (section.role === "assessment") {
       result[section.id] = renderAssessment(options?.icdBlock);
@@ -799,10 +792,7 @@ export async function renderSections(
       ? options?.encounterModel
         ? (async () => {
             const targets: NarrativeTargetSection[] = opusSections
-              .filter(
-                (s) =>
-                  s.role === "chiefComplaint" || s.role === "plan",
-              )
+              .filter((s) => s.role === "chiefComplaint" || s.role === "plan")
               .map((s) => ({
                 id: s.id,
                 label: s.label,

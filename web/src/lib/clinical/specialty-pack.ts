@@ -113,7 +113,10 @@ const SLOVAK_GENERAL: SpecialtyPack = {
       icd: "I10",
       canonical: "Primárna [esenciálna] artériová hypertenzia",
     },
-    dm2: { icd: "E11.9", canonical: "Diabetes mellitus 2. typu bez komplikácií" },
+    dm2: {
+      icd: "E11.9",
+      canonical: "Diabetes mellitus 2. typu bez komplikácií",
+    },
     "dm 2 typu": {
       icd: "E11.9",
       canonical: "Diabetes mellitus 2. typu bez komplikácií",
@@ -289,7 +292,10 @@ const ENGLISH_GENERAL: SpecialtyPack = {
   icdCsvPath: "public/icd-10/ICD-10-GT.csv",
   medicationCsvPath: null,
   diagnosisSynonyms: {
-    stemi: { icd: "I21.0", canonical: "Acute transmural myocardial infarction" },
+    stemi: {
+      icd: "I21.0",
+      canonical: "Acute transmural myocardial infarction",
+    },
     nstemi: {
       icd: "I21.4",
       canonical: "Acute subendocardial myocardial infarction",

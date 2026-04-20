@@ -161,7 +161,10 @@ export async function renderNarrativeFromModel(
           value: r.value,
           source: r.source,
         }));
-        const snippets = extractNarrativeEvidence(asExtracted, options.sources!);
+        const snippets = extractNarrativeEvidence(
+          asExtracted,
+          options.sources!,
+        );
         return formatNarrativeEvidence(snippets);
       })()
     : "";

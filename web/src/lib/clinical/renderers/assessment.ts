@@ -70,10 +70,9 @@ export function renderAssessmentFromModel(model: EncounterModel): string {
 
   if (model.chronicConditions.length > 0) {
     blocks.push(
-      [
-        headings.chronic,
-        ...model.chronicConditions.map(renderProblem),
-      ].join("\n"),
+      [headings.chronic, ...model.chronicConditions.map(renderProblem)].join(
+        "\n",
+      ),
     );
   }
 
