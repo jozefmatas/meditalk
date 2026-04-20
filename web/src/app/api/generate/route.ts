@@ -21,6 +21,8 @@ import {
   runFactExtraction,
   validateFacts,
   resolveFacts,
+  resolveTimelineCoherence,
+  resolveIcdFromFacts,
   countFacts,
   emptyExtractedFacts,
   computeFingerprint,
@@ -31,7 +33,7 @@ import {
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
-import type { ClinicalAnalysis } from "@/lib/clinical/types";
+import type { ClinicalAnalysis, CandidateIcdCode } from "@/lib/clinical/types";
 import type {
   ExtractedFacts,
   FactExtractionInput,
@@ -651,12 +653,24 @@ export async function POST(request: NextRequest) {
           factExtractionInput,
           language,
         );
-        validatedFacts = resolution.resolvedFacts;
-        factWarnings = validation.warnings;
+        // Pass 1.6c — timeline coherence. Collapses same-subject symptom /
+        // chiefComplaint facts when one carries a more precise temporal
+        // anchor ("od 13:00" vs "od rána"). Scope is narrow — measurements,
+        // findings, etc. are untouched so legitimate time-series survives.
+        const timeline = resolveTimelineCoherence(resolution.resolvedFacts);
+        validatedFacts = timeline.facts;
+        factWarnings = [
+          ...validation.warnings,
+          ...timeline.conflicts.map(
+            (c) =>
+              `Timeline conflict: kept "${c.kept.value}" (${c.keptAnchor.kind}) over "${c.dropped.value}" (${c.droppedAnchor.kind})`,
+          ),
+        ];
         factRemovedCount = validation.counts.removed;
-        factResolutionDropCount = resolution.counts.total;
+        factResolutionDropCount =
+          resolution.counts.total + timeline.conflicts.length;
         logger.debug(
-          `[generate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${factResolutionDropCount} dropped by resolver (${resolution.counts.correctionDrops} correction), ${factWarnings.length} warnings`,
+          `[generate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${resolution.counts.total} dropped by resolver (${resolution.counts.correctionDrops} correction), ${timeline.conflicts.length} timeline-conflicts collapsed, ${factWarnings.length} warnings`,
         );
         lap("fact-extraction-done");
       } catch (err) {
@@ -667,10 +681,76 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Pass 1.65 — Deterministic diagnosis resolver.
+    // Resolves ICD codes directly from validated diagnosis facts using a
+    // curated synonym table + exact/fuzzy CSV description match. Each
+    // code carries `factIds` (stable "${category}-${index}" refs) so the
+    // evidence trail is explicit: no evidence → excluded.
+    //
+    // Merge strategy: resolver codes become the PRIMARY source because
+    // they are deterministic across runs (same facts → same codes).
+    // Sonnet's suggestions are folded in as supplementary — codes the
+    // resolver missed still appear, and Pass 1.7 (below) enforces
+    // lexical grounding against facts regardless of who proposed them.
+    // This is the fix for "ICD inconsistency across runs" the doctor
+    // has been seeing.
+    if (clinicalAnalysis) {
+      const resolverResult = resolveIcdFromFacts(validatedFacts, language);
+      // Key by the dot-stripped upper-case code so "I21.3" and "I213"
+      // don't produce two distinct entries — they refer to the same code.
+      const codeKey = (c: CandidateIcdCode) =>
+        c.code.replace(/\./g, "").toUpperCase();
+      const category3 = (c: CandidateIcdCode) =>
+        c.code.replace(/\./g, "").toUpperCase().substring(0, 3);
+
+      // Categories where the resolver produced a SPECIFIC subcode
+      // (I21.2 → category I21). Sonnet's guesses in these categories
+      // are suppressed — the resolver's pick is fact-grounded, Sonnet's
+      // extras are usually speculative (e.g. I21 parent + I21.0 + I21.9
+      // alongside the real I21.2 from "STEMI laterálna stena").
+      const resolverSpecificCategories = new Set<string>();
+      for (const c of resolverResult.codes) {
+        if (c.code.includes(".")) resolverSpecificCategories.add(category3(c));
+      }
+
+      const byKey = new Map<string, CandidateIcdCode>();
+      for (const c of resolverResult.codes) byKey.set(codeKey(c), c);
+      let suppressed = 0;
+      for (const c of clinicalAnalysis.candidateIcdCodes) {
+        const key = codeKey(c);
+        if (byKey.has(key)) continue;
+        if (resolverSpecificCategories.has(category3(c))) {
+          suppressed++;
+          continue;
+        }
+        byKey.set(key, c);
+      }
+      clinicalAnalysis = {
+        ...clinicalAnalysis,
+        candidateIcdCodes: Array.from(byKey.values()),
+      };
+      logger.debug(
+        `[generate] ICD resolver — ${resolverResult.codes.length} deterministic code(s), ${suppressed} Sonnet code(s) suppressed (same-category as a specific resolver pick), ${resolverResult.unresolved.length} unresolved`,
+      );
+    }
+
     // Preserve the full Pass 1 candidate list BEFORE certainty filtering.
     // These are shown as suggestions in the ICD panel so the doctor can
     // pick codes that the certainty filter dropped.
-    const allCandidateIcdCodes = clinicalAnalysis?.candidateIcdCodes ?? [];
+    //
+    // Dedup defensively by normalized code — Sonnet can emit the same
+    // code twice with different descriptions, and the UI keys list
+    // entries by `code.code` so duplicates crash React with a
+    // "two children with the same key" warning.
+    const allCandidateIcdCodesRaw = clinicalAnalysis?.candidateIcdCodes ?? [];
+    const seenCodes = new Set<string>();
+    const allCandidateIcdCodes: CandidateIcdCode[] = [];
+    for (const c of allCandidateIcdCodesRaw) {
+      const key = c.code.replace(/\./g, "").toUpperCase();
+      if (seenCodes.has(key)) continue;
+      seenCodes.add(key);
+      allCandidateIcdCodes.push(c);
+    }
 
     // Pass 1.7 — Diagnosis certainty filter. Drop any candidate ICD code
     // that isn't lexically grounded in the validated diagnosis/history facts.
@@ -790,6 +870,7 @@ export async function POST(request: NextRequest) {
           extractedIcdCodes,
           systemPrompt,
           userMessage,
+          sanityReport,
         } = await generateFromTemplate(
           transcriptChunks,
           template,
@@ -858,6 +939,11 @@ export async function POST(request: NextRequest) {
           at: new Date().toISOString(),
           operation: "generate" as const,
           fingerprint,
+          sanity: {
+            errors: sanityReport.errors.length,
+            warnings: sanityReport.warnings.length,
+            interventions: sanityReport.interventions.length,
+          },
         };
         const generationHistory = [...priorHistory, historyEntry].slice(-10);
 

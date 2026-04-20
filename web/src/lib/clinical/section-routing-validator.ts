@@ -36,6 +36,9 @@ export type SectionRole =
   | "assessment"
   | "chiefComplaint"
   | "findings"
+  | "vitals"
+  | "ekg"
+  | "labs"
   | "other";
 
 /**
@@ -81,9 +84,54 @@ const ROLE_PATTERNS: [SectionRole, string[]][] = [
     "chiefComplaint",
     ["terajsie", "present illness", "hpi", "chief complaint", "dovod"],
   ],
+  // Specific exam subsections — checked BEFORE the generic `findings` role.
+  // Order matters: more specific label patterns first.
+  [
+    "vitals",
+    [
+      "krvny tlak",
+      "krvneho tlaku",
+      "blood pressure",
+      "vital sign",
+      "vitalne funkc",
+      "vitalnych funk",
+      "pulse",
+      "tep ",
+      "pulz",
+      "teplota",
+      "saturac",
+      "spo2",
+      "sato2",
+      "glykemi",
+      "gcs",
+      "dychova frekven",
+      "srdcova frekven",
+    ],
+  ],
+  ["ekg", ["ekg", "elektrokardio", "electrocardio"]],
+  [
+    "labs",
+    [
+      "laborator",
+      "laboratoria",
+      "laboratoriu",
+      "laboratory",
+      "labs",
+      "lab values",
+      "laboratorne hodn",
+      "laboratorne vysled",
+    ],
+  ],
   [
     "findings",
-    ["nalez", "finding", "objektivny", "status praesens", "physical exam", "vysetrenie"],
+    [
+      "nalez",
+      "finding",
+      "objektivny",
+      "status praesens",
+      "physical exam",
+      "vysetrenie",
+    ],
   ],
 ];
 
@@ -91,7 +139,14 @@ const ROLE_PATTERNS: [SectionRole, string[]][] = [
  * Classify a section by its "role" based on its label and/or context.
  *
  * Priority 1: Exact abbreviation match on label (most reliable).
- * Priority 2: Substring match on label or context.
+ * Priority 2: Substring match on the LABEL (the section's own name).
+ * Priority 3: Fallback to substring match on the CONTEXT only if the
+ *            label matched nothing.
+ *
+ * Splitting label-match from context-match prevents a weak context
+ * signal from hijacking a strong label match — e.g. a section whose
+ * label is "EKG" but whose context happens to mention "diagnostic
+ * impression" must still classify as `ekg`, not `assessment`.
  */
 export function classifySection(label: string, context?: string): SectionRole {
   const normalizedLabel = normalizeForMatch(label);
@@ -100,16 +155,19 @@ export function classifySection(label: string, context?: string): SectionRole {
   const abbrRole = ABBREVIATION_ROLE_MAP[normalizedLabel];
   if (abbrRole) return abbrRole;
 
-  // Priority 2: substring match on label and context
-  const normalizedContext = context ? normalizeForMatch(context) : "";
-
+  // Priority 2: LABEL-only substring match — specific role wins.
   for (const [role, patterns] of ROLE_PATTERNS) {
     for (const pattern of patterns) {
-      if (
-        normalizedLabel.includes(pattern) ||
-        normalizedContext.includes(pattern)
-      ) {
-        return role;
+      if (normalizedLabel.includes(pattern)) return role;
+    }
+  }
+
+  // Priority 3: fall back to context when the label matched nothing.
+  const normalizedContext = context ? normalizeForMatch(context) : "";
+  if (normalizedContext) {
+    for (const [role, patterns] of ROLE_PATTERNS) {
+      for (const pattern of patterns) {
+        if (normalizedContext.includes(pattern)) return role;
       }
     }
   }

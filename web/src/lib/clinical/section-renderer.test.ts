@@ -4,6 +4,10 @@ import {
   classifySectionTiers,
   renderMedications,
   renderAssessment,
+  renderVitals,
+  renderEkg,
+  renderLabs,
+  detectVitalsKindFromLabel,
   buildHaikuSystemPrompt,
   buildHaikuUserMessage,
   buildOpusSystemPrompt,
@@ -144,7 +148,8 @@ describe("renderMedications", () => {
 
 describe("renderAssessment", () => {
   it("returns ICD block with stripped bullet prefix", () => {
-    const block = "- I10 Esenciálna hypertenzia\n- E11.9 DM 2. typu bez komplikácií";
+    const block =
+      "- I10 Esenciálna hypertenzia\n- E11.9 DM 2. typu bez komplikácií";
     const result = renderAssessment(block);
     expect(result).toBe(
       "I10 Esenciálna hypertenzia\nE11.9 DM 2. typu bez komplikácií",
@@ -254,7 +259,12 @@ describe("buildOpusSystemPrompt", () => {
   });
 
   it("includes style guide when provided", () => {
-    const prompt = buildOpusSystemPrompt("sk", undefined, undefined, "Use formal tone.");
+    const prompt = buildOpusSystemPrompt(
+      "sk",
+      undefined,
+      undefined,
+      "Use formal tone.",
+    );
     expect(prompt).toContain("STYLE GUIDE");
     expect(prompt).toContain("Use formal tone.");
   });
@@ -281,47 +291,64 @@ describe("buildOpusUserMessage", () => {
   });
 
   it("includes encounter date", () => {
-    const msg = buildOpusUserMessage(sections, {}, {}, {
-      visitDate: "2025-04-20",
-    });
+    const msg = buildOpusUserMessage(
+      sections,
+      {},
+      {},
+      {
+        visitDate: "2025-04-20",
+      },
+    );
     expect(msg).toContain("ENCOUNTER DATE: 2025-04-20");
   });
 
   it("includes medication context as reference", () => {
-    const msg = buildOpusUserMessage(sections, {}, {}, {
-      medicationContext: "Bisoprolol 5 mg 1-0-0, Ramipril 10 mg 1-0-0",
-    });
+    const msg = buildOpusUserMessage(
+      sections,
+      {},
+      {},
+      {
+        medicationContext: "Bisoprolol 5 mg 1-0-0, Ramipril 10 mg 1-0-0",
+      },
+    );
     expect(msg).toContain("MEDICATION CONTEXT");
     expect(msg).toContain("do NOT list these");
     expect(msg).toContain("Bisoprolol 5 mg");
   });
 
   it("includes diagnosis context as reference", () => {
-    const msg = buildOpusUserMessage(sections, {}, {}, {
-      diagnosisContext: "I10 Esenciálna hypertenzia",
-    });
+    const msg = buildOpusUserMessage(
+      sections,
+      {},
+      {},
+      {
+        diagnosisContext: "I10 Esenciálna hypertenzia",
+      },
+    );
     expect(msg).toContain("DIAGNOSIS CONTEXT");
     expect(msg).toContain("do NOT list these");
     expect(msg).toContain("I10 Esenciálna hypertenzia");
   });
 
-  it("includes doctor notes", () => {
-    const msg = buildOpusUserMessage(sections, {}, {}, {
-      doctorNotes: "Pacient prichádza pre bolesti na hrudníku.",
-    });
-    expect(msg).toContain("DOCTOR'S ADDITIONAL NOTES");
+  it("includes pre-built narrative evidence when provided", () => {
+    const msg = buildOpusUserMessage(
+      sections,
+      {},
+      {},
+      {
+        narrativeEvidence:
+          "NARRATIVE EVIDENCE (scoped):\n[Doctor's notes]\nPacient prichádza pre bolesti na hrudníku.",
+      },
+    );
+    expect(msg).toContain("NARRATIVE EVIDENCE");
     expect(msg).toContain("Pacient prichádza pre bolesti na hrudníku.");
   });
 
-  it("includes file texts", () => {
-    const msg = buildOpusUserMessage(sections, {}, {}, {
-      fileTexts: [
-        { name: "report.pdf", type: "pdf", text: "Lab results: CRP 45 mg/l" },
-      ],
-    });
-    expect(msg).toContain("UPLOADED FILE CONTENTS");
-    expect(msg).toContain("report.pdf");
-    expect(msg).toContain("CRP 45 mg/l");
+  it("omits the narrative-evidence block when none is supplied", () => {
+    const msg = buildOpusUserMessage(sections, {}, {}, {});
+    expect(msg).not.toContain("NARRATIVE EVIDENCE");
+    expect(msg).not.toContain("DOCTOR'S ADDITIONAL NOTES");
+    expect(msg).not.toContain("UPLOADED FILE CONTENTS");
   });
 });
 
@@ -396,5 +423,195 @@ describe("edge cases", () => {
   it("handles empty section labels", () => {
     const tiers = classifySectionTiers({});
     expect(tiers).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deterministic vitals / EKG / labs
+// ---------------------------------------------------------------------------
+
+describe("detectVitalsKindFromLabel", () => {
+  it("maps specific Slovak vital labels to kinds", () => {
+    expect(detectVitalsKindFromLabel("Krvný tlak")).toBe("bp");
+    expect(detectVitalsKindFromLabel("Srdcová frekvencia")).toBe("hr");
+    expect(detectVitalsKindFromLabel("Dýchová frekvencia")).toBe("rr");
+    expect(detectVitalsKindFromLabel("Saturácia")).toBe("spo2");
+    expect(detectVitalsKindFromLabel("Teplota")).toBe("temp_c");
+    expect(detectVitalsKindFromLabel("Glykémia")).toBe("glucose_mmol");
+    expect(detectVitalsKindFromLabel("GCS")).toBe("gcs");
+  });
+
+  it("returns null for generic vitals labels", () => {
+    expect(detectVitalsKindFromLabel("Vitálne funkcie")).toBeNull();
+    expect(detectVitalsKindFromLabel("Vital signs")).toBeNull();
+  });
+});
+
+describe("renderVitals", () => {
+  it("renders BP-kind facts one per line for a BP subsection", () => {
+    const facts = [
+      makeFact("measurements", "TK 150/80 mmHg (14:02)"),
+      makeFact("measurements", "TK 145/80 mmHg (14:31)"),
+      makeFact("measurements", "SF 68/min (14:02)"), // filtered out
+    ];
+    const { text, consumed } = renderVitals(facts, "bp");
+    expect(text).toBe("TK 150/80 mmHg (14:02)\nTK 145/80 mmHg (14:31)");
+    expect(consumed).toHaveLength(2);
+  });
+
+  it("renders every vital-kind fact for a generic vitals section", () => {
+    const facts = [
+      makeFact("measurements", "TK 150/80 mmHg (14:02)"),
+      makeFact("measurements", "SF 68/min (14:02)"),
+      makeFact("measurements", "SpO2 98% (14:02)"),
+      makeFact("measurements", "Glykémia 5,5 mmol/l (14:02)"), // not a vital
+    ];
+    const { text, consumed } = renderVitals(facts, null);
+    expect(text).toContain("TK 150/80 mmHg");
+    expect(text).toContain("SF 68/min");
+    expect(text).toContain("SpO2 98%");
+    expect(text).not.toContain("Glykémia");
+    expect(consumed).toHaveLength(3);
+  });
+
+  it("returns empty text when no facts match", () => {
+    const facts = [makeFact("symptoms", "bolesť hlavy")];
+    const { text, consumed } = renderVitals(facts, "bp");
+    expect(text).toBe("");
+    expect(consumed).toHaveLength(0);
+  });
+
+  it("preserves multiple same-kind readings (time series)", () => {
+    const facts = [
+      makeFact("measurements", "TK 150/80 mmHg (14:02)"),
+      makeFact("measurements", "TK 145/80 mmHg (14:31)"),
+      makeFact("measurements", "TK 143/80 mmHg (15:12)"),
+    ];
+    const { text } = renderVitals(facts, "bp");
+    expect(text.split("\n")).toHaveLength(3);
+  });
+});
+
+describe("renderLabs", () => {
+  it("picks up glucose measurements", () => {
+    const facts = [
+      makeFact("measurements", "Glykémia 11,1 mmol/l (14:02)"),
+      makeFact("measurements", "TK 150/80 mmHg (14:02)"), // filtered out
+    ];
+    const { text, consumed } = renderLabs(facts);
+    expect(text).toBe("Glykémia 11,1 mmol/l (14:02)");
+    expect(consumed).toHaveLength(1);
+  });
+
+  it("returns empty when no lab-kind facts present", () => {
+    const facts = [makeFact("measurements", "TK 150/80 mmHg")];
+    expect(renderLabs(facts).text).toBe("");
+  });
+});
+
+describe("renderEkg", () => {
+  it("picks up finding facts mentioning EKG / rhythm / ST changes", () => {
+    const facts = [
+      makeFact("findings", "EKG 12-zvodové: SR SF 68/min, ST elevácia v aVL"),
+      makeFact("findings", "brušná stena palpačne bpn."), // not EKG
+    ];
+    const { text, consumed } = renderEkg(facts);
+    expect(text).toContain("EKG 12-zvodové");
+    expect(text).not.toContain("brušná stena");
+    expect(consumed).toHaveLength(1);
+  });
+
+  it("returns empty when no EKG-like facts present", () => {
+    const facts = [makeFact("findings", "palpačne citlivý epigastrium")];
+    expect(renderEkg(facts).text).toBe("");
+  });
+});
+
+describe("deterministic renderers — pertinent negatives", () => {
+  it("renderMedications skips negated medications", () => {
+    const facts = [
+      makeFact("medications", "Bisoprolol 5 mg 1-0-0"),
+      {
+        ...makeFact("medications", "Warfarin"),
+        negated: true,
+      },
+    ];
+    expect(renderMedications(facts)).toBe("Bisoprolol 5 mg 1-0-0");
+  });
+
+  it("renderVitals skips negated vitals", () => {
+    const facts = [
+      makeFact("measurements", "TK 120/80 mmHg"),
+      {
+        ...makeFact("measurements", "TK 150/90 mmHg"),
+        negated: true,
+      },
+    ];
+    const { text, consumed } = renderVitals(facts, "bp");
+    expect(text).toBe("TK 120/80 mmHg");
+    expect(consumed).toHaveLength(1);
+  });
+
+  it("renderEkg skips negated EKG findings", () => {
+    const facts = [
+      makeFact("findings", "EKG SR SF 68/min"),
+      {
+        ...makeFact("findings", "ST elevácia v aVL"),
+        negated: true,
+      },
+    ];
+    const { text, consumed } = renderEkg(facts);
+    expect(text).toBe("EKG SR SF 68/min");
+    expect(consumed).toHaveLength(1);
+  });
+});
+
+describe("buildHaikuUserMessage — pertinent negatives", () => {
+  it("prefixes negated facts with [NEGATED]", () => {
+    const sections: SectionTier[] = [
+      { id: "s_to", label: "TO", role: "chiefComplaint", tier: "opus" },
+      { id: "s_sym", label: "Symptoms", role: "findings", tier: "haiku" },
+    ];
+    const assignment: Record<string, ExtractedFact[]> = {
+      s_sym: [
+        makeFact("symptoms", "bolesť na hrudi"),
+        { ...makeFact("symptoms", "dýchavičnosť"), negated: true },
+      ],
+    };
+    const msg = buildHaikuUserMessage(sections, assignment, {}, [], []);
+    expect(msg).toContain("  - bolesť na hrudi");
+    expect(msg).toContain("  - [NEGATED] dýchavičnosť");
+  });
+});
+
+describe("buildHaikuSystemPrompt — negation rendering rule", () => {
+  it("teaches how to render [NEGATED] facts in Slovak", () => {
+    const prompt = buildHaikuSystemPrompt("sk");
+    expect(prompt).toContain("[NEGATED]");
+    expect(prompt).toMatch(/bez|neguje/);
+  });
+
+  it("teaches how to render [NEGATED] facts in English", () => {
+    const prompt = buildHaikuSystemPrompt("en");
+    expect(prompt).toContain("[NEGATED]");
+    expect(prompt).toMatch(/no |denies/i);
+  });
+});
+
+describe("classifySectionTiers — vitals / ekg / labs", () => {
+  it("classifies vitals / ekg / labs subsections as deterministic", () => {
+    const labels: Record<string, string> = {
+      s_tk: "Krvný tlak",
+      s_spo2: "Saturácia",
+      s_ekg: "EKG",
+      s_labs: "Laboratórne vyšetrenie",
+      s_celk: "Celkové vyšetrenie", // generic → still haiku/findings
+    };
+    const tiers = classifySectionTiers(labels);
+    expect(tiers.find((t) => t.id === "s_tk")?.tier).toBe("deterministic");
+    expect(tiers.find((t) => t.id === "s_spo2")?.tier).toBe("deterministic");
+    expect(tiers.find((t) => t.id === "s_ekg")?.tier).toBe("deterministic");
+    expect(tiers.find((t) => t.id === "s_labs")?.tier).toBe("deterministic");
+    expect(tiers.find((t) => t.id === "s_celk")?.tier).toBe("haiku");
   });
 });

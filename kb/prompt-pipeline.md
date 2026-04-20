@@ -65,12 +65,24 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
   Pass B       clearParentSections    pure TS
                -> force "" on sections with subsections
                |
-  Pass C       enforceContentRouting  pure TS
-               -> strip misrouted meds/substance/allergy content
-               -> cross-section dedup (OA↔LA, SA↔Ab, EA↔AA)
-               |
   Pass 2.1     scrubPhi (output)      pure TS
                -> defensive PHI scrub on generated section values
+               |
+  Pass 2.2     runSanityGate          pure TS (gate, not just flag)
+               -> enforceContentRouting (was Pass C) + diff → report
+               -> strip PHI-only lines (e.g. "[ADDRESS] (14:02)")
+               -> empty Assessment w/ validated diagnoses? auto-rerender
+                  from the pre-built ICD block (downgrade error → info)
+               -> impossible measurement in output? auto-strip the line
+               -> returns structured SanityReport {errors, warnings, info, interventions}
+                  — interventions carry autoRerendered:true when a fix
+                  was triggered by a critical error
+               |
+  Pass 2.3     enforceSectionPurity   pure TS
+               -> per-line rejection guard: HPI narrative in LA,
+                  "Hlavná diagnóza" in EKG/vitals/labs, raw vitals
+                  in Záver, CSV debris anywhere, bare ICD lines in TO
+               -> violations logged to sanityReport.warnings
                |
   Pass 2.5     Defensive ICD filter    pure TS
                -> strip codes Opus snuck past the prompt
@@ -326,11 +338,20 @@ RULES:
 13. NO ASSUMPTION MODE — NEVER invent missing clinical dimensions. If a numeric
     value is stated WITHOUT a unit ("fajci 15" with no "cigariet/den"), preserve
     the raw value and mark as "(jednotka nespecifikovana)".
+14. PERTINENT NEGATIVES — doctors explicitly document the ABSENCE of findings as
+    clinical signal ("no dyspnea", "bez dušnosti", "neguje vracanie", "denies X").
+    Extract as facts with `negated: true`. The `value` holds the bare subject
+    only (no "bez"/"no"/"neguje" prefix); downstream rendering inserts the
+    language-appropriate negation marker.
 
 SOURCE REFERENCE SCHEMA:
 - type: "transcript" | "doctor_notes" | "file"
 - sourceIndex: integer (0-based, from the header label)
 - evidence: short verbatim quote (<=120 chars)
+
+FACT OBJECT SCHEMA:
+- category, value, source (required)
+- negated: boolean (optional, default false — set to true for pertinent negatives)
 
 CATEGORIES: demographics, chiefComplaint, symptoms, findings, measurements,
 diagnoses, medications, procedures, familyHistory, personalHistory, socialHistory,
@@ -404,9 +425,26 @@ For every fact, check that `evidence` actually appears in the source it claims t
 3. **Second pass:** all content tokens (>=3 chars) in order?
 4. **Cross-source fallback:** if the claimed source doesn't match, try every other source (rescues Haiku mislabeling `transcript` vs `file`). On success, updates the fact's source reference.
 
-Removal reasons: `evidence_not_in_source`, `source_index_out_of_range`, `duplicate`, `empty_value`.
+Removal reasons: `evidence_not_in_source`, `source_index_out_of_range`, `duplicate`, `empty_value`, `impossible_numeric`.
+
+**Dedup key includes negation:** the validator's dedup key is `normalized(value) + (negated ? "|neg" : "")`. An affirmed "dyspnea" fact and a negated "dyspnea" fact are NOT collapsed — both can legitimately exist (e.g. symptom present earlier, documented absent on re-examination; or correction detected by Pass 1.6b).
+
+**Numeric / unit sanity (measurements only):** Before dedup, any fact in the `measurements` category is run through `validateMeasurementValue` ([web/src/lib/clinical/numeric-sanity.ts](web/src/lib/clinical/numeric-sanity.ts)). The module parses the free-form fact value (BP `TK 150/80 mmHg`, HR `SF 68/min`, SpO₂, temp, glucose, GCS, weight, height), identifies the measurement kind and extracts the numeric value(s), then classifies against physiologic ranges per kind. Three outcomes:
+
+- `impossible` → drop with reason `impossible_numeric` (e.g. BP `800/100`, SpO₂ `120%`, HR `350`, glucose `111 mmol/L`, systolic ≤ diastolic).
+- `suspicious` → keep but add a `"Suspicious measurement: ..."` entry to `warnings`.
+- `ok` or `unparseable` → pass through unchanged.
+
+Scope is deliberately narrow (measurements category only) so numbers in diagnoses/findings/plan prose are never dropped.
 
 **Medication auto-correction (base-name-only):** Validates against the approved list via `isValidMedication`. On miss, `correctMedicationBaseName` attempts fuzzy matching (Levenshtein >= 0.7). The key invariant: only the drug **name** is corrected — dose, frequency, and route are preserved verbatim from the source via `parseMedicationFact` / `reconstructMedicationValue` ([web/src/lib/clinical/medication-normalizer.ts](web/src/lib/clinical/medication-normalizer.ts)). This prevents the dosage fabrication bug where the full CSV product name (e.g. "Eliquis 2,5 mg filmom obalene tablety") replaced the entire fact value.
+
+**Medication strength sanity:** After name correction, `validateMedicationStrength` ([web/src/lib/clinical/medication-strength.ts](web/src/lib/clinical/medication-strength.ts)) compares the extracted dose against the full set of known strengths for that base drug in the locale CSV (built once per locale as a `byBaseName` index). Verdicts:
+
+- `no_dose_stated` / `drug_unknown` / `strength_matches` → pass through silently.
+- `invalid_strength` (e.g. "Atacand 500 mg" when real strengths are 8 / 16 / 32 mg) → keep the fact but add a `"Suspicious medication strength: …"` entry to `warnings`, including the list of valid strengths for the doctor to verify.
+
+Unlike numeric measurement sanity, medication strength **never drops facts** — dropping a drug the patient is actually taking is more dangerous than surfacing an implausible dose. Normalization handles Slovak/Czech comma decimals ("2,5 mg" == "2.5mg") and whitespace differences.
 
 **Medication block in enriched prompt:** When `hasValidatedFacts` is true, the separate medication resolution block in `buildEnrichedSystemPrompt` is skipped entirely. Facts are the single source of truth — no dual medication list conflict.
 
@@ -429,7 +467,101 @@ Drops facts that were replaced by the speaker. Rule-based, 100% deterministic.
 
 **Important:** English `no` is **excluded** from the regex because Slovak `no` means "well/so" (filler word, extremely common in clinical speech). English corrections like "no wait" / "wait no" are covered by the phrase-based detection.
 
-**What it does NOT do:** numeric last-mention-wins deduplication. That rule wrongly collapsed legitimate time-series (multiple BP readings at different times).
+**What it does NOT do:** numeric last-mention-wins deduplication. That rule wrongly collapsed legitimate time-series (multiple BP readings at different times). Same-subject pairs with different temporal precisions are handled by Pass 1.6c below, NOT here.
+
+---
+
+## 5.5 Pass 1.6c — Timeline Coherence
+
+File: [web/src/lib/clinical/timeline-coherence.ts](web/src/lib/clinical/timeline-coherence.ts)
+Pure TypeScript. No LLM call.
+
+Reconciles **implicit** temporal corrections that the explicit correction resolver (Pass 1.6) deliberately leaves alone — e.g. the doctor says "chest pain since morning" and later refines to "chest pain since 13:00". Both are factual; both describe the same event at different precisions. Keeping both produces a contradictory narrative in TO/HPI.
+
+Runs only on `symptoms` + `chiefComplaint` (the narrative-sensitive categories). Measurements, findings, medications, and other categories are untouched so legitimate time-series ("TK 150/80 at 14:02, 145/80 at 14:31, ...") survives.
+
+**Algorithm:**
+
+1. For each fact, `extractTemporalAnchor(value)` classifies any temporal phrase as:
+   - `clock` (precision 3) — "14:02", "od 13:00"
+   - `relative` (precision 2) — "od rána", "this morning", "od včera"
+   - `duration` (precision 1) — "3 hodiny", "for 2 days"
+   - `none` (precision 0) — no temporal phrase detected
+2. Tokenize the fact value minus the temporal phrase into content tokens (diacritic-stripped, ≥3 chars, minus a small filler stoplist: "od", "uz", "since", "from", …).
+3. For each pair in the category, compute Jaccard similarity on the token sets. Pairs with similarity ≥ 0.5 are treated as "same subject".
+4. When two same-subject facts have **different** precisions, drop the lower-precision fact and record a `TimelineConflict` ({kept, dropped, keptAnchor, droppedAnchor, subjectSimilarity}).
+5. **Equal precisions → keep both** (could be legitimate progression — pain at 13:00 and worsened pain at 14:30 are distinct anchors, not a conflict).
+
+Conflicts are surfaced to the generator as warnings (`Timeline conflict: kept "X at 13:00" over "X from morning"`) and counted in the fact extraction telemetry log alongside validator removals and correction drops.
+
+---
+
+## 5.7 Pass 1.65 — Diagnosis Resolver (Deterministic ICD)
+
+File: [web/src/lib/clinical/diagnosis-resolver.ts](web/src/lib/clinical/diagnosis-resolver.ts)
+Pure TypeScript. No LLM call.
+
+Resolves ICD codes **directly from validated diagnosis facts** using only deterministic rules, before Pass 1.7 applies certainty filtering. Primary fix for two long-standing pain points:
+
+1. **ICD inconsistency across runs** — the legacy pipeline relied on Sonnet's `candidateIcdCodes`. At temperature 0 GPU float math still introduces variance, so the same encounter produces different codes on different runs. The resolver is byte-for-byte deterministic: same facts → same codes, every run.
+2. **Critical-path latency** — eventually enables deferring Sonnet off the critical path (deterministic codes are usable immediately). Current wiring still runs Sonnet in parallel; codes are merged.
+
+**Resolution strategy per diagnosis fact:**
+
+1. **Synonym table** — a curated per-locale dictionary of abbreviations and short forms doctors use ("STEMI", "HTN", "DM2", "COPD", "AFib", etc.) that never appear verbatim in the CSV. Each synonym maps to a canonical description + ICD code and produces a **high-confidence** match. Token-level matching lets "STEMI laterálna stena" still resolve via "stemi".
+2. **Exact description lookup** — `lookupIcdByDescription` compares the normalized fact value (diacritic-stripped, lowercased, punctuation-collapsed) against the CSV's own descriptions via the `byDescriptionNorm` reverse index built in `icd-index.ts`. Exact hits are **high confidence**.
+3. **Fuzzy search** — `searchIcdNormalized` iterates the reverse index for diacritic-insensitive substring hits, scored by Jaccard token overlap. Hits ≥ 0.6 are accepted (≥ 0.8 → high confidence, else medium). Below 0.6 the fact is treated as unresolved.
+4. **Pertinent negatives are skipped** — a fact with `negated: true` documents absence and doesn't produce a code.
+5. **Unresolved facts are excluded.** The plan's "no evidence → excluded" rule is enforced here: the resolver never emits a code it can't trace back to a specific fact.
+
+**Fact-level provenance:** every resolved code carries `factIds: string[]` — stable `${category}-${index}` references to the facts that produced it. Multiple facts resolving to the same code are merged, accumulating their factIds (e.g. "STEMI" + "Akútny transmurálny infarkt myokardu" → I21.0 with `factIds: ["diagnoses-0", "diagnoses-1"]`).
+
+**Merge with Sonnet:** in the API route layer the resolver's codes become the PRIMARY source — they are deterministic across runs. Sonnet's suggestions fold in as supplementary: codes Sonnet found but the resolver missed are kept (and still pass through Pass 1.7 grounding). When both propose the same code, the resolver's entry wins because it carries the evidence trail. When the resolver emits a specific subcode (e.g. `I21.2`), Sonnet's parent/sibling codes in the same 3-char category (I21, I21.0, I21.9) are **suppressed** so Záver isn't padded with speculative variants of the same encounter diagnosis.
+
+---
+
+## 5.8 Pass 2.05 — Structured Assessment (Záver)
+
+File: [web/src/lib/clinical/assessment-structuring.ts](web/src/lib/clinical/assessment-structuring.ts)
+Pure TypeScript. No LLM call.
+
+Turns the flat `candidateIcdCodes` list into a bucketed `StructuredAssessment` and renders it with fixed Slovak / Czech / English section headings. Replaces the legacy behavior where Záver degraded into a mixed dump of primary, secondary, chronic, historical and differential diagnoses on one run, none on the next.
+
+**Bucket classifier (`classifyDiagnosisBucket`)** — deterministic precedence:
+
+1. Differential / uncertainty markers (`vs`, `versus`, `v.s.`, `?`, `diferenciálne`, `nemožno vylúčiť`, `suspekt`, `r/o`, …) → `differential`.
+2. Historical phrasing (`stav po`, `status post`, `post-op`, `history of`, `anamnest`) → `chronic`.
+3. Facts originating from the `personalHistory` category → `chronic`.
+4. Chronic-condition markers (`hypertenzia`, `diabetes`, `hypotyreoz`, `chronick`, `kompenzovan`, …) → `chronic`.
+5. Acute ICD category prefixes (I20/I21/I22/I23/I24/I26/I46/I60–I63/I74/J81/J96/K35/K81/K85/N10/N17) → `primary`.
+6. Everything else → `secondary`.
+
+**Clean pass (`cleanStructuredAssessment`)**:
+
+- Moves any speculative item that slipped into primary/secondary/chronic back to `differential`.
+- Moves `stav po` items out of primary/secondary into `chronic`.
+- Dedupes across buckets by ICD code (dot-stripped, upper-cased) and by normalized label — higher-priority bucket wins (primary > secondary > chronic > differential).
+- Collapses differential items that loosely overlap an already-primary label (so "Diferenciálne diagnosticky NSTEMI" disappears when I21.4 NSTEMI is already primary).
+
+**Renderer (`renderStructuredAssessment`)** emits in this exact order, omitting empty buckets entirely:
+
+```
+Hlavná diagnóza
+I21.4 Akútny subendokardiálny infarkt myokardu
+
+Vedľajšie diagnózy
+I48 Fibrilácia predsiení a flutter predsiení
+
+Chronické ochorenia
+I10 Primárna [esenciálna] artériová hypertenzia
+
+Diferenciálna diagnostika
+I20.0 Nestabilná angina pectoris
+```
+
+**Wiring.** `generateFromTemplate` builds the structured text once. In the **tiered path** it's passed as `icdBlock` so the deterministic Assessment renderer consumes it verbatim. In the **legacy path** — or whenever Opus writes an Assessment — a post-processing pass (Pass 2.05) overwrites any section classified as `assessment` role with the structured text. Single source of truth: Opus / Haiku cannot flatten it back.
+
+**Custom `template.systemPrompt` no longer disables tiered rendering.** When validated facts are present, the tiered path runs regardless; the custom prompt is merged into `styleGuide` so doctor-provided tone / abbreviation preferences still apply but Assessment, medications, vitals, EKG, labs all go through deterministic renderers.
 
 ---
 
@@ -785,25 +917,60 @@ Model: `claude-opus-4-6`, temperature 0, `max_tokens: 8192`
 
 The model streams JSON via SSE. `extractSectionsFromStream` scans for closing brackets of each known key and emits `section` events to the client progressively.
 
+### 9.0 Tiered section rendering (fact path)
+
+When validated facts are present and the template has no custom `systemPrompt`, sections are split into three rendering tiers by `classifySectionTiers` ([section-renderer.ts](web/src/lib/clinical/section-renderer.ts)):
+
+| Tier               | Sections / roles                                                                                                             | Engine    | Why                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------- |
+| **Deterministic**  | `medications`, `assessment`, `vitals`, `ekg`, `labs`                                                                         | no LLM    | Pure structured data — zero drift, zero cost, rendered from validated facts only. |
+| **Haiku batch**    | `personalHistory`, `socialHistory`, `substanceUse`, `allergies`, `epidemiological`, `findings` (generic exam prose), `other` | Haiku 4.5 | Compact prose from pre-assigned facts.                                            |
+| **Opus narrative** | `chiefComplaint` (TO/HPI), `plan`                                                                                            | Opus 4.6  | Temporal narrative — only tier that sees doctor notes and file texts directly.    |
+
+**Opus narrative-evidence scoping** (Strengthen Step 5):
+
+The Opus tier no longer sees the raw `doctorNotes` + `fileTexts` dump. Instead it receives a deterministic, fact-scoped set of source snippets built by `extractNarrativeEvidence` ([narrative-evidence.ts](web/src/lib/clinical/narrative-evidence.ts)):
+
+- For each fact assigned to an Opus-tier section (TO/HPI + Plan), locate its verbatim evidence quote in the declared source (transcript chunk / doctor notes / file), then pull a window of ±120 characters around it.
+- Windows from the same source are merged when they overlap so the same sentence isn't emitted twice.
+- Total budget is capped at 3000 characters; windows clipping the budget are trimmed at the last whitespace boundary to avoid dangling partial words.
+- Output is rendered via `formatNarrativeEvidence` into a single `NARRATIVE EVIDENCE` block, labeled by source type (`[Transcript chunk N]` / `[Doctor's notes]` / `[File "name"]`) with per-file directives preserved.
+- The Opus user message includes ONLY this curated block — no raw `DOCTOR'S ADDITIONAL NOTES` or `UPLOADED FILE CONTENTS` sections. Opus gets the narrative texture it needs (onset phrases, refusal language, time anchors) without being able to wander into OA/SA/LA territory from stray content in the full-source dump.
+- Diacritics handling: uses a position-preserving Slovak/Czech map so evidence quotes typed without diacritics still locate in source text that has them.
+- Fully deterministic: same facts + same sources = same snippets in the same order, every run.
+
+**Deterministic vitals / EKG / labs rendering** (Strengthen Step 3):
+
+- `renderVitals(facts, kind)` — if the subsection label names a specific kind ("Krvný tlak", "Saturácia", "Teplota"), `detectVitalsKindFromLabel` picks that kind; facts parsing as that `MeasurementKind` are emitted one per line (preserving units + timestamps). Generic labels ("Vitálne funkcie", "Vital signs") return all vital-kind measurements (BP/HR/RR/SpO₂/temp/GCS).
+- `renderEkg(facts)` — picks facts whose value matches EKG keywords (EKG/ECG/rhythm/ST elevation/QRS).
+- `renderLabs(facts)` — picks glucose-kind measurements (narrative lab findings still go through Haiku until a structured lab fact category exists).
+- **Consumption model:** the deterministic loop pulls facts from the parent section's `undistributedPool` (measurement/finding facts that the assigner routed to a parent like "Objektívne vyšetrenie" rather than a specific subsection). Consumed facts are removed from the pool so Haiku's redistribution step never produces duplicates.
+- **Pertinent negatives:** deterministic renderers (medications, vitals, EKG, labs) SKIP facts with `negated: true` — emitting a negated value verbatim would flip a "no ST elevation" finding into a false positive. Negated facts reach the Haiku/Opus tier instead, where the system prompts teach per-language rendering ("bez dušnosti", "neguje nauzeu", "denies dyspnea", "no ST elevation"). The prompt scaffolding prefixes negated facts with `[NEGATED]` in the user message so the model knows which ones to invert.
+
 ### 9.1 Post-processing
 
 After Opus returns:
 
 1. **Pass A — Bullet stripping** — `stripBulletMarkers()` defensively removes leading `- `, `• `, `* `, `– `, `— ` from all lines in every section value. The model frequently ignores no-bullet prompt instructions, so this guarantees clean output regardless of model compliance.
 2. **Pass B — Parent section clearing** — `collectParentSectionIds()` identifies template sections with subsections (e.g. Anamnézy with RA, OA, SA...) and forces their content to `""`. All content must live in subsections only.
-3. **Pass C — Section routing validator** — `enforceContentRouting()` ([section-routing-validator.ts](web/src/lib/clinical/section-routing-validator.ts)) deterministically strips misrouted content from sections. Only runs when `hasValidatedFacts` is true. Six rules:
-   - **Rule 1:** Medication blocks (3+ consecutive dosage lines, or header + 2+) stripped from non-LA, non-plan sections. Preserves narrative medication mentions with historical context (e.g. "v minulosti užíval Warfarin, vysadený pre krvácanie").
-   - **Rule 2:** Substance use content (fajčí, alkohol, drogy, etc.) stripped from non-Ab sections.
-   - **Rule 3:** Allergy content (alergie, precitlivelosť, etc.) stripped from non-AA sections.
-   - **Rule 4:** Cross-section dedup OA↔LA — identical non-trivial lines (>20 chars) appearing in both are stripped from OA, kept in LA.
-   - **Rule 5:** Cross-section dedup SA↔Ab — identical lines stripped from SA, kept in Ab.
-   - **Rule 6:** Cross-section dedup EA↔AA — identical lines stripped from EA, kept in AA.
-   Section classification uses `ABBREVIATION_ROLE_MAP` (exact label match: la→medications, ab→substanceUse, aa→allergies, ea→epidemiological, oa→personalHistory, sa→socialHistory) and `ROLE_PATTERNS` (substring match on label/context).
-4. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text. **Skipped when `hasValidatedFacts` is true** — the ICD block was pre-rendered by `buildPreRenderedIcdBlock` and the doctor's original wording is preserved.
+3. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text. **Skipped when `hasValidatedFacts` is true** — the ICD block was pre-rendered by `buildPreRenderedIcdBlock` and the doctor's original wording is preserved.
 4. **Pass 2.1 — Defensive PHI scrub** — re-applies `scrubPhi()` to each generated section value. Even though input was scrubbed (Pass 1.1), the LLM might reconstruct PHI from partial clues. The PHI scrubber now protects blood pressure values from false-positive address matching (e.g. "Tlak 138/84 mmHg" was being matched by `STREET_SLASH_HOUSE_REGEX`).
-5. **ICD code extraction** — `extractIcdCodesFromSections()` scans generated text for `CODE Description` lines (no bullet prefix required — regex uses optional bullet marker).
-6. **Pass 2.5 defensive filter** — intersects extracted codes with the pre-filtered candidate set. Strips unauthorized codes from both the sidebar list AND the section text.
-7. **HTML rendering** — `buildTemplateHtml()` wraps section contents into the template HTML structure.
+5. **Pass 2.2 — Sanity gate** — `runSanityGate()` ([sanity-gate.ts](web/src/lib/clinical/sanity-gate.ts)) is the unified post-render checkpoint. Runs AFTER Pass 2.1 so PHI-only lines (created by the scrubber) can be detected. Responsibilities:
+   - **Section routing** (formerly Pass C, now folded in): invokes `enforceContentRouting()` and diffs the before/after to report what was stripped as `misrouted_content_stripped` warnings + `strip_misrouted_content` interventions. Six routing rules still apply:
+     - **Rule 1:** Medication blocks (3+ consecutive dosage lines, or header + 2+) stripped from non-LA, non-plan sections. Preserves narrative medication mentions with historical context.
+     - **Rule 2:** Substance use content stripped from non-Ab sections.
+     - **Rule 3:** Allergy content stripped from non-AA sections.
+     - **Rule 4–6:** Cross-section dedup OA↔LA, SA↔Ab, EA↔AA.
+       Section classification uses `ABBREVIATION_ROLE_MAP` and `ROLE_PATTERNS`.
+   - **PHI-only line stripping:** `stripPhiOnlyLines()` removes lines consisting entirely of PHI tokens (e.g. `[ADDRESS] (14:02)` in vitals after the scrubber redacted location data mis-extracted as a "measurement"). Emits a `phi_only_line_stripped` info entry per offending section.
+   - **Empty critical section detector + auto-rerender:** if validated diagnoses exist but the Assessment renders empty (or contains only placeholder characters like `—` / `N/A`), the gate tries a deterministic re-render from the pre-built ICD block (`renderAssessment(icdBlock)`). When the rerender produces content, the error is **downgraded to `info`** and a `rerender_assessment_from_icd` intervention is recorded with `autoRerendered: true`. When no ICD block is available (or it would render empty), the error persists so the caller can block publish or warn the doctor. Never ships a silently-empty Assessment.
+
+- **Impossible measurement auto-strip:** scans each section's rendered text for implausible vitals (BP 800/100, SpO₂ 120%, HR 350). Offending lines are **stripped** from the output (an impossible value left in the note is a direct patient-safety risk), with a `strip_impossible_measurement` intervention + `impossible_measurement_in_output` warning emitted per line so the doctor can audit what was missed upstream.
+- Returns a structured `SanityReport { errors, warnings, info, interventions }`. The gate is non-blocking — it always returns fixed contents — but the report is surfaced to the caller (`generateFromTemplate` returns it via `sanityReport`) and persisted per run in `metadata.generation_history[].sanity` as `{errors, warnings, interventions}` counts for observability.
+
+6. **ICD code extraction** — `extractIcdCodesFromSections()` scans generated text for `CODE Description` lines (no bullet prefix required — regex uses optional bullet marker).
+7. **Pass 2.5 defensive filter** — intersects extracted codes with the pre-filtered candidate set. Strips unauthorized codes from both the sidebar list AND the section text.
+8. **HTML rendering** — `buildTemplateHtml()` wraps section contents into the template HTML structure.
 
 ---
 
@@ -1059,41 +1226,52 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 
 ## 15. Non-Determinism Sources & Absorption
 
-| Source                                          | Absorbed by                                   |
-| ----------------------------------------------- | --------------------------------------------- |
-| Pass 1 concept count drifting (9 vs 7)          | Concepts are hints, not ground truth          |
-| Pass 1 ICD candidates including weak inferences | **Pass 1.7** drops ungrounded codes           |
-| Pass 1.5 mislabeling `transcript` vs `file`     | **Pass 1.6a** cross-source fallback           |
-| Pass 1.5 paraphrasing evidence                  | Fuzzy matcher in `evidenceAppearsInSource`    |
-| Pass 1.5 emitting both sides of a correction    | **Pass 1.6b** correction-phrase detector      |
-| Opus ignoring "only these ICDs" constraint      | **Pass 2.5** defensive strip                  |
-| Opus placing facts in wrong sections            | **Fact-to-section pre-assignment**            |
-| Opus injecting med lists into OA/SA             | **Pass C** `enforceContentRouting()` post-proc |
-| Opus placing substance use in SA instead of Ab  | **Pass C** substance use stripping             |
-| Opus placing allergies in EA/OA instead of AA   | **Pass C** allergy content stripping           |
-| Opus rephrasing fact values                     | **FACT VALUE FIDELITY** rule in system prompt |
-| Opus emitting bullet points despite instruction | **Pass A** `stripBulletMarkers()` post-proc   |
-| Opus writing content in parent sections         | **Pass B** parent-section clearing            |
-| Template change losing fact structure           | **Structured rerender** from cached facts     |
+| Source                                          | Absorbed by                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| Pass 1 concept count drifting (9 vs 7)          | Concepts are hints, not ground truth                            |
+| Pass 1 ICD candidates including weak inferences | **Pass 1.7** drops ungrounded codes                             |
+| Pass 1.5 mislabeling `transcript` vs `file`     | **Pass 1.6a** cross-source fallback                             |
+| Pass 1.5 paraphrasing evidence                  | Fuzzy matcher in `evidenceAppearsInSource`                      |
+| Pass 1.5 emitting both sides of a correction    | **Pass 1.6b** correction-phrase detector                        |
+| Opus ignoring "only these ICDs" constraint      | **Pass 2.5** defensive strip                                    |
+| Opus placing facts in wrong sections            | **Fact-to-section pre-assignment**                              |
+| Opus injecting med lists into OA/SA             | **Pass 2.2 gate** `enforceContentRouting()` via `runSanityGate` |
+| Opus placing substance use in SA instead of Ab  | **Pass 2.2 gate** substance use stripping                       |
+| Opus placing allergies in EA/OA instead of AA   | **Pass 2.2 gate** allergy content stripping                     |
+| PHI-only lines left behind after scrubbing      | **Pass 2.2 gate** `stripPhiOnlyLines()`                         |
+| Empty Assessment despite validated diagnoses    | **Pass 2.2 gate** empty-critical-section detector               |
+| Opus rephrasing fact values                     | **FACT VALUE FIDELITY** rule in system prompt                   |
+| Opus emitting bullet points despite instruction | **Pass A** `stripBulletMarkers()` post-proc                     |
+| Opus writing content in parent sections         | **Pass B** parent-section clearing                              |
+| Template change losing fact structure           | **Structured rerender** from cached facts                       |
 
 ---
 
 ## 16. Tests
 
-| File                                                                                | Coverage                                                                                          |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [fact-extraction.test.ts](web/src/lib/clinical/fact-extraction.test.ts)             | Prompt building, `coerceFact`, empty-input short-circuit                                          |
-| [fact-validator.test.ts](web/src/lib/clinical/fact-validator.test.ts)               | `normalizeForMatch`, `evidenceAppearsInSource`, cross-source fallback, dedup, medication warnings |
-| [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)                 | Correction phrase detection (sk/cs/en), punctuation-bracketed negation, time-series preservation  |
-| [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                 | 38+ tests: EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism            |
-| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                           | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`, `hasValidatedFacts` flag behavior        |
-| [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                  | `buildFactBasedSystemPrompt`, `buildTemplateSystemPrompt`                                         |
-| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts) | Category-to-section mapping, abbreviation matching, TO/HPI routing, unassigned fallback           |
-| [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                     | SHA-256 stability, `diffFingerprints`                                                             |
-| [phi-scrubber.test.ts](web/src/lib/clinical/phi-scrubber.test.ts)                   | Name, birth number, phone, email, address scrubbing; clinical value preservation (GCS, BP, pupils) |
-| [section-routing-validator.test.ts](web/src/lib/clinical/section-routing-validator.test.ts) | All 6 routing rules, med block thresholds, narrative context preservation, immutability    |
-| [assessment-classifier.test.ts](web/src/lib/clinical/assessment-classifier.test.ts) | Active/chronic/background tiering, cap enforcement, overflow handling                             |
-| [medication-normalizer.test.ts](web/src/lib/clinical/medication-normalizer.test.ts) | `parseMedicationFact`/`reconstructMedicationValue`, dose/frequency preservation                   |
+| File                                                                                        | Coverage                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [fact-extraction.test.ts](web/src/lib/clinical/fact-extraction.test.ts)                     | Prompt building, `coerceFact`, empty-input short-circuit                                                                                                                                                                   |
+| [fact-validator.test.ts](web/src/lib/clinical/fact-validator.test.ts)                       | `normalizeForMatch`, `evidenceAppearsInSource`, cross-source fallback, dedup, medication warnings, numeric sanity integration                                                                                              |
+| [numeric-sanity.test.ts](web/src/lib/clinical/numeric-sanity.test.ts)                       | Measurement parsing (BP/HR/RR/SpO₂/temp/glucose/GCS/weight/height), Slovak comma decimals, physiologic range verdicts                                                                                                      |
+| [medication-strength.test.ts](web/src/lib/clinical/medication-strength.test.ts)             | Strength extraction from CSV names, normalization, per-drug strength registry, invalid-strength warning                                                                                                                    |
+| [sanity-gate.test.ts](web/src/lib/clinical/sanity-gate.test.ts)                             | PHI-only line stripping, empty-critical-section detector, impossible-measurement safety net, misrouted-content reporting                                                                                                   |
+| [section-renderer.test.ts](web/src/lib/clinical/section-renderer.test.ts)                   | Tier classification, deterministic renderers (LA/Assessment/vitals/EKG/labs), label → kind detection, undistributed consumption                                                                                            |
+| [narrative-evidence.test.ts](web/src/lib/clinical/narrative-evidence.test.ts)               | Fact-scoped source-window extraction, overlap merging, budget enforcement, diacritic fallback, file-directive preservation                                                                                                 |
+| [fact-resolver.test.ts](web/src/lib/clinical/fact-resolver.test.ts)                         | Correction phrase detection (sk/cs/en), punctuation-bracketed negation, time-series preservation                                                                                                                           |
+| [timeline-coherence.test.ts](web/src/lib/clinical/timeline-coherence.test.ts)               | Temporal anchor extraction (clock/relative/duration), same-subject Jaccard matching, precision-wins drop, time-series protection                                                                                           |
+| [diagnosis-resolver.test.ts](web/src/lib/clinical/diagnosis-resolver.test.ts)               | Synonym table (STEMI/HTN/DM2), exact CSV description match, fuzzy Jaccard fallback, fact-id provenance, pertinent-negative skip                                                                                            |
+| [assessment-structuring.test.ts](web/src/lib/clinical/assessment-structuring.test.ts)       | Bucket classifier, uncertainty/historical/chronic markers, dedup across buckets, "stav po" re-bucketing, acute-coronary precedence (I21 drops I20/I24/I25/R07), malformed CSV-debris filter, Slovak/Czech/English headings |
+| [section-purity.test.ts](web/src/lib/clinical/section-purity.test.ts)                       | Per-line rejection of HPI in LA, assessment headings in EKG, vitals lines in Záver, CSV debris, bare ICD codes in TO, clean sections untouched                                                                             |
+| [icd-certainty.test.ts](web/src/lib/clinical/icd-certainty.test.ts)                         | 38+ tests: EMS regression, broad grounding, synonyms, R-chapter exclusion, determinism                                                                                                                                     |
+| [pipeline.test.ts](web/src/lib/clinical/pipeline.test.ts)                                   | `buildEnrichedSystemPrompt`, `buildPreRenderedIcdBlock`, `hasValidatedFacts` flag behavior                                                                                                                                 |
+| [anthropic.test.ts](web/src/lib/anthropic.test.ts)                                          | `buildFactBasedSystemPrompt`, `buildTemplateSystemPrompt`                                                                                                                                                                  |
+| [fact-section-assigner.test.ts](web/src/lib/clinical/fact-section-assigner.test.ts)         | Category-to-section mapping, abbreviation matching, TO/HPI routing, unassigned fallback                                                                                                                                    |
+| [fingerprint.test.ts](web/src/lib/clinical/fingerprint.test.ts)                             | SHA-256 stability, `diffFingerprints`                                                                                                                                                                                      |
+| [phi-scrubber.test.ts](web/src/lib/clinical/phi-scrubber.test.ts)                           | Name, birth number, phone, email, address scrubbing; clinical value preservation (GCS, BP, pupils)                                                                                                                         |
+| [section-routing-validator.test.ts](web/src/lib/clinical/section-routing-validator.test.ts) | All 6 routing rules, med block thresholds, narrative context preservation, immutability                                                                                                                                    |
+| [assessment-classifier.test.ts](web/src/lib/clinical/assessment-classifier.test.ts)         | Active/chronic/background tiering, cap enforcement, overflow handling                                                                                                                                                      |
+| [medication-normalizer.test.ts](web/src/lib/clinical/medication-normalizer.test.ts)         | `parseMedicationFact`/`reconstructMedicationValue`, dose/frequency preservation                                                                                                                                            |
 
 ---
 

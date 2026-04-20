@@ -268,7 +268,8 @@ export function formatAssignedFactsForPrompt(
     const label = sectionLabels[id];
     lines.push(`[Section "${label}" (${id})]:`);
     for (const f of facts) {
-      lines.push(`  - [${categoryLabel(f.category)}] ${f.value}`);
+      const negPrefix = f.negated ? "[NEGATED] " : "";
+      lines.push(`  - [${categoryLabel(f.category)}] ${negPrefix}${f.value}`);
     }
   }
 
@@ -277,7 +278,8 @@ export function formatAssignedFactsForPrompt(
   if (unassigned && unassigned.length > 0) {
     lines.push("[General context — place in the most appropriate section]:");
     for (const f of unassigned) {
-      lines.push(`  - [${categoryLabel(f.category)}] ${f.value}`);
+      const negPrefix = f.negated ? "[NEGATED] " : "";
+      lines.push(`  - [${categoryLabel(f.category)}] ${negPrefix}${f.value}`);
     }
   }
 

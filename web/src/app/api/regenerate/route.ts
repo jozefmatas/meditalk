@@ -27,6 +27,8 @@ import {
   runFactExtraction,
   validateFacts,
   resolveFacts,
+  resolveTimelineCoherence,
+  resolveIcdFromFacts,
   countFacts,
   emptyExtractedFacts,
   computeFingerprint,
@@ -382,12 +384,21 @@ Rules:
             factExtractionInput,
             language,
           );
-          validatedFacts = resolution.resolvedFacts;
-          factWarnings = validation.warnings;
+          // Pass 1.6c — timeline coherence (see timeline-coherence.ts).
+          const timeline = resolveTimelineCoherence(resolution.resolvedFacts);
+          validatedFacts = timeline.facts;
+          factWarnings = [
+            ...validation.warnings,
+            ...timeline.conflicts.map(
+              (c) =>
+                `Timeline conflict: kept "${c.kept.value}" (${c.keptAnchor.kind}) over "${c.dropped.value}" (${c.droppedAnchor.kind})`,
+            ),
+          ];
           factRemovedCount = validation.counts.removed;
-          factResolutionDropCount = resolution.counts.total;
+          factResolutionDropCount =
+            resolution.counts.total + timeline.conflicts.length;
           logger.debug(
-            `[regenerate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${factResolutionDropCount} dropped by resolver (${resolution.counts.correctionDrops} correction), ${factWarnings.length} warnings`,
+            `[regenerate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${resolution.counts.total} dropped by resolver (${resolution.counts.correctionDrops} correction), ${timeline.conflicts.length} timeline-conflicts collapsed, ${factWarnings.length} warnings`,
           );
         } catch (err) {
           logger.warn(
@@ -397,8 +408,53 @@ Rules:
         }
       }
 
+      // Pass 1.65 — Deterministic diagnosis resolver. Same merge strategy
+      // as the generate route: resolver codes are primary (deterministic
+      // across runs), Sonnet's suggestions fold in as supplementary.
+      if (clinicalAnalysis) {
+        const resolverResult = resolveIcdFromFacts(validatedFacts, language);
+        const codeKey = (c: CandidateIcdCode) =>
+          c.code.replace(/\./g, "").toUpperCase();
+        const category3 = (c: CandidateIcdCode) =>
+          c.code.replace(/\./g, "").toUpperCase().substring(0, 3);
+        const resolverSpecificCategories = new Set<string>();
+        for (const c of resolverResult.codes) {
+          if (c.code.includes("."))
+            resolverSpecificCategories.add(category3(c));
+        }
+        const byKey = new Map<string, CandidateIcdCode>();
+        for (const c of resolverResult.codes) byKey.set(codeKey(c), c);
+        let suppressed = 0;
+        for (const c of clinicalAnalysis.candidateIcdCodes) {
+          const key = codeKey(c);
+          if (byKey.has(key)) continue;
+          if (resolverSpecificCategories.has(category3(c))) {
+            suppressed++;
+            continue;
+          }
+          byKey.set(key, c);
+        }
+        clinicalAnalysis = {
+          ...clinicalAnalysis,
+          candidateIcdCodes: Array.from(byKey.values()),
+        };
+        logger.debug(
+          `[regenerate] ICD resolver — ${resolverResult.codes.length} deterministic code(s), ${suppressed} Sonnet code(s) suppressed, ${resolverResult.unresolved.length} unresolved`,
+        );
+      }
+
       // Preserve the full candidate list before certainty filtering.
-      allCandidateIcdCodes = clinicalAnalysis?.candidateIcdCodes ?? [];
+      // Dedup by normalized code so the UI never gets two entries with
+      // the same React key (see generate route for rationale).
+      const raw = clinicalAnalysis?.candidateIcdCodes ?? [];
+      const seenCodes = new Set<string>();
+      allCandidateIcdCodes = [];
+      for (const c of raw) {
+        const key = c.code.replace(/\./g, "").toUpperCase();
+        if (seenCodes.has(key)) continue;
+        seenCodes.add(key);
+        allCandidateIcdCodes.push(c);
+      }
 
       // Pass 1.7 — Diagnosis certainty filter. See generate route for details.
       // Drops candidate ICD codes that are not lexically grounded in the

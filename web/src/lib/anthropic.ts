@@ -744,6 +744,7 @@ export async function generateFromTemplate(
         sectionContexts,
         icdBlock,
         clinicalAnalysis,
+        encounterModel: encounterModel ?? undefined,
         chunks,
         doctorNotes,
         fileTexts,

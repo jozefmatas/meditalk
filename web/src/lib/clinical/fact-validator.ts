@@ -15,6 +15,8 @@ import {
   parseMedicationFact,
   reconstructMedicationValue,
 } from "./medication-normalizer";
+import { validateMeasurementValue } from "./numeric-sanity";
+import { validateMedicationStrength } from "./medication-strength";
 import { logger } from "@/lib/logger";
 
 /**
@@ -33,7 +35,8 @@ export type RemovalReason =
   | "evidence_not_in_source"
   | "source_index_out_of_range"
   | "duplicate"
-  | "empty_value";
+  | "empty_value"
+  | "impossible_numeric";
 
 export interface RemovedFact {
   fact: ExtractedFact;
@@ -236,15 +239,43 @@ export function validateFacts(
         continue;
       }
 
-      // 3. Dedup by normalized value within category.
-      const key = normalizeForMatch(acceptedFact.value);
+      // 3. Numeric / unit sanity — only for the `measurements` category.
+      //    Impossible physiologic values (BP 800/100, SpO₂ 120%, HR 350)
+      //    are dropped outright; merely suspicious values (e.g. 260/160)
+      //    are kept but surfaced as a warning so the doctor can verify.
+      if (category === "measurements") {
+        const verdict = validateMeasurementValue(acceptedFact.value);
+        if (!verdict.ok && verdict.severity === "impossible") {
+          removed.push({
+            fact: acceptedFact,
+            reason: "impossible_numeric",
+            detail: `${verdict.kind ?? "unknown"}: ${verdict.reason}`,
+          });
+          continue;
+        }
+        if (!verdict.ok && verdict.severity === "suspicious") {
+          warnings.push(
+            `Suspicious measurement: "${acceptedFact.value}" — ${verdict.reason}`,
+          );
+        }
+      }
+
+      // 4. Dedup by normalized value + negation flag within category.
+      //    An affirmed "dyspnea" and a negated "dyspnea" are logically
+      //    different facts (doctor explicitly documented both presence
+      //    and absence — likely the second corrects the first, but the
+      //    fact-resolver handles that separately; the validator must
+      //    not silently collapse them here).
+      const key =
+        normalizeForMatch(acceptedFact.value) +
+        (acceptedFact.negated ? "|neg" : "");
       if (seen.has(key)) {
         removed.push({ fact: acceptedFact, reason: "duplicate" });
         continue;
       }
       seen.add(key);
 
-      // 4. Category-specific: auto-correct misspelled medications.
+      // 5. Category-specific: auto-correct misspelled medications.
       // Transcription often misspells drug names (e.g. "Koprenesa" for
       // "Co-Prenessa"). If the name isn't in the approved list, try
       // fuzzy matching and auto-correct ONLY the base drug name.
@@ -277,6 +308,26 @@ export function validateFacts(
               `Medication "${acceptedFact.value}" not found in ${locale} approved list — no close match found`,
             );
           }
+        }
+
+        // 6. Strength sanity — reject-by-warning if the extracted dose
+        //    doesn't match any known strength of the (possibly corrected)
+        //    base drug. We NEVER drop medication facts for strength
+        //    issues — keeping a fact with an implausible dose flagged is
+        //    safer than silently removing the drug altogether.
+        const parsedFinal = parseMedicationFact(acceptedFact.value);
+        const strengthVerdict = validateMedicationStrength(
+          parsedFinal.name,
+          parsedFinal.dose,
+          locale,
+        );
+        if (!strengthVerdict.ok && strengthVerdict.severity === "suspicious") {
+          const valid =
+            strengthVerdict.validStrengths.slice(0, 6).join(", ") +
+            (strengthVerdict.validStrengths.length > 6 ? ", …" : "");
+          warnings.push(
+            `Suspicious medication strength: "${acceptedFact.value}" — "${strengthVerdict.inputStrength}" is not a known strength of ${strengthVerdict.baseName} (valid: ${valid})`,
+          );
         }
       }
 
@@ -352,7 +403,8 @@ export function formatFactsForPrompt(facts: ExtractedFacts): string {
     if (list.length === 0) continue;
     lines.push(`${categoryLabel(category)}:`);
     for (const f of list) {
-      lines.push(`  - ${f.value}`);
+      const prefix = f.negated ? "[NEGATED] " : "";
+      lines.push(`  - ${prefix}${f.value}`);
     }
   }
   return lines.join("\n");

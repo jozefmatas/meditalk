@@ -76,6 +76,13 @@ describe("buildFactExtractionSystemPrompt", () => {
     expect(prompt).toContain("file");
   });
 
+  it("teaches PERTINENT NEGATIVES rule", () => {
+    const prompt = buildFactExtractionSystemPrompt("sk");
+    expect(prompt).toMatch(/PERTINENT NEGATIVES/);
+    expect(prompt).toContain("negated");
+    expect(prompt).toMatch(/bez|neguje|neudáva|denies|no dyspnea/i);
+  });
+
   it("enforces NO ASSUMPTION MODE for missing units", () => {
     const prompt = buildFactExtractionSystemPrompt("sk");
     expect(prompt).toContain("NO ASSUMPTION MODE");
@@ -307,5 +314,52 @@ describe("coerceFact", () => {
     );
     expect(fact!.value).toBe("cough");
     expect(fact!.source.evidence).toBe("patient coughs");
+  });
+
+  it("preserves negated: true when present", () => {
+    const fact = coerceFact(
+      {
+        value: "dyspnea",
+        negated: true,
+        source: {
+          type: "transcript",
+          sourceIndex: 0,
+          evidence: "no dyspnea",
+        },
+      },
+      "symptoms",
+    );
+    expect(fact!.negated).toBe(true);
+  });
+
+  it("omits negated field for affirmed facts", () => {
+    const fact = coerceFact(
+      {
+        value: "dyspnea",
+        source: {
+          type: "transcript",
+          sourceIndex: 0,
+          evidence: "reports dyspnea",
+        },
+      },
+      "symptoms",
+    );
+    expect(fact!.negated).toBeUndefined();
+  });
+
+  it("ignores non-boolean negated values (defensive)", () => {
+    const fact = coerceFact(
+      {
+        value: "nausea",
+        negated: "yes", // truthy but not strictly true
+        source: {
+          type: "transcript",
+          sourceIndex: 0,
+          evidence: "denies nausea",
+        },
+      },
+      "symptoms",
+    );
+    expect(fact!.negated).toBeUndefined();
   });
 });

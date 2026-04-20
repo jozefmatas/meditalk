@@ -46,6 +46,14 @@ export interface ExtractedFact {
   /** The fact itself in clinical language (≤120 chars; ≤400 for chiefComplaint, ≤250 for findings). */
   value: string;
   source: SourceReference;
+  /**
+   * Pertinent negative — set when the source explicitly documents the
+   * ABSENCE of this finding (e.g. "no dyspnea", "bez dušnosti",
+   * "neguje nauzeu", "popiera bolesť"). The `value` still holds the
+   * bare subject of the negation in clinical language (no "bez"/"no"
+   * prefix) — downstream renderers inject the negation marker.
+   */
+  negated?: boolean;
 }
 
 /** Fact categories, aligned with template section roles. */
@@ -172,6 +180,15 @@ RULES:
 11. A single source statement may produce multiple facts (one per distinct clinical datum), but the same fact MUST NOT appear in more than one category.
 12. EXTRACT EVERY DISTINCT MENTION — do NOT try to resolve self-corrections or contradictions yourself. If the speaker states a fact and then corrects themselves, emit BOTH mentions as separate fact entries, each with its own verbatim evidence quote pointing at the exact source phrase. This applies to EVERY correction shape: explicit phrases ("actually I mean", "sorry", "pardon", "vlastne", "opravujem sa"), bare punctuation-bracketed negations ("otec zomrel na infarkt, nie, na mozgovú mŕtvicu" — "father died of MI, no, of a stroke" — "1 broken rib, sorry, 2 broken ribs"), and any other structural hint that the speaker is replacing an earlier statement. A deterministic downstream step will detect the correction marker and drop the superseded mention. Your job is to be a faithful recorder, not an editor — so ALWAYS extract both the pre-correction value and the corrected value, every single time. Do NOT silently keep only the later one, and do NOT silently keep only the earlier one.
 13. NO ASSUMPTION MODE — NEVER invent missing clinical dimensions. If a numeric value is stated WITHOUT a unit or dimension (e.g. "fajčí 15" with no "cigariet/deň" and no "rokov", "pije 3" with no "pohárov/deň", "mal 2" with no indication of what), you MUST preserve the raw value verbatim and MUST NOT guess the unit. Do NOT default to the most common interpretation (smoking 15 ≠ 15/day, smoking 15 ≠ 15 years — both are fabrication). Do NOT silently drop the fact either. Instead, emit a single fact whose \`value\` contains the bare number together with the subject (e.g. "fajčí 15 (jednotka nešpecifikovaná)", "pije 3 (jednotka nešpecifikovaná)"), and whose evidence is the exact verbatim quote. In ${langLabel} use the ambiguity marker "(jednotka nešpecifikovaná)" in Slovak, "(jednotka neuvedena)" in Czech, or "(unit not specified)" in English. The same rule applies to any missing clinical dimension: frequency, duration, laterality, severity, dosage strength, route — if it is not in the source, do NOT invent it.
+14. PERTINENT NEGATIVES — doctors explicitly document the ABSENCE of findings as deliberate clinical signal (e.g. "no dyspnea", "denies nausea", "bez dušnosti", "neguje vracanie", "neudáva bolesť hlavy", "popiera alergie"). These are first-class facts and MUST be extracted. Set the optional boolean field \`negated\` to \`true\` on the fact object. The \`value\` MUST contain ONLY the bare subject of the negation in clinical language — do NOT include the negation word itself ("bez", "neguje", "neudáva", "popiera", "denies", "no", "žiadne" etc.). Examples:
+    - Source: "Pacient udáva dýchavičnosť, neudáva bolesť na hrudi."
+      → fact A: { value: "dýchavičnosť", category: "symptoms" }
+      → fact B: { value: "bolesť na hrudi", category: "symptoms", negated: true }
+    - Source: "No dyspnea, no orthopnea, denies syncope."
+      → three facts, each with negated: true, value: "dyspnea" / "orthopnea" / "syncope".
+    - Source: "Brucho palpačne nebolestivé, bez rezistencií."
+      → two findings, both negated: { value: "palpačná bolestivosť brucha", negated: true } and { value: "rezistencie v bruchu", negated: true }.
+    The same category routing rules apply — a negated fact goes in the category of its subject (negated symptom → \`symptoms\`, negated finding → \`findings\`, negated medication → \`medications\`, etc.). Update example JSON objects with \`negated: true\` where applicable.
 
 SOURCE REFERENCE SCHEMA:
 Each fact MUST include a \`source\` object with exactly these three fields:
@@ -184,7 +201,7 @@ CATEGORIES (use exactly these JSON keys, in any order): ${categoryList}
 OUTPUT FORMAT:
 Return a single valid JSON object with one key per category. Each key maps to an array of fact objects. A category with no facts MUST be an empty array \`[]\`. Do not include keys other than the categories listed above. Do not wrap the JSON in prose or markdown fences.
 
-Each fact object MUST have exactly these keys: \`category\`, \`value\`, \`source\`. The \`category\` field MUST equal the containing key.
+Each fact object MUST have the keys: \`category\`, \`value\`, \`source\`, and OPTIONALLY \`negated\` (boolean, default \`false\`). The \`category\` field MUST equal the containing key. Omit \`negated\` for affirmative facts; set \`negated: true\` ONLY when the source explicitly documents absence of the finding (see rule 14).
 
 EXAMPLE (illustrative only — do not copy the content):
 {
@@ -192,7 +209,9 @@ EXAMPLE (illustrative only — do not copy the content):
   "chiefComplaint": [
     { "category": "chiefComplaint", "value": "bolesť na hrudníku od rána", "source": { "type": "transcript", "sourceIndex": 0, "evidence": "má bolesť na hrudníku od rána" } }
   ],
-  "symptoms": [],
+  "symptoms": [
+    { "category": "symptoms", "value": "dýchavičnosť", "negated": true, "source": { "type": "transcript", "sourceIndex": 0, "evidence": "neudáva dýchavičnosť" } }
+  ],
   "findings": [],
   "measurements": [
     { "category": "measurements", "value": "TK 150/95 mmHg", "source": { "type": "transcript", "sourceIndex": 0, "evidence": "tlak 150 na 95" } }
@@ -377,6 +396,8 @@ export function coerceFact(
     typeof source.evidence === "string" ? source.evidence.trim() : "";
   if (!evidence) return null;
 
+  const negated = obj.negated === true;
+
   return {
     category: expectedCategory,
     value,
@@ -385,5 +406,6 @@ export function coerceFact(
       sourceIndex,
       evidence,
     },
+    ...(negated ? { negated: true } : {}),
   };
 }

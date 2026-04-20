@@ -408,6 +408,15 @@ const EKG_KEYWORD_REGEX =
 const IMAGING_KEYWORD_REGEX =
   /\brtg\b|\brontgen\b|\bxray\b|x-ray|\bct\b|\bmri\b|\bmr\b|\bmrt\b|\bultrazvuk\b|\busg\b|\becho\b|\btte\b|echokardio|sonograf|angiograf/i;
 
+/**
+ * Lab-test keywords — matches common cardiology / internal-medicine
+ * lab names as they appear in Slovak / Czech / English reports, plus
+ * the numeric-unit pattern (`ng/l`, `mg/l`, `g/l`, `U/l`, `IU/l`,
+ * `mmol/l`, `μg/ml`) which is a strong signal for a quantitative lab.
+ */
+const LAB_KEYWORD_REGEX =
+  /\btnt\b|\btni\b|hs[-\s]?tnt|hsctnt|troponin|nt[-\s]?probnp|probnp|\bbnp\b|d[-\s]?dimer|\bcrp\b|fibrinog|myoglob|\bquick\b|\binr\b|hba1c|kreatini[ck]|\bgfr\b|\bnatri[eé]m|\bk\+|\bkali[eé]m|chlorid|albumin|bilirubin|alt\b|\bast\b|alkalin|\bldh\b|leukocyt|trombocyt|hemoglob|\s(\d+[,.]?\d*)\s*(?:ng|mg|g|ng\/l|mg\/l|g\/l|U\/l|IU\/l|mmol\/l|μmol\/l|umol\/l|μg\/ml|mcg\/ml)\b/i;
+
 function classifyObjectiveFact(
   fact: ExtractedFact,
 ): "vitals" | "labs" | "ecg" | "imaging" | "exam" | "other" {
@@ -424,6 +433,7 @@ function classifyObjectiveFact(
   if (fact.category === "findings") {
     if (EKG_KEYWORD_REGEX.test(fact.value)) return "ecg";
     if (IMAGING_KEYWORD_REGEX.test(fact.value)) return "imaging";
+    if (LAB_KEYWORD_REGEX.test(fact.value)) return "labs";
     return "exam";
   }
   return "other";

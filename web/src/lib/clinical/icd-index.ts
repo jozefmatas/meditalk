@@ -5,6 +5,31 @@ import type { IcdEntry, CandidateIcdCode } from "./types";
 interface IcdIndex {
   byCode: Map<string, string>;
   byCategory: Map<string, IcdEntry[]>;
+  /**
+   * Reverse lookup: normalized description → ICD entry. Lets the
+   * diagnosis resolver translate a Slovak/Czech fact value like
+   * "Esenciálna artériová hypertenzia" directly to its code (I10)
+   * without going through Sonnet.
+   */
+  byDescriptionNorm: Map<string, IcdEntry>;
+}
+
+/**
+ * Normalize an ICD description or diagnosis value for reverse lookup:
+ *  - Unicode NFKD + strip combining marks (so "á" == "a")
+ *  - Lowercase
+ *  - Collapse non-alphanumerics to a single space
+ *  - Trim
+ * Same shape as `normalizeForMatch` in fact-validator but intentionally
+ * duplicated here to keep icd-index dependency-free.
+ */
+export function normalizeIcdDescription(input: string): string {
+  return input
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 /** Per-locale cache */
@@ -29,6 +54,61 @@ function csvFileForLocale(locale: string): string {
 }
 
 /**
+ * Split a single ICD CSV line into its two columns: the quoted
+ * description column and the `CODE-truncated_description` column.
+ *
+ * Handles:
+ *   - Unquoted descriptions (no comma inside → the single comma splits).
+ *   - Quoted descriptions (commas inside the quotes are preserved and
+ *     the split occurs on the first comma AFTER the closing quote).
+ *   - Embedded double-quotes escaped as `""` per RFC 4180.
+ *
+ * Returns `null` when the line doesn't look like a valid ICD row.
+ */
+function splitTwoCsvColumns(
+  line: string,
+): { description: string; codeColumn: string } | null {
+  let i = 0;
+  let description: string;
+
+  if (line[0] === '"') {
+    // Quoted cell — scan until the matching unescaped closing quote.
+    let buf = "";
+    i = 1;
+    while (i < line.length) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          // Escaped double-quote inside the cell.
+          buf += '"';
+          i += 2;
+          continue;
+        }
+        // End of quoted cell.
+        i++;
+        break;
+      }
+      buf += ch;
+      i++;
+    }
+    description = buf;
+    // Expect a comma separator next.
+    if (line[i] !== ",") return null;
+    i++;
+  } else {
+    // Unquoted cell — split on the first comma.
+    const firstComma = line.indexOf(",");
+    if (firstComma === -1) return null;
+    description = line.substring(0, firstComma);
+    i = firstComma + 1;
+  }
+
+  const codeColumn = line.substring(i).trim();
+  if (!codeColumn) return null;
+  return { description: description.trim(), codeColumn };
+}
+
+/**
  * Lazily load and parse an ICD-10 CSV for the given locale.
  * CSV format: "description",CODE-truncated_description
  * Code is everything before the first `-` in column 2.
@@ -42,16 +122,20 @@ function loadIndex(locale = "en"): IcdIndex {
   const raw = readFileSync(csvPath, "utf-8");
   const byCode = new Map<string, string>();
   const byCategory = new Map<string, IcdEntry[]>();
+  const byDescriptionNorm = new Map<string, IcdEntry>();
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
 
-    // Find the last comma that separates description from code column
-    const lastComma = line.lastIndexOf(",");
-    if (lastComma === -1) continue;
-
-    const descRaw = line.substring(0, lastComma).replace(/^"|"$/g, "");
-    const codeCol = line.substring(lastComma + 1).replace(/^"|"$/g, "");
+    // Split into exactly 2 columns respecting double-quoted cells. The
+    // previous `lastIndexOf(",")` strategy broke on rows whose second
+    // column also contained commas (e.g. `"Bolesť v hrudníku, bližšie
+    // neurčená",R07.4-Bolesť v hrudníku, bližšie neurčená`), causing
+    // the raw CSV text to leak into rendered descriptions.
+    const split = splitTwoCsvColumns(line);
+    if (!split) continue;
+    const descRaw = split.description;
+    const codeCol = split.codeColumn;
 
     // Code is everything before the first dash
     const dashIdx = codeCol.indexOf("-");
@@ -63,13 +147,64 @@ function loadIndex(locale = "en"): IcdIndex {
     // Index by 3-character category prefix (strip dot for consistency)
     const category = code.replace(".", "").substring(0, 3);
     const arr = byCategory.get(category) || [];
-    arr.push({ code, description: descRaw });
+    const entry: IcdEntry = { code, description: descRaw };
+    arr.push(entry);
     byCategory.set(category, arr);
+
+    // Reverse description lookup — first code with a given normalized
+    // description wins. Shorter descriptions are usually more canonical,
+    // so if a later row repeats the key, we keep the earlier (usually
+    // the category-level) entry.
+    const descKey = normalizeIcdDescription(descRaw);
+    if (descKey && !byDescriptionNorm.has(descKey)) {
+      byDescriptionNorm.set(descKey, entry);
+    }
   }
 
-  const index = { byCode, byCategory };
+  const index = { byCode, byCategory, byDescriptionNorm };
   _cache.set(locale, index);
   return index;
+}
+
+/**
+ * Look up an ICD entry by its exact (normalized) description.
+ * Returns `null` when no exact match exists.
+ */
+export function lookupIcdByDescription(
+  description: string,
+  locale = "en",
+): IcdEntry | null {
+  if (!description) return null;
+  const { byDescriptionNorm } = loadIndex(locale);
+  const key = normalizeIcdDescription(description);
+  return byDescriptionNorm.get(key) ?? null;
+}
+
+/**
+ * Diacritic-insensitive ICD search. Iterates every indexed entry and
+ * returns those whose normalized description contains the given
+ * normalized substring. Used by the deterministic diagnosis resolver
+ * because the default `searchIcd` preserves diacritics and would miss
+ * "transmuralny" against a CSV entry of "transmurálny".
+ *
+ * Limit defaults to 10 — the caller applies token-overlap scoring to
+ * pick the best hit.
+ */
+export function searchIcdNormalized(
+  normalizedQuery: string,
+  locale = "en",
+  limit = 10,
+): IcdEntry[] {
+  if (!normalizedQuery) return [];
+  const { byDescriptionNorm } = loadIndex(locale);
+  const hits: IcdEntry[] = [];
+  for (const [normDesc, entry] of byDescriptionNorm) {
+    if (normDesc.includes(normalizedQuery)) {
+      hits.push(entry);
+      if (hits.length >= limit) break;
+    }
+  }
+  return hits;
 }
 
 /** Get all ICD entries under a 3-char category (e.g. "I10" → all I10.x codes) */
