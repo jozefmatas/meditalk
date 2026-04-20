@@ -712,14 +712,48 @@ export async function POST(request: NextRequest) {
         if (c.code.includes(".")) resolverSpecificCategories.add(category3(c));
       }
 
+      // Strict diagnosis-fact grounding — any Sonnet code that didn't
+      // come from the resolver must have at least 2 meaningful tokens
+      // (≥4 chars) overlapping with a validated DIAGNOSIS fact.
+      // Rationale: Sonnet infers diagnoses from context (NT-proBNP →
+      // I50.9 heart failure; no mention of GERD → K21.9; "hyperurikémia"
+      // → M10.x dna). That overreach passes our old Pass 1.7 grounding
+      // because it matched any fact token. We now require the code's
+      // description to lexically align with something the doctor
+      // actually called out as a diagnosis.
+      const diagnosisTokens = new Set<string>();
+      const normalizeTokens = (s: string): string[] =>
+        s
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((t) => t.length >= 4);
+      for (const f of validatedFacts.diagnoses) {
+        for (const t of normalizeTokens(f.value)) diagnosisTokens.add(t);
+      }
+      const resolverKeys = new Set(resolverResult.codes.map(codeKey));
+      const isDiagnosisGrounded = (c: CandidateIcdCode): boolean => {
+        if (resolverKeys.has(codeKey(c))) return true; // resolver-emitted, already grounded
+        const descTokens = normalizeTokens(c.description);
+        let overlap = 0;
+        for (const t of descTokens) if (diagnosisTokens.has(t)) overlap++;
+        return overlap >= 2;
+      };
+
       const byKey = new Map<string, CandidateIcdCode>();
       for (const c of resolverResult.codes) byKey.set(codeKey(c), c);
       let suppressed = 0;
+      let ungrounded = 0;
       for (const c of clinicalAnalysis.candidateIcdCodes) {
         const key = codeKey(c);
         if (byKey.has(key)) continue;
         if (resolverSpecificCategories.has(category3(c))) {
           suppressed++;
+          continue;
+        }
+        if (!isDiagnosisGrounded(c)) {
+          ungrounded++;
           continue;
         }
         byKey.set(key, c);
@@ -729,7 +763,7 @@ export async function POST(request: NextRequest) {
         candidateIcdCodes: Array.from(byKey.values()),
       };
       logger.debug(
-        `[generate] ICD resolver — ${resolverResult.codes.length} deterministic code(s), ${suppressed} Sonnet code(s) suppressed (same-category as a specific resolver pick), ${resolverResult.unresolved.length} unresolved`,
+        `[generate] ICD resolver — ${resolverResult.codes.length} deterministic, ${suppressed} Sonnet suppressed (same-category as specific resolver pick), ${ungrounded} Sonnet dropped (not diagnosis-grounded), ${resolverResult.unresolved.length} unresolved`,
       );
     }
 

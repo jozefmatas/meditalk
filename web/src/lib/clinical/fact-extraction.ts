@@ -182,7 +182,7 @@ RULES:
 8. Facts describing what the doctor or patient PLANS to do (follow-up, prescription, referral, lifestyle change, next visit) go in \`plan\`.
 9. HISTORY SUBCATEGORY ROUTING — use the CORRECT subcategory for each fact:
    - \`familyHistory\`: diseases of parents, siblings, grandparents. NEVER the patient's own conditions.
-   - \`personalHistory\`: the patient's OWN past conditions — prior surgeries, hospitalizations, chronic diseases, childhood illnesses.
+   - \`personalHistory\`: the patient's OWN past conditions — prior surgeries, hospitalizations, chronic diseases, childhood illnesses. CRITICAL: when the source lists several conditions in one compound sentence (comma-separated, "and"-chained, or semicolon-separated — e.g. "AH, hyperurikémia, paroxyzmálna fibrilácia predsiení, mitrálna regurgitácia, syndróm spánkového apnoe, stav po parc. strumektómii, stav po operácii slepého čreva"), extract EACH condition as a SEPARATE personalHistory fact with its own evidence quote pointing to that specific phrase. DO NOT collapse compound histories into a single fact. A patient with 10 comorbidities must produce 10 personalHistory facts, not 1. Missing a comorbidity is a correctness failure.
    - \`socialHistory\`: marital status, housing, living situation, social support. NEVER substance use, NEVER work/occupation.
    - \`workHistory\`: current/past occupation, workplace exposures, occupational hazards. NEVER smoking/alcohol/drugs.
    - \`substanceUse\`: smoking, alcohol, recreational drugs, ALL substance use. NEVER place these in \`workHistory\` or \`socialHistory\`.

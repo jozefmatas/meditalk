@@ -422,14 +422,42 @@ Rules:
           if (c.code.includes("."))
             resolverSpecificCategories.add(category3(c));
         }
+        // Strict diagnosis-fact grounding — see generate/route.ts for
+        // rationale. Any Sonnet code not emitted by the resolver must
+        // have ≥2 meaningful tokens overlapping a diagnosis fact.
+        const diagnosisTokens = new Set<string>();
+        const normalizeTokens = (s: string): string[] =>
+          s
+            .normalize("NFKD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter((t) => t.length >= 4);
+        for (const f of validatedFacts.diagnoses) {
+          for (const t of normalizeTokens(f.value)) diagnosisTokens.add(t);
+        }
+        const resolverKeys = new Set(resolverResult.codes.map(codeKey));
+        const isDiagnosisGrounded = (c: CandidateIcdCode): boolean => {
+          if (resolverKeys.has(codeKey(c))) return true;
+          const descTokens = normalizeTokens(c.description);
+          let overlap = 0;
+          for (const t of descTokens) if (diagnosisTokens.has(t)) overlap++;
+          return overlap >= 2;
+        };
+
         const byKey = new Map<string, CandidateIcdCode>();
         for (const c of resolverResult.codes) byKey.set(codeKey(c), c);
         let suppressed = 0;
+        let ungrounded = 0;
         for (const c of clinicalAnalysis.candidateIcdCodes) {
           const key = codeKey(c);
           if (byKey.has(key)) continue;
           if (resolverSpecificCategories.has(category3(c))) {
             suppressed++;
+            continue;
+          }
+          if (!isDiagnosisGrounded(c)) {
+            ungrounded++;
             continue;
           }
           byKey.set(key, c);
@@ -439,7 +467,7 @@ Rules:
           candidateIcdCodes: Array.from(byKey.values()),
         };
         logger.debug(
-          `[regenerate] ICD resolver — ${resolverResult.codes.length} deterministic code(s), ${suppressed} Sonnet code(s) suppressed, ${resolverResult.unresolved.length} unresolved`,
+          `[regenerate] ICD resolver — ${resolverResult.codes.length} deterministic, ${suppressed} Sonnet suppressed, ${ungrounded} Sonnet dropped (not diagnosis-grounded), ${resolverResult.unresolved.length} unresolved`,
         );
       }
 
