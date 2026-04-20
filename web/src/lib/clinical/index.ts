@@ -45,7 +45,14 @@ export {
   isValidMedication,
   searchMedications,
   resolveMedications,
+  extractBaseName,
+  correctMedicationBaseName,
 } from "./medication-index";
+export {
+  parseMedicationFact,
+  reconstructMedicationValue,
+} from "./medication-normalizer";
+export type { ParsedMedication } from "./medication-normalizer";
 export type {
   ClinicalAnalysis,
   SpecialtyId,
@@ -88,3 +95,10 @@ export type {
   DroppedIcdCandidate,
   DropReason,
 } from "./icd-certainty";
+export { scrubPhi } from "./phi-scrubber";
+export type { PhiAudit, ScrubResult } from "./phi-scrubber";
+export { classifyAssessment } from "./assessment-classifier";
+export type {
+  ClassificationResult,
+  ClassifiedCandidate,
+} from "./assessment-classifier";

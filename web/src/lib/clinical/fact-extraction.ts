@@ -27,6 +27,8 @@ export interface FactExtractionInput {
   doctorNotes?: string;
   /** OCR'd file content (labs, referrals, etc.), 0-based. */
   files?: { name: string; type: string; text: string; context?: string }[];
+  /** Encounter date (ISO string) — used to resolve "dnes"/"včera" in facts. */
+  visitDate?: string;
 }
 
 /** Where in the source material a fact was extracted from. */
@@ -151,7 +153,7 @@ RULES:
 2. Every fact MUST include a source reference with a short VERBATIM evidence quote (≤120 chars) copied from the source material. Quote the exact wording, do not paraphrase.
 3. If you cannot find evidence for a fact, do NOT include it. Missing is better than hallucinated.
 4. Do NOT interpret, diagnose, or upgrade severity. Extract exactly what is stated. If the source says "ACS", the diagnosis value stays "ACS" — never rewrite to "STEMI" or "non-STEMI".
-5. For medications: extract the exact name as mentioned. Include dosage, strength, and frequency only if EXPLICITLY stated in the source.
+5. For medications: extract the exact name and dosing schedule as mentioned. Include dosage strength (mg, mcg, ml) ONLY if a specific number + unit is EXPLICITLY stated in the source. If the source says "Rytmonorm 1-0-1" with no mg value, the value MUST be "Rytmonorm 1-0-1" — do NOT add "150 mg" or any other strength. NEVER look up "common dosages" from medical knowledge. A wrong dosage is far more dangerous than a missing dosage.
 6. For diagnoses: copy the exact wording. Preserve uncertainty markers like "suspected", "possible", "rule out".
 7. For measurements (BP, HR, SpO2, temperature, lab values, weight, height): always include the unit as stated — and ONLY the unit as stated. If the source gives a number without a unit, see rule 13.
 8. Facts describing what the doctor or patient PLANS to do (follow-up, prescription, referral, lifestyle change, next visit) go in \`plan\`.
@@ -212,6 +214,17 @@ export function buildFactExtractionUserMessage(
   input: FactExtractionInput,
 ): string {
   const parts: string[] = [];
+
+  // Provide encounter date so the model can resolve "dnes"/"včera"/"today"
+  if (input.visitDate) {
+    const d = new Date(input.visitDate);
+    if (!isNaN(d.getTime())) {
+      const formatted = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+      parts.push(
+        `ENCOUNTER DATE: ${formatted}\nWhen the source says "dnes" / "today" / "včera" / "yesterday", resolve it relative to this date.`,
+      );
+    }
+  }
 
   if (input.chunks.length > 0) {
     const numbered = input.chunks

@@ -145,6 +145,33 @@ describe("buildFactExtractionUserMessage", () => {
     expect(msg).not.toContain("UPLOADED FILE CONTENTS");
     expect(msg).not.toContain("doctor_notes");
   });
+
+  it("includes ENCOUNTER DATE when visitDate is provided", () => {
+    const input: FactExtractionInput = {
+      chunks: ["patient presents with cough"],
+      visitDate: "2025-04-14T10:00:00Z",
+    };
+    const msg = buildFactExtractionUserMessage(input);
+    expect(msg).toContain("ENCOUNTER DATE: 14.4.2025");
+    expect(msg).toContain("dnes");
+  });
+
+  it("omits ENCOUNTER DATE when visitDate is undefined", () => {
+    const input: FactExtractionInput = {
+      chunks: ["patient presents with cough"],
+    };
+    const msg = buildFactExtractionUserMessage(input);
+    expect(msg).not.toContain("ENCOUNTER DATE");
+  });
+
+  it("omits ENCOUNTER DATE when visitDate is invalid", () => {
+    const input: FactExtractionInput = {
+      chunks: ["patient presents with cough"],
+      visitDate: "not-a-date",
+    };
+    const msg = buildFactExtractionUserMessage(input);
+    expect(msg).not.toContain("ENCOUNTER DATE");
+  });
 });
 
 describe("coerceFact", () => {

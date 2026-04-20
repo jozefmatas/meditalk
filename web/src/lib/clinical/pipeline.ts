@@ -161,9 +161,13 @@ export function buildEnrichedSystemPrompt(
   }
 
   // Resolve mentioned medications against the approved database.
-  // Uses fuzzy matching so transcription misspellings (e.g. "Koprenesa"
-  // for "Co-Prenessa") are resolved to the correct approved name.
-  if (analysis.mentionedMedications.length > 0) {
+  // When validated facts are present, skip this entirely — facts are the
+  // single source of truth for medications. The fact validator already
+  // corrected any misspelled drug names (base name only, preserving
+  // dose/frequency). Including a second independent medication list here
+  // caused dosage fabrication: the CSV product name (e.g. "Eliquis 2,5 mg")
+  // would override the doctor's stated dose ("Eliquis 5 mg").
+  if (!hasValidatedFacts && analysis.mentionedMedications.length > 0) {
     const resolvedMeds: string[] = [];
     for (const medName of analysis.mentionedMedications) {
       const matches = searchMedications(medName, 3, locale);
@@ -184,15 +188,7 @@ export function buildEnrichedSystemPrompt(
       }
     }
 
-    if (hasValidatedFacts) {
-      // When facts are present, FACT VALUE FIDELITY already constrains the
-      // LLM to use only provided facts. The medication block only needs the
-      // lookup table and correction handling.
-      parts.push(`\nVERIFIED MEDICATIONS (locale: ${locale}):
-${resolvedMeds.join("\n")}
-Use corrected names where marked [corrected from "..."]. For [not found in approved list], use the dictated name without annotations.`);
-    } else {
-      parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
+    parts.push(`\nVERIFIED MEDICATIONS FROM APPROVED LIST (locale: ${locale}):
 ${resolvedMeds.join("\n")}
 RULES:
 - Only include medications EXPLICITLY mentioned in the transcript or documents
@@ -201,7 +197,6 @@ RULES:
 - Do NOT add medications that are "commonly prescribed" for a condition unless they are explicitly mentioned in the source material
 - If a medication is marked [corrected from "..."], use the CORRECTED name (it was auto-matched from a misspelling)
 - If a medication is marked [not found in approved list], still include it in the clinical note using EXACTLY the name the doctor dictated — do NOT add any warning label, bracket, or annotation around it`);
-    }
   }
 
   // Add pre-rendered ICD block — Opus must copy this verbatim

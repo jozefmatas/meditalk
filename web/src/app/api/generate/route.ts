@@ -25,6 +25,8 @@ import {
   emptyExtractedFacts,
   computeFingerprint,
   filterCertainIcdCandidates,
+  scrubPhi,
+  classifyAssessment,
 } from "@/lib/clinical";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -76,7 +78,7 @@ export async function POST(request: NextRequest) {
     // Support both visitId (new) and transcriptId (legacy)
     const visitId = body.visitId || body.transcriptId;
     const templateId: string | undefined = body.templateId;
-    const doctorNotes: string | undefined = body.doctorNotes;
+    let doctorNotes: string | undefined = body.doctorNotes;
     // Scribe real-time transcript (used for recording files instead of Whisper)
     let transcriptText: string | undefined = body.transcriptText;
     // Recovery: path to stored audio blob in Supabase storage (uploaded at
@@ -109,7 +111,9 @@ export async function POST(request: NextRequest) {
     // transcription); used as fallback when client-side transcription fails.
     const { data: visit, error: visitError } = await supabase
       .from("visits")
-      .select("id, title, language, metadata")
+      .select(
+        "id, title, language, metadata, visit_date, patient_name, patient_id",
+      )
       .eq("id", visitId)
       .single();
 
@@ -118,6 +122,12 @@ export async function POST(request: NextRequest) {
     }
 
     const language = (visit.language as SupportedLanguage) || "en";
+    const visitDate: string | undefined =
+      typeof visit.visit_date === "string" ? visit.visit_date : undefined;
+    const patientName: string | undefined =
+      typeof visit.patient_name === "string" ? visit.patient_name : undefined;
+    const patientId: string | undefined =
+      typeof visit.patient_id === "string" ? visit.patient_id : undefined;
 
     // Recovery / resume: if stored audio exists, download and transcribe.
     // When both audioPath and transcriptText are present (resume + generate:
@@ -406,6 +416,32 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Pass 1.1 — PHI scrub: remove patient identifiers before any LLM call.
+    // Operates in-place on transcriptText, fileTexts, and doctorNotes.
+    // Always runs — birth numbers, phones, emails are pattern-matched
+    // regardless of whether patient name/id are known from the DB.
+    let phiRedactionCount = 0;
+    if (transcriptText) {
+      const r = scrubPhi(transcriptText, patientName, patientId);
+      transcriptText = r.scrubbed;
+      phiRedactionCount += r.audit.totalRedactions;
+    }
+    for (const ft of fileTexts) {
+      const r = scrubPhi(ft.text, patientName, patientId);
+      ft.text = r.scrubbed;
+      phiRedactionCount += r.audit.totalRedactions;
+    }
+    if (doctorNotes) {
+      const r = scrubPhi(doctorNotes, patientName, patientId);
+      doctorNotes = r.scrubbed;
+      phiRedactionCount += r.audit.totalRedactions;
+    }
+    if (phiRedactionCount > 0) {
+      logger.info(
+        `[generate] PHI scrub: ${phiRedactionCount} redaction(s) applied`,
+      );
+    }
+
     // Re-read visit metadata after file extraction to include cached extracted_text
     // (fixes bug where second metadata save would overwrite cached extractions)
     const { data: refreshedVisit } = await supabase
@@ -538,6 +574,7 @@ export async function POST(request: NextRequest) {
           chunks: [transcriptText],
           doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
           files: fileTexts.length > 0 ? fileTexts : undefined,
+          visitDate,
         }
       : null;
 
@@ -586,6 +623,7 @@ export async function POST(request: NextRequest) {
       chunks: transcriptChunks,
       doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
       files: fileTexts.length > 0 ? fileTexts : undefined,
+      visitDate,
     };
     const hasAnyFactSource =
       factExtractionInput.chunks.length > 0 ||
@@ -669,9 +707,20 @@ export async function POST(request: NextRequest) {
         `[generate] ICD certainty — kept ${certainty.counts.kept}/${certainty.counts.total}`,
         certainty.dropped.slice(0, 5),
       );
+      // Pass 1.8 — Assessment relevance classification: cap diagnosis
+      // dumps by tier so the Záver stays focused.
+      const assessment = classifyAssessment(certainty.kept, validatedFacts);
+      const assessmentKept = [
+        ...assessment.activeCurrent,
+        ...assessment.chronicRelevant,
+      ];
+      logger.debug(
+        `[generate] Assessment classification — ${assessment.counts.active} active, ${assessment.counts.chronic} chronic, ${assessment.counts.background} background`,
+      );
+
       clinicalAnalysis = {
         ...clinicalAnalysis,
-        candidateIcdCodes: certainty.kept,
+        candidateIcdCodes: assessmentKept,
       };
     }
 
@@ -755,6 +804,9 @@ export async function POST(request: NextRequest) {
             sendEvent({ type: "section", id, title, content });
           },
           factCount > 0 ? validatedFacts : undefined,
+          visitDate,
+          patientName,
+          patientId,
         );
 
         lap("generation-done");

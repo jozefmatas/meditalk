@@ -159,16 +159,19 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 
 ### Pipeline passes:
 
-| Pass                                | Model               | Purpose                                                                                                                                          |
-| ----------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Pass 1** — Clinical Analysis      | Sonnet 4.6 (temp=0) | Match clinical concepts, infer specialty, cluster problems, suggest ICD-10 codes, extract medication names                                       |
-| **Pass 1.5** — Fact Extraction      | Haiku 4.5 (temp=0)  | Extract structured facts into 15 categories (including 6 history subcategories for precise section routing), each with verbatim evidence quote   |
-| **Pass 1.6a** — Fact Validation     | Pure TypeScript     | Verify evidence appears in claimed source, fuzzy matching, cross-source fallback, medication correction                                          |
-| **Pass 1.6b** — Fact Resolution     | Pure TypeScript     | Detect speaker self-corrections, drop superseded facts                                                                                           |
-| **Pass 1.7** — ICD Certainty Filter | Pure TypeScript     | Drop ICD candidates not grounded in diagnoses/history-subcategory facts                                                                          |
-| **Prompt Assembly**                 | Pure TypeScript     | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
-| **Pass 2** — Generation             | Opus 4.6 (temp=0)   | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE                                          |
-| **Pass 2.5** — Post-Generation      | Pure TypeScript     | Strip ungrounded ICD codes from output                                                                                                           |
+| Pass                                     | Model               | Purpose                                                                                                                                          |
+| ---------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Pass 1.1** — PHI Scrub                 | Pure TypeScript     | Remove patient name, birth number, phone, email from all inputs before any LLM call                                                              |
+| **Pass 1** — Clinical Analysis           | Sonnet 4.6 (temp=0) | Match clinical concepts, infer specialty, cluster problems, suggest ICD-10 codes, extract medication names                                       |
+| **Pass 1.5** — Fact Extraction           | Haiku 4.5 (temp=0)  | Extract structured facts into 15 categories with verbatim evidence; visit_date injected for temporal resolution                                  |
+| **Pass 1.6a** — Fact Validation          | Pure TypeScript     | Verify evidence in source, cross-source fallback, base-name-only medication correction (preserves dose/freq)                                     |
+| **Pass 1.6b** — Fact Resolution          | Pure TypeScript     | Detect speaker self-corrections, drop superseded facts                                                                                           |
+| **Pass 1.7** — ICD Certainty Filter      | Pure TypeScript     | Drop ICD candidates not grounded in diagnoses/history-subcategory facts                                                                          |
+| **Pass 1.8** — Assessment Classification | Pure TypeScript     | Tier ICD candidates (active/chronic/background), cap at 4+5, exclude background                                                                  |
+| **Prompt Assembly**                      | Pure TypeScript     | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
+| **Pass 2** — Generation                  | Opus 4.6 (temp=0)   | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE                                          |
+| **Pass 2.1** — Output PHI Scrub          | Pure TypeScript     | Defensive re-scrub of generated section values                                                                                                   |
+| **Pass 2.5** — Post-Generation           | Pure TypeScript     | Strip ungrounded ICD codes from output                                                                                                           |
 
 ### Streaming Protocol (SSE events):
 
@@ -189,13 +192,16 @@ This is the core engine. For the full canonical reference, see [kb/note-generati
 **Key files:**
 
 - [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — main generation endpoint
+- [web/src/lib/clinical/phi-scrubber.ts](web/src/lib/clinical/phi-scrubber.ts) — Pass 1.1 + Pass 2.1 PHI scrubbing
 - [web/src/lib/clinical/pipeline.ts](web/src/lib/clinical/pipeline.ts) — Pass 1 + enriched prompt assembly
 - [web/src/lib/clinical/fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) — Pass 1.5
 - [web/src/lib/clinical/fact-validator.ts](web/src/lib/clinical/fact-validator.ts) — Pass 1.6a
+- [web/src/lib/clinical/medication-normalizer.ts](web/src/lib/clinical/medication-normalizer.ts) — medication fact parsing/reconstruction
 - [web/src/lib/clinical/fact-resolver.ts](web/src/lib/clinical/fact-resolver.ts) — Pass 1.6b
 - [web/src/lib/clinical/icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) — Pass 1.7
+- [web/src/lib/clinical/assessment-classifier.ts](web/src/lib/clinical/assessment-classifier.ts) — Pass 1.8
 - [web/src/lib/clinical/fact-section-assigner.ts](web/src/lib/clinical/fact-section-assigner.ts) — deterministic fact-to-section assignment
-- [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts) — Pass 2 + prompt builders + Pass 2.5
+- [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts) — Pass 2 + prompt builders + Pass 2.1/2.5
 - [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
 
 ---
@@ -317,12 +323,12 @@ All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` mer
 
 ### Other tables:
 
-| Table               | Purpose                                                       |
-| ------------------- | ------------------------------------------------------------- |
-| `templates`         | User-defined templates with i18n, style guide, usage tracking |
+| Table               | Purpose                                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `templates`         | User-defined templates with i18n, style guide, usage tracking                                                                                                                                                                               |
 | `api_usage`         | Per-call token/cost log; aggregated via SQL RPCs (`aggregate_usage_by_user`, `aggregate_usage_by_visit`, `get_dashboard_usage_totals`, `aggregate_usage_by_model`, `aggregate_usage_by_operation`) to avoid Supabase 1000-row default limit |
-| `audit_logs`        | User-action audit trail                                       |
-| `transcript_chunks` | Legacy chunk + embedding store (deprecated)                   |
+| `audit_logs`        | User-action audit trail                                                                                                                                                                                                                     |
+| `transcript_chunks` | Legacy chunk + embedding store (deprecated)                                                                                                                                                                                                 |
 
 ### Storage:
 

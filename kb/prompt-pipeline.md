@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-16 (title removed from Pass 2)_
+_Last updated: 2026-04-20 (Phase 1 safety: PHI scrub, medication normalization, assessment classifier, visit_date, defensive output scrub)_
 
 How raw clinical data becomes a structured medical note. This document covers every LLM call, the exact prompt texts, the deterministic filters between them, and cost/speed characteristics. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -15,6 +15,9 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
   transcript + files + doctor notes
                |
+  Pass 1.1     scrubPhi                pure TS
+               -> remove patient name, birth number, phone, email
+               |
        ========|========  LLM CALLS (PARALLEL)  ========
                |                |                |
   Pass 1       | Sonnet 4.6    | Pass 1.5       | Embedding search
@@ -28,6 +31,7 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
   Pass 1.6a    validateFacts          pure TS
                -> drop ungrounded evidence, dedup, cross-source fallback
+               -> medication base-name-only correction (preserves dose/freq)
                |
   Pass 1.6b    resolveFacts           pure TS
                -> drop self-corrected facts ("vlastne", ", nie,")
@@ -36,6 +40,10 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                -> drop ICD codes not lexically grounded in facts
                -> two-tier: broad (non-R) vs strict (R-chapter)
                -> synonym table bridges layperson<->medical terms
+               |
+  Pass 1.8     classifyAssessment     pure TS
+               -> tier ICD candidates: active_current / chronic_relevant / background_only
+               -> cap: 4 active + 5 chronic, background excluded
                |
   Pre-render   assignFactsToSections  pure TS
                -> deterministic fact-to-section mapping
@@ -51,6 +59,15 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
                |
        ========|========  POST-PROCESSING  ========
                |
+  Pass A       stripBulletMarkers     pure TS
+               -> strip "- ", "• ", etc. from line starts
+               |
+  Pass B       clearParentSections    pure TS
+               -> force "" on sections with subsections
+               |
+  Pass 2.1     scrubPhi (output)      pure TS
+               -> defensive PHI scrub on generated section values
+               |
   Pass 2.5     Defensive ICD filter    pure TS
                -> strip codes Opus snuck past the prompt
                |
@@ -64,9 +81,12 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](web/sr
 **Key guarantees:**
 
 1. **Every fact has verbatim evidence.** Pass 1.5 refuses to emit a fact without a quote; Pass 1.6a drops any fact whose quote isn't in the source.
-2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in validated facts. Pass 2.5 defensively strips any Opus snuck past the prompt.
+2. **Every ICD code is grounded.** Pass 1.7 drops candidates that aren't lexically rooted in validated facts. Pass 1.8 classifies them by relevance tier and caps counts. Pass 2.5 defensively strips any Opus snuck past the prompt.
 3. **Same inputs -> same outputs** for the entire post-Pass-1 pipeline. Pass 1 LLM noise is absorbed by deterministic downstream gates. ICD codes are pre-rendered in sorted order (VERBATIM copy), facts are pre-assigned to template sections, and transcript is omitted when facts are present — Opus acts as a formatter, not a reasoner.
 4. **Template changes are lossless.** Validated facts are persisted in `metadata.validated_facts`. When the user changes templates, the regenerate route re-runs fact-to-section assignment against the new template (structured rerender) instead of prose reformatting.
+5. **No PHI reaches LLMs.** Pass 1.1 (input scrub) removes patient name, birth number, phone, email from all source material before any LLM call. Pass 2.1 (output scrub) defensively re-applies the same scrub to generated sections.
+6. **Medication dosages are never fabricated.** Pass 1.6a's medication auto-correction only replaces the base drug name (e.g. "Koprenesa" → "Co-Prenessa"), preserving the original dose/frequency verbatim. The full CSV product name is never injected.
+7. **Temporal references resolve correctly.** `visit_date` from the DB is injected into both Haiku (Pass 1.5) and Opus (Pass 2) prompts as `ENCOUNTER DATE`, enabling "dnes"/"včera" resolution.
 
 ---
 
@@ -112,6 +132,26 @@ Two helpers flatten the hierarchy into what the prompt needs:
 Section-specific guidance takes precedence over general rules per the system prompt instructions.
 
 All 8 system templates have English `context` fields on every section and subsection (migration `20260416`). Contexts are consumed by the LLM, not shown to users — English is more token-efficient and language-agnostic. Example: `"Family history. Diseases of parents, siblings, grandparents. NEVER include the patient's own diseases here."`
+
+---
+
+## 1.5. Pass 1.1 — PHI Scrub (Input)
+
+File: [web/src/lib/clinical/phi-scrubber.ts](web/src/lib/clinical/phi-scrubber.ts)
+Integration: [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — after file assembly, before any LLM call.
+
+Deterministic regex-based removal of personally identifiable information from `transcriptText`, `fileTexts[].text`, and `doctorNotes`. Activated when `patient_name` or `patient_id` is set on the visit record.
+
+**Scrubs:**
+
+- Patient name (both orderings, case-insensitive) → `[PATIENT_NAME]`
+- Birth number (rodné číslo: `YYMMDD/XXXX`, months 51-62 for females) → `[PATIENT_ID]`
+- Phone numbers (SK/CZ: `+421`/`+420`, local `0XXX`) → `[PHONE]`
+- Email addresses → `[EMAIL]`
+- Long numeric IDs (9-12 digits, not already caught above) → `[PATIENT_ID]`
+- Known patient ID string (exact match) → `[PATIENT_ID]`
+
+**Preserves:** ages, clinical dates, ICD codes, blood pressure, medication dosages.
 
 ---
 
@@ -310,6 +350,8 @@ contains a line starting with 'DOCTOR'S DIRECTIVE FOR THIS FILE:', that directiv
 OVERRIDES what you extract from that specific file.
 ```
 
+**visit_date injection:** When `visit_date` is set on the visit record, the user message is prepended with `ENCOUNTER DATE: DD.M.YYYY` and an instruction to resolve "dnes"/"včera"/"today"/"yesterday" relative to this date. The same injection is applied to the Opus (Pass 2) user message via `buildTemplateUserMessage`.
+
 ### 3.4 Output — `ExtractedFacts`
 
 Fifteen fixed categories, all arrays of `ExtractedFact`:
@@ -349,7 +391,9 @@ For every fact, check that `evidence` actually appears in the source it claims t
 
 Removal reasons: `evidence_not_in_source`, `source_index_out_of_range`, `duplicate`, `empty_value`.
 
-**Medication auto-correction:** Validates against the approved list via `isValidMedication`. On miss, `correctMedicationName` attempts fuzzy matching (Levenshtein distance >= 0.7). Auto-corrects on confident match (e.g. `"Koprenesa"` -> `"Co-Prenessa"`).
+**Medication auto-correction (base-name-only):** Validates against the approved list via `isValidMedication`. On miss, `correctMedicationBaseName` attempts fuzzy matching (Levenshtein >= 0.7). The key invariant: only the drug **name** is corrected — dose, frequency, and route are preserved verbatim from the source via `parseMedicationFact` / `reconstructMedicationValue` ([web/src/lib/clinical/medication-normalizer.ts](web/src/lib/clinical/medication-normalizer.ts)). This prevents the dosage fabrication bug where the full CSV product name (e.g. "Eliquis 2,5 mg filmom obalene tablety") replaced the entire fact value.
+
+**Medication block in enriched prompt:** When `hasValidatedFacts` is true, the separate medication resolution block in `buildEnrichedSystemPrompt` is skipped entirely. Facts are the single source of truth — no dual medication list conflict.
 
 ---
 
@@ -433,6 +477,26 @@ The generate route preserves ALL pre-filter candidates as `suggestedIcdCodes` in
 ### 6.6 Empty-list behavior
 
 When all candidates are dropped, `buildEnrichedSystemPrompt` adds an explicit "NO ICD CODES" instruction telling Opus to not include ANY ICD codes — preventing hallucinated codes.
+
+---
+
+## 6.5. Pass 1.8 — Assessment Relevance Classification
+
+File: [web/src/lib/clinical/assessment-classifier.ts](web/src/lib/clinical/assessment-classifier.ts)
+Integration: [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — after ICD certainty filter.
+Pure TypeScript. No LLM call.
+
+Classifies ICD candidates that passed the certainty filter into three tiers based on which fact categories ground them:
+
+| Tier               | Grounding categories                          | Cap      |
+| ------------------ | --------------------------------------------- | -------- |
+| `active_current`   | diagnoses, chiefComplaint, symptoms, findings | max 4    |
+| `chronic_relevant` | personalHistory, medications                  | max 5    |
+| `background_only`  | everything else                               | excluded |
+
+Overflow from active cap rolls into chronic. Background candidates are excluded from the Opus prompt entirely — they only appeared in the old history sections (OA) if placed there by Haiku facts.
+
+This eliminates the encyclopedic diagnosis dumps in Záver that doctors complained about.
 
 ---
 
@@ -542,8 +606,11 @@ CRITICAL — SECTION-SPECIFIC GUIDANCE OVERRIDES ALL: ...
 3. DIRECTIVES: Doctor's notes and per-file directives are authoritative.
 4. OUTPUT LANGUAGE: Write ALL content in {language}.
 5. MISSING SECTIONS: Output empty string "".
-6. FORMATTING: Bullets for diagnoses/meds, narrative for history/exam.
-7. FORMAT: Return valid JSON with section keys only. No "title" key.
+6. FORMATTING — NO BULLET POINTS: Never use bullet markers (-, •, *, –, —). Diagnoses one per line (code + name, no prefix). Medications comma-separated inline. History/exam as flowing prose.
+7. PARENT SECTIONS WITH SUBSECTIONS: Parent section = "" — content in subsections only (e.g. Anamnézy parent is empty, content goes into RA, OA, SA, etc.).
+8. FORMAT: Return valid JSON with section keys only. No "title" key.
+9. ASSESSMENT SCOPE: Záver must be concise — max 4 active + 5 chronic ICD items.
+10. HISTORY COMPRESSION: OA/RA/SA/PA/Ab — compact flowing prose, comma/semicolon-separated.
 
 TEMPLATE SECTIONS:
 {sections}
@@ -560,7 +627,10 @@ Used when validated facts are NOT available. Contains all rules including:
 - NO ASSUMPTION MODE
 - Source priority hierarchy
 - FACT VALUE FIDELITY (conditional on facts being present)
-- Section routing rules (8a-8h)
+- Section routing rules (9a-9h)
+- Assessment scope constraints (rule 10)
+- History compression constraints (rule 11)
+- No-bullet formatting (rule 6) and parent-section-empty rule (rule 7)
 
 **Note:** Title is NOT generated by Pass 2 in either prompt path. Title generation is handled exclusively by the dedicated Haiku call (§10).
 
@@ -656,7 +726,7 @@ RULES:
 2. Do NOT introduce clinical details, context, or information not in this list.
 3. Preserve each fact's wording as closely as possible — only adjust grammar minimally.
 4. Present facts in the EXACT order shown below within each section. Do NOT reorder.
-5. Each fact = one distinct statement or bullet point. Do NOT merge facts.
+5. Each fact = one distinct statement on its own line. No bullet markers. Do NOT merge facts.
 
 [Section "RA" (s_ra)]:
   - [Family History] otec zomrel na IM v 65 rokoch
@@ -704,10 +774,13 @@ The model streams JSON via SSE. `extractSectionsFromStream` scans for closing br
 
 After Opus returns:
 
-1. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text.
-2. **ICD code extraction** — `extractIcdCodesFromSections()` scans generated text for `- CODE Description` lines.
-3. **Pass 2.5 defensive filter** — intersects extracted codes with the pre-filtered candidate set. Strips unauthorized codes from both the sidebar list AND the section text.
-4. **HTML rendering** — `buildTemplateHtml()` wraps section contents into the template HTML structure.
+1. **Pass A — Bullet stripping** — `stripBulletMarkers()` defensively removes leading `- `, `• `, `* `, `– `, `— ` from all lines in every section value. The model frequently ignores no-bullet prompt instructions, so this guarantees clean output regardless of model compliance.
+2. **Pass B — Parent section clearing** — `collectParentSectionIds()` identifies template sections with subsections (e.g. Anamnézy with RA, OA, SA...) and forces their content to `""`. All content must live in subsections only.
+3. **ICD description validation** — `validateIcdDescriptions()` replaces any hallucinated/paraphrased ICD descriptions with exact canonical CSV text. **Skipped when `hasValidatedFacts` is true** — the ICD block was pre-rendered by `buildPreRenderedIcdBlock` and the doctor's original wording is preserved.
+4. **Pass 2.1 — Defensive PHI scrub** — re-applies `scrubPhi()` to each generated section value. Even though input was scrubbed (Pass 1.1), the LLM might reconstruct PHI from partial clues. The PHI scrubber now protects blood pressure values from false-positive address matching (e.g. "Tlak 138/84 mmHg" was being matched by `STREET_SLASH_HOUSE_REGEX`).
+5. **ICD code extraction** — `extractIcdCodesFromSections()` scans generated text for `CODE Description` lines (no bullet prefix required — regex uses optional bullet marker).
+6. **Pass 2.5 defensive filter** — intersects extracted codes with the pre-filtered candidate set. Strips unauthorized codes from both the sidebar list AND the section text.
+7. **HTML rendering** — `buildTemplateHtml()` wraps section contents into the template HTML structure.
 
 ---
 
@@ -973,6 +1046,8 @@ All Anthropic calls use `temperature: 0`. The determinism guarantees come from t
 | Opus ignoring "only these ICDs" constraint      | **Pass 2.5** defensive strip                  |
 | Opus placing facts in wrong sections            | **Fact-to-section pre-assignment**            |
 | Opus rephrasing fact values                     | **FACT VALUE FIDELITY** rule in system prompt |
+| Opus emitting bullet points despite instruction | **Pass A** `stripBulletMarkers()` post-proc   |
+| Opus writing content in parent sections         | **Pass B** parent-section clearing            |
 | Template change losing fact structure           | **Structured rerender** from cached facts     |
 
 ---

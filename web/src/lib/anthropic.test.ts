@@ -20,6 +20,7 @@ import {
   buildTitleSystemPrompt,
   buildTitleUserMessage,
   sanitizeGeneratedTitle,
+  stripBulletMarkers,
   InsufficientContextError,
   NOT_STATED,
   GENERATION_MODELS,
@@ -728,5 +729,59 @@ describe("buildTemplateUserMessage", () => {
     expect(msg).toContain("Do NOT merge facts");
     // Transcript should be excluded when facts are present
     expect(msg).not.toContain("[Chunk 1]:");
+  });
+});
+
+describe("stripBulletMarkers", () => {
+  it("strips dash bullet markers from lines", () => {
+    const input = "- I10 Esenciálna hypertenzia\n- I48 Fibrilácia predsiení";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("I10 Esenciálna hypertenzia\nI48 Fibrilácia predsiení");
+  });
+
+  it("strips bullet (•) markers", () => {
+    const input = "• Euthyrox 112 ug\n• Betaloc ZOK 25 mg";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("Euthyrox 112 ug\nBetaloc ZOK 25 mg");
+  });
+
+  it("strips en-dash and em-dash bullets", () => {
+    const input = "– Item one\n— Item two";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("Item one\nItem two");
+  });
+
+  it("strips asterisk bullets", () => {
+    const input = "* First\n* Second";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("First\nSecond");
+  });
+
+  it("preserves dashes in the middle of text", () => {
+    const input = "Pacientka 14.4. prišla - pálenie nad srdcom";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe(input);
+  });
+
+  it("preserves medication dosing format", () => {
+    const input = "Rytmonorm 325 mg 1-0-1, Nolpaza 20 mg 1-0-0";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe(input);
+  });
+
+  it("strips indented bullets", () => {
+    const input = "  - Candibene\n  - Mukolytiká";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("Candibene\nMukolytiká");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(stripBulletMarkers("")).toBe("");
+  });
+
+  it("handles mixed bullet and non-bullet lines", () => {
+    const input = "Pacientka pri vedomí.\n- I10 Hypertenzia\nBez edémov.";
+    const result = stripBulletMarkers(input);
+    expect(result).toBe("Pacientka pri vedomí.\nI10 Hypertenzia\nBez edémov.");
   });
 });

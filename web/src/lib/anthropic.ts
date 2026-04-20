@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupportedLanguage } from "./types";
-import type { Template } from "./templates/types";
+import type { Template, TemplateSection } from "./templates/types";
 import { buildTemplateHtml, flattenSectionIds } from "./templates/html";
 import { logUsage, type UsageContext } from "./usage";
 import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
@@ -23,6 +23,7 @@ import {
   assignFactsToSections,
   formatAssignedFactsForPrompt,
 } from "./clinical/fact-section-assigner";
+import { scrubPhi } from "./clinical/phi-scrubber";
 import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
@@ -49,6 +50,38 @@ const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   sk: "Slovak",
   cs: "Czech",
 };
+
+/** Matches bullet-style list prefixes at the start of a line. */
+const BULLET_PREFIX_RE = /^\s*[-•–—*]\s+/gm;
+
+/**
+ * Strip bullet markers from the start of lines in generated text.
+ * Defensive post-processing — even if the prompt tells the model not to
+ * use bullets, it often does anyway.
+ */
+export function stripBulletMarkers(text: string): string {
+  if (!text) return text;
+  return text.replace(BULLET_PREFIX_RE, "");
+}
+
+/**
+ * Collect IDs of template sections that have subsections.
+ * Content for these parent sections should be empty — all content
+ * goes into the child subsections.
+ */
+function collectParentSectionIds(sections: TemplateSection[]): Set<string> {
+  const parents = new Set<string>();
+  function walk(list: TemplateSection[]) {
+    for (const s of list) {
+      if (s.subsections && s.subsections.length > 0) {
+        parents.add(s.id);
+        walk(s.subsections);
+      }
+    }
+  }
+  walk(sections);
+  return parents;
+}
 
 /**
  * Build a lean system prompt for the facts-present path.
@@ -112,7 +145,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 1. FACT VALUE FIDELITY: The pre-assigned validated clinical facts are the sole source of clinical truth. Your job is to FORMAT them into the note, not to REWRITE them.
    - Reproduce each fact's wording as closely as possible. Only adjust grammatical case, declension, or word order as minimally needed for natural {{language}} text.
    - Do NOT rephrase, paraphrase, elaborate, summarize, or add explanatory context beyond what the fact states.
-   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement or bullet point.
+   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement on its own line.
    - Present facts within each section in the EXACT order they appear in the input. Do NOT reorder facts.
    - If a section has pre-assigned facts, its content MUST be derived exclusively from those facts — do not add information from other sections or from general clinical knowledge.
    - The same facts must produce the same output text every time. Treat this as a formatting task, not a creative writing task.
@@ -125,9 +158,37 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 5. MISSING SECTIONS: If a section has no relevant information, output an empty string "" for that key. Do NOT write placeholder text.
 
-6. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items. For diagnoses/ICD codes, put the code first, then the name. Narrative sections should remain as flowing prose.
+6. FORMATTING — ABSOLUTELY NO BULLET POINTS OR LIST MARKERS:
+   NEVER use bullet points, dashes, or list markers anywhere. No "- ", no "• ", no "* ", no "– ". This is the most critical formatting rule.
+   Write everything as dense flowing prose or one item per line (plain text, no leading markers).
 
-7. FORMAT: Return valid JSON with one key for each section ID listed below (string value, or "" if empty). No other keys.
+   WRONG (never do this):
+   "- I10 Esenciálna hypertenzia\n- I48 Fibrilácia predsiení"
+   "- Euthyrox 112 ug 1-0-0\n- Betaloc ZOK 25 mg 1-0-0"
+   "- alergia na Candibene\n- alergia na mukolytiká"
+   "- Koronarografia cez pravú ruku\n- Kontrola u lekára do 3 dní"
+
+   CORRECT (always do this):
+   "I10 Esenciálna hypertenzia\nI48 Fibrilácia predsiení"
+   "Euthyrox 112 ug 1-0-0, Betaloc ZOK 25 mg 1-0-0, Nolpaza 20 mg 1-0-0"
+   "alergia na Candibene a mukolytiká, na iné lieky neguje"
+   "Koronarografia cez pravú ruku s možnosťou intervencie. Kontrola u lekára do 3 dní."
+
+   Section-specific formatting:
+   Diagnoses/ICD codes: one per line, code first then name, NO prefix.
+   Medications: compact comma-separated inline (all meds in one line/paragraph).
+   Allergies: compact comma-separated inline (all allergies in one sentence).
+   History (OA, RA, SA, PA, Ab): compact flowing prose, comma-separated.
+   Examination/findings: dense flowing prose with measurements inline.
+   Plans: write as flowing sentences, NOT itemized.
+
+7. PARENT SECTIONS WITH SUBSECTIONS: If a section has subsections (e.g. Anamnézy with RA, OA, SA, etc.), output an empty string "" for the PARENT section — all content MUST go into the subsections only. NEVER write content directly under a parent header.
+
+8. FORMAT: Return valid JSON with one key for each section ID listed below (string value, or "" if empty). No other keys.
+
+9. ASSESSMENT SCOPE: The Záver/Assessment section must be CONCISE. Include ONLY active current problems and management-relevant chronic conditions. Do NOT list every historical diagnosis. Background-only conditions go ONLY in OA.
+
+10. HISTORY COMPRESSION: For OA, RA, SA, PA, Ab sections — compact flowing prose, comma-separated or semicolon-separated inline lists. Do NOT expand abbreviations into verbose descriptions.
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
@@ -194,7 +255,7 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 2b. FACT VALUE FIDELITY (when VALIDATED CLINICAL FACTS are provided): The pre-assigned facts are the sole source of clinical truth. Your job is to FORMAT them into the note, not to REWRITE them.
    - Reproduce each fact's wording as closely as possible. Only adjust grammatical case, declension, or word order as minimally needed for natural {{language}} text.
    - Do NOT rephrase, paraphrase, elaborate, summarize, or add explanatory context beyond what the fact states.
-   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement or bullet point.
+   - Do NOT merge multiple facts into compound sentences — present each fact as a distinct statement on its own line.
    - Present facts within each section in the EXACT order they appear in the input. Do not reorder facts.
    - If a section has pre-assigned facts, its content MUST be derived exclusively from those facts — do not add information from other sections or from general clinical knowledge.
    - The same facts must produce the same output text every time. Treat this as a formatting task, not a creative writing task.
@@ -213,11 +274,35 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 
 5. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
 
-6. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items — they are much easier to scan. For diagnoses/ICD codes, put the code first, then the name (e.g. "- I10 Esenciálna hypertenzia"). For plans and recommendations, use one bullet per action. Narrative sections (history, examination findings) should remain as flowing prose paragraphs — do not bullet-ify everything.
+6. FORMATTING — ABSOLUTELY NO BULLET POINTS OR LIST MARKERS:
+   NEVER use bullet points, dashes, or list markers anywhere. No "- ", no "• ", no "* ", no "– ". This is the most critical formatting rule.
+   Write everything as dense flowing prose or one item per line (plain text, no leading markers).
 
-7. FORMAT: Return valid JSON with one key for each section ID listed below, with the section content as a string value (or "" if no information). No other keys. Title is generated separately — do NOT include a "title" key.
+   WRONG (never do this):
+   "- I10 Esenciálna hypertenzia\n- I48 Fibrilácia predsiení"
+   "- Euthyrox 112 ug 1-0-0\n- Betaloc ZOK 25 mg 1-0-0"
+   "- alergia na Candibene\n- alergia na mukolytiká"
+   "- Koronarografia cez pravú ruku\n- Kontrola u lekára do 3 dní"
 
-8. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
+   CORRECT (always do this):
+   "I10 Esenciálna hypertenzia\nI48 Fibrilácia predsiení"
+   "Euthyrox 112 ug 1-0-0, Betaloc ZOK 25 mg 1-0-0, Nolpaza 20 mg 1-0-0"
+   "alergia na Candibene a mukolytiká, na iné lieky neguje"
+   "Koronarografia cez pravú ruku s možnosťou intervencie. Kontrola u lekára do 3 dní."
+
+   Section-specific formatting:
+   Diagnoses/ICD codes: one per line, code first then name, NO prefix.
+   Medications: compact comma-separated inline (all meds in one line/paragraph).
+   Allergies: compact comma-separated inline (all allergies in one sentence).
+   History (OA, RA, SA, PA, Ab): compact flowing prose, comma-separated.
+   Examination/findings: dense flowing prose with measurements inline.
+   Plans: write as flowing sentences, NOT itemized.
+
+7. PARENT SECTIONS WITH SUBSECTIONS: If a section has subsections (e.g. Anamnézy with RA, OA, SA, etc.), output an empty string "" for the PARENT section — all content MUST go into the subsections only. NEVER write content directly under a parent header.
+
+8. FORMAT: Return valid JSON with one key for each section ID listed below, with the section content as a string value (or "" if no information). No other keys. Title is generated separately — do NOT include a "title" key.
+
+9. SECTION CONTENT ROUTING — MANDATORY placement rules. Each type of clinical information MUST be placed ONLY in its designated section. Misplacing content (e.g. putting medications in TO or smoking in PA) is a critical error.
 
    COMMON ABBREVIATIONS used in Slovak/Czech medical templates:
    RA = Rodinná anamnéza (Family history) | OA = Osobná anamnéza (Personal/past medical history) | SA = Sociálna anamnéza (Social history — living situation, marital status, support system) | EA = Epidemiologická anamnéza (Epidemiological history — travel, exposures) | PA = Pracovná anamnéza (Work/occupational history — job, occupation, workplace exposures) | AA = Alergie (Allergies) | LA = Lieková anamnéza (Current medications — drug names, dosages, frequencies) | Ab = Abúzy (Substance use — tobacco, alcohol, recreational drugs) | TO = Terajšie ochorenie (History of present illness — chief complaint, symptom timeline, current episode narrative ONLY, NEVER medication lists)
@@ -231,6 +316,10 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
    f) Family history → ONLY in sections labeled RA, FHx, "Rodinná anamnéza", or "Family history".
    g) Past medical/surgical history → ONLY in sections labeled OA, PMHx, "Osobná anamnéza", or "Past history".
    h) Allergies → ONLY in sections labeled AA, "Alergie", or "Allergies".
+
+10. ASSESSMENT SCOPE: The Záver/Assessment section must be CONCISE. Include ONLY active current problems and management-relevant chronic conditions. Do NOT list every historical diagnosis. Background-only conditions go ONLY in OA.
+
+11. HISTORY COMPRESSION: For OA, RA, SA, PA, Ab sections — compact flowing prose, comma-separated or semicolon-separated inline lists. Do NOT expand abbreviations into verbose descriptions.
 
 TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
 {{sections}}
@@ -255,9 +344,21 @@ export function buildTemplateUserMessage(
   validatedFacts?: ExtractedFacts,
   sectionLabels?: Record<string, string>,
   sectionContexts?: Record<string, string>,
+  visitDate?: string,
 ): string {
   const allIds = flattenSectionIds(template);
   const parts: string[] = [];
+
+  // Provide encounter date so the model can resolve temporal references
+  if (visitDate) {
+    const d = new Date(visitDate);
+    if (!isNaN(d.getTime())) {
+      const formatted = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+      parts.push(
+        `ENCOUNTER DATE: ${formatted}\nResolve "dnes" / "today" / "včera" / "yesterday" relative to this date.`,
+      );
+    }
+  }
 
   if (validatedFacts && countFacts(validatedFacts) > 0) {
     // When section labels are available, assign facts to sections
@@ -270,7 +371,7 @@ export function buildTemplateUserMessage(
       );
       const factBlock = formatAssignedFactsForPrompt(assignment, sectionLabels);
       parts.push(
-        `VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS:\nRULES:\n1. Place ONLY the listed facts into each section — do NOT move facts between sections.\n2. Do NOT introduce clinical details, context, or information not in this list.\n3. Preserve each fact's wording as closely as possible — only adjust grammar minimally.\n4. Present facts in the EXACT order shown below within each section. Do NOT reorder.\n5. Each fact = one distinct statement or bullet point. Do NOT merge facts into compound sentences.\n\n${factBlock}`,
+        `VALIDATED CLINICAL FACTS — PRE-ASSIGNED TO SECTIONS:\nRULES:\n1. Place ONLY the listed facts into each section — do NOT move facts between sections.\n2. Do NOT introduce clinical details, context, or information not in this list.\n3. Preserve each fact's wording as closely as possible — only adjust grammar minimally.\n4. Present facts in the EXACT order shown below within each section. Do NOT reorder.\n5. Each fact = one distinct statement on its own line. Do NOT merge facts into compound sentences. Do NOT prefix with dashes or bullet markers.\n\n${factBlock}`,
       );
     } else {
       // Fallback: category-grouped facts without section assignment
@@ -475,6 +576,9 @@ export async function generateFromTemplate(
   sectionContexts?: Record<string, string>,
   onSection?: (id: string, title: string, content: string) => void,
   validatedFacts?: ExtractedFacts,
+  visitDate?: string,
+  patientName?: string,
+  patientId?: string,
 ): Promise<{
   generatedNote: string;
   suggestedTitle: string;
@@ -494,6 +598,7 @@ export async function generateFromTemplate(
     validatedFacts,
     sectionLabels,
     sectionContexts,
+    visitDate,
   );
 
   // Build system prompt — use the lean fact-based prompt when validated
@@ -606,14 +711,51 @@ export async function generateFromTemplate(
     sectionContents[id] = typeof value === "string" ? value : "";
   }
 
-  // Validate ICD descriptions against canonical CSV data
-  // Replaces any hallucinated/paraphrased descriptions with exact CSV text
+  // Post-processing Pass A — strip bullet markers.
+  // The model often ignores prompt instructions and produces bullets anyway.
+  // Belt-and-braces: strip them deterministically so the output never has
+  // bullet-prefixed lines regardless of model compliance.
   for (const id of allIds) {
     if (sectionContents[id]) {
-      sectionContents[id] = validateIcdDescriptions(
+      sectionContents[id] = stripBulletMarkers(sectionContents[id]);
+    }
+  }
+
+  // Post-processing Pass B — clear parent sections that have subsections.
+  // Content should live in the subsections only (e.g. Anamnézy parent is
+  // empty, all content goes into RA, OA, SA, etc.).
+  const parentIds = collectParentSectionIds(template.sections);
+  for (const id of parentIds) {
+    sectionContents[id] = "";
+  }
+
+  // Validate ICD descriptions against canonical CSV data.
+  // When validated facts are present, the ICD block was pre-rendered by
+  // buildPreRenderedIcdBlock — skip overwriting to preserve the doctor's
+  // original wording alongside the ICD code.
+  if (!hasValidatedFacts) {
+    for (const id of allIds) {
+      if (sectionContents[id]) {
+        sectionContents[id] = validateIcdDescriptions(
+          sectionContents[id],
+          language,
+        );
+      }
+    }
+  }
+
+  // Pass 2.1 — Defensive PHI scrub on generated output. Even though
+  // input was scrubbed (Pass 1.1), the LLM might reconstruct PHI from
+  // partial clues. Re-apply scrubPhi to each section value.
+  // Always runs — birth numbers, phones, emails are pattern-matched
+  // regardless of whether patient name/id are known.
+  for (const id of allIds) {
+    if (sectionContents[id]) {
+      sectionContents[id] = scrubPhi(
         sectionContents[id],
-        language,
-      );
+        patientName,
+        patientId,
+      ).scrubbed;
     }
   }
 

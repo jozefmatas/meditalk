@@ -274,19 +274,15 @@ describe("buildEnrichedSystemPrompt", () => {
     expect(result).toContain("ICD-10 BLOCK (VERBATIM)");
   });
 
-  it("uses condensed medication block when hasValidatedFacts is true", () => {
+  it("omits medication block entirely when hasValidatedFacts is true", () => {
     const analysis = makeAnalysis({
       mentionedMedications: ["Metformin"],
     });
     const result = buildEnrichedSystemPrompt(BASE_PROMPT, analysis, "en", true);
-    expect(result).toContain("VERIFIED MEDICATIONS");
-    // Should NOT contain the verbose rules
-    expect(result).not.toContain(
-      "Only include medications EXPLICITLY mentioned",
-    );
-    expect(result).not.toContain(
-      'Do NOT add medications that are "commonly prescribed"',
-    );
+    // Facts are the single source of truth — no separate medication block
+    expect(result).not.toContain("VERIFIED MEDICATIONS");
+    expect(result).not.toContain("MEDICATION");
+    expect(result).not.toContain("Metformin");
   });
 
   it("uses full medication rules when hasValidatedFacts is false", () => {

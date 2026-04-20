@@ -7,7 +7,14 @@ import type {
 import { FACT_CATEGORIES, emptyExtractedFacts } from "./fact-extraction";
 import type { SupportedLanguage } from "../types";
 import type { ClinicalAnalysis } from "./types";
-import { isValidMedication, correctMedicationName } from "./medication-index";
+import {
+  isValidMedication,
+  correctMedicationBaseName,
+} from "./medication-index";
+import {
+  parseMedicationFact,
+  reconstructMedicationValue,
+} from "./medication-normalizer";
 import { logger } from "@/lib/logger";
 
 /**
@@ -240,19 +247,30 @@ export function validateFacts(
       // 4. Category-specific: auto-correct misspelled medications.
       // Transcription often misspells drug names (e.g. "Koprenesa" for
       // "Co-Prenessa"). If the name isn't in the approved list, try
-      // fuzzy matching and auto-correct if a confident match is found.
+      // fuzzy matching and auto-correct ONLY the base drug name.
+      // CRITICAL: dose, frequency, and route are preserved verbatim
+      // from the original fact value. This prevents dosage fabrication
+      // where the CSV product name (e.g. "Eliquis 2,5 mg") would
+      // overwrite the doctor's stated dose (e.g. "Eliquis 5 mg").
       if (category === "medications" && options.locale) {
         const locale = options.locale;
         if (!isValidMedication(acceptedFact.value, locale)) {
-          const correction = correctMedicationName(acceptedFact.value, locale);
+          const parsed = parseMedicationFact(acceptedFact.value);
+          const correction = correctMedicationBaseName(parsed.name, locale);
           if (correction) {
             const original = acceptedFact.value;
-            acceptedFact.value = correction.correctedName;
+            acceptedFact = {
+              ...acceptedFact,
+              value: reconstructMedicationValue({
+                ...parsed,
+                correctedName: correction.correctedBaseName,
+              }),
+            };
             logger.info(
-              `[fact-validator] Auto-corrected medication: "${original}" → "${correction.correctedName}" (${correction.entry.activeIngredient})`,
+              `[fact-validator] Auto-corrected medication name: "${parsed.name}" → "${correction.correctedBaseName}" (${correction.entry.activeIngredient}), preserved dose/freq from original`,
             );
             warnings.push(
-              `Medication auto-corrected: "${original}" → "${correction.correctedName}" (${correction.entry.activeIngredient})`,
+              `Medication name auto-corrected: "${original}" → "${acceptedFact.value}" (${correction.entry.activeIngredient})`,
             );
           } else {
             warnings.push(

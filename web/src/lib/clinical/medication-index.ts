@@ -196,7 +196,7 @@ export function searchMedications(
  * "Co-Prenessa 4 mg /1,25 mg" → "Co-Prenessa"
  * "Amlessa 8 mg/10 mg tablety" → "Amlessa"
  */
-function extractBaseName(fullName: string): string {
+export function extractBaseName(fullName: string): string {
   // Cut at the first digit or "mg"/"ml"/"tbl" marker
   const match = fullName.match(/^(.*?)(?:\s+\d|\s+mg|\s+ml|\s+tbl)/i);
   return (match ? match[1] : fullName).trim();
@@ -308,6 +308,54 @@ export function correctMedicationName(
   if (fuzzyMatches.length > 0) {
     return {
       correctedName: fuzzyMatches[0].name,
+      entry: fuzzyMatches[0],
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Correct a misspelled medication BASE name only — never returns the full
+ * CSV product name with dosage. This is the safe alternative to
+ * `correctMedicationName()` that prevents dosage fabrication.
+ *
+ * "Koprenesa" → { correctedBaseName: "Co-Prenessa", entry: ... }
+ * "Rytmonorm" → null (already valid)
+ *
+ * Unlike `correctMedicationName()` which returns "Co-Prenessa 4 mg /1,25 mg",
+ * this returns only "Co-Prenessa" — the caller preserves the original
+ * dosage/frequency from the fact value.
+ */
+export function correctMedicationBaseName(
+  name: string,
+  locale = "en",
+): { correctedBaseName: string; entry: MedicationEntry } | null {
+  // Check if the base name itself is already a valid medication base name
+  const normalizedName = name.trim();
+  if (!normalizedName) return null;
+
+  // First: check if the exact input is already a valid medication key
+  if (isValidMedication(normalizedName, locale)) return null;
+
+  // Check if extracting the base name gives us a valid match
+  const baseName = extractBaseName(normalizedName);
+  if (isValidMedication(baseName, locale)) return null;
+
+  // Try substring match — but return only the base name portion
+  const substringMatches = searchMedications(baseName, 1, locale);
+  if (substringMatches.length > 0) {
+    return {
+      correctedBaseName: extractBaseName(substringMatches[0].name),
+      entry: substringMatches[0],
+    };
+  }
+
+  // Fuzzy match with higher threshold (0.7) for auto-correction
+  const fuzzyMatches = fuzzySearchMedications(baseName, 1, locale, 0.7);
+  if (fuzzyMatches.length > 0) {
+    return {
+      correctedBaseName: extractBaseName(fuzzyMatches[0].name),
       entry: fuzzyMatches[0],
     };
   }
