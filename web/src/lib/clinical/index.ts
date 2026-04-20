@@ -68,22 +68,9 @@ export type {
   ResolvedIcdCode,
   DiagnosisResolutionResult,
 } from "./diagnosis-resolver";
-export {
-  buildStructuredAssessment,
-  cleanStructuredAssessment,
-  classifyDiagnosisBucket,
-  renderStructuredAssessment,
-  normalizeDiagnosisLabel,
-  hasStructuredContent,
-  isDifferentialLabel,
-  isHistoricalLabel,
-  isChronicLabel,
-} from "./assessment-structuring";
-export type {
-  StructuredAssessment,
-  ResolvedDiagnosisItem,
-  AssessmentBucket,
-} from "./assessment-structuring";
+// assessment-structuring + assessment-classifier removed in Phase 6.
+// All bucketing (primary/secondary/chronic/differential) now lives in
+// encounter-model.ts → `classifyProblem` + `buildEncounterModel`.
 export {
   buildMedicationReferenceForConcepts,
   getMedicationActiveIngredient,
@@ -152,11 +139,6 @@ export type {
 } from "./icd-certainty";
 export { scrubPhi } from "./phi-scrubber";
 export type { PhiAudit, ScrubResult } from "./phi-scrubber";
-export { classifyAssessment } from "./assessment-classifier";
-export type {
-  ClassificationResult,
-  ClassifiedCandidate,
-} from "./assessment-classifier";
 export {
   enforceContentRouting,
   classifySection,

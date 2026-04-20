@@ -28,7 +28,6 @@ import {
   computeFingerprint,
   filterCertainIcdCandidates,
   scrubPhi,
-  classifyAssessment,
 } from "@/lib/clinical";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -787,20 +786,12 @@ export async function POST(request: NextRequest) {
         `[generate] ICD certainty — kept ${certainty.counts.kept}/${certainty.counts.total}`,
         certainty.dropped.slice(0, 5),
       );
-      // Pass 1.8 — Assessment relevance classification: cap diagnosis
-      // dumps by tier so the Záver stays focused.
-      const assessment = classifyAssessment(certainty.kept, validatedFacts);
-      const assessmentKept = [
-        ...assessment.activeCurrent,
-        ...assessment.chronicRelevant,
-      ];
-      logger.debug(
-        `[generate] Assessment classification — ${assessment.counts.active} active, ${assessment.counts.chronic} chronic, ${assessment.counts.background} background`,
-      );
-
+      // Assessment bucketing (primary/secondary/chronic/differential)
+      // is now handled by the EncounterModel builder — no separate
+      // classifyAssessment pass needed.
       clinicalAnalysis = {
         ...clinicalAnalysis,
-        candidateIcdCodes: assessmentKept,
+        candidateIcdCodes: certainty.kept,
       };
     }
 
