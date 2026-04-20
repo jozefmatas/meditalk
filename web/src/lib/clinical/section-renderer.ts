@@ -33,6 +33,8 @@ import {
   renderSocialHistorySection,
   renderEpidemiologicalSection,
   renderMedicationsSection,
+  renderWorkHistorySection,
+  renderFamilyHistorySection,
 } from "./renderers/history";
 import {
   renderNarrativeFromModel,
@@ -62,12 +64,14 @@ const ROLE_TO_TIER: Record<SectionRole, RenderTier> = {
   labs: "deterministic",
   chiefComplaint: "opus",
   plan: "opus",
-  // Everything else → haiku
+  // Everything else → haiku (promoted to deterministic when a model is supplied)
   substanceUse: "haiku",
   allergies: "haiku",
   epidemiological: "haiku",
   personalHistory: "haiku",
   socialHistory: "haiku",
+  workHistory: "haiku",
+  familyHistory: "haiku",
   findings: "haiku",
   other: "haiku",
 };
@@ -590,6 +594,8 @@ export async function renderSections(
       "substanceUse",
       "personalHistory",
       "socialHistory",
+      "workHistory",
+      "familyHistory",
       "epidemiological",
     ]);
   const tiers: SectionTier[] = options?.encounterModel
@@ -638,6 +644,10 @@ export async function renderSections(
       result[section.id] = renderPersonalHistorySection(options.encounterModel);
     } else if (section.role === "socialHistory" && options?.encounterModel) {
       result[section.id] = renderSocialHistorySection(options.encounterModel);
+    } else if (section.role === "workHistory" && options?.encounterModel) {
+      result[section.id] = renderWorkHistorySection(options.encounterModel);
+    } else if (section.role === "familyHistory" && options?.encounterModel) {
+      result[section.id] = renderFamilyHistorySection(options.encounterModel);
     } else if (section.role === "epidemiological" && options?.encounterModel) {
       result[section.id] = renderEpidemiologicalSection(options.encounterModel);
     } else if (section.role === "assessment") {

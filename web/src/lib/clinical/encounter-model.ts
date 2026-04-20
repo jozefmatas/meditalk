@@ -26,6 +26,7 @@ import type { ExtractedFact, ExtractedFacts } from "./fact-extraction";
 import type { CandidateIcdCode } from "./types";
 import type { ResolvedIcdCode } from "./diagnosis-resolver";
 import { parseMeasurement, type MeasurementKind } from "./numeric-sanity";
+import { getIcdDescription } from "./icd-index";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -280,12 +281,16 @@ function isAcuteCode(code: string | undefined): boolean {
  */
 export function classifyProblem(input: {
   label: string;
+  canonicalLabel?: string;
   icdCode?: string;
   factOriginCategory?: ExtractedFact["category"];
 }): { certainty: ProblemItem["certainty"]; priority: ProblemItem["priority"] } {
-  const { label, icdCode, factOriginCategory } = input;
+  const { label, canonicalLabel, icdCode, factOriginCategory } = input;
 
   if (isDifferentialLabel(label)) {
+    return { certainty: "differential", priority: "active-supporting" };
+  }
+  if (canonicalLabel && isDifferentialLabel(canonicalLabel)) {
     return { certainty: "differential", priority: "active-supporting" };
   }
 
@@ -319,24 +324,40 @@ export function classifyProblem(input: {
 function buildProblemList(
   codes: CandidateIcdCode[] | ResolvedIcdCode[],
   factIndexMap: Map<string, ExtractedFact["category"]>,
+  language: SupportedLanguage,
 ): ProblemItem[] {
   const byKey = new Map<string, ProblemItem>();
 
   for (const code of codes) {
     const resolved = code as ResolvedIcdCode;
-    const label = resolved.canonicalDescription ?? code.description;
-    // The fact evidence ids come from `resolver.factIds` when set, else
-    // empty. No evidence → certainty degrades later (or we drop it).
+    // DISPLAY label priority: CSV description (per-locale) > resolver's
+    // canonicalDescription > Sonnet's raw description. Sonnet sometimes
+    // returns a wrong description for a correct code (M54.06 paired with
+    // "Panikulitída" instead of "Bolesť chrbta") — we always trust the
+    // CSV when the code exists there.
+    const csvDescription = getIcdDescription(code.code, language);
+    const displayLabel =
+      csvDescription ?? resolved.canonicalDescription ?? code.description;
+    // CLASSIFICATION label: the raw description as emitted (Sonnet or
+    // resolver). Uncertainty/historical/chronic markers ride on that
+    // wording — the CSV canonical is too clean to carry "Diferenciálne
+    // diagnosticky …" / "Stav po …" context.
+    const rawLabel = code.description;
+
     const evidenceFactIds = resolved.factIds ?? [];
     const factOriginCategory = evidenceFactIds
       .map((id) => factIndexMap.get(id))
       .find((c): c is ExtractedFact["category"] => Boolean(c));
 
     const { certainty, priority } = classifyProblem({
-      label,
+      label: rawLabel,
+      canonicalLabel: resolved.canonicalDescription,
       icdCode: code.code,
       factOriginCategory,
     });
+    // We store the clean display label on the item, but classification
+    // was done on the raw label above.
+    const label = displayLabel;
 
     const key = code.code.replace(/\./g, "").toUpperCase();
     const existing = byKey.get(key);
@@ -531,7 +552,11 @@ export function buildEncounterModel(
   });
 
   // Build the problem list from candidate ICDs.
-  const problems = buildProblemList(candidateIcdCodes, factIndexMap);
+  const problems = buildProblemList(
+    candidateIcdCodes,
+    factIndexMap,
+    language,
+  );
 
   const primaryCandidates = problems.filter(
     (p) => p.certainty === "final" && p.priority === "encounter-driving",
@@ -541,15 +566,19 @@ export function buildEncounterModel(
   // to live in assessment-structuring lives here now.
   const primaryProblem = pickPrimary(primaryCandidates);
 
-  const supportingProblems = problems.filter(
-    (p) =>
-      p.certainty !== "differential" &&
-      p.priority === "active-supporting" &&
-      (!primaryProblem || p.icdCode !== primaryProblem.icdCode) &&
-      !isRedundantWithPrimary(p, primaryProblem),
+  const supportingProblems = collapseParentChildCodes(
+    problems.filter(
+      (p) =>
+        p.certainty !== "differential" &&
+        p.priority === "active-supporting" &&
+        (!primaryProblem || p.icdCode !== primaryProblem.icdCode) &&
+        !isRedundantWithPrimary(p, primaryProblem),
+    ),
   );
 
-  const chronicConditions = problems.filter((p) => p.priority === "chronic");
+  const chronicConditions = collapseParentChildCodes(
+    problems.filter((p) => p.priority === "chronic"),
+  );
 
   const differentialProblems = problems.filter(
     (p) =>
@@ -606,6 +635,35 @@ export function buildEncounterModel(
     },
     chronicConditions,
   };
+}
+
+/**
+ * Collapse parent (3-char) + child (dotted) codes in the same category
+ * to a single entry. I10 + I10.90 → I10.90 wins. Among multiple
+ * dotted subcodes of the same parent, insertion order wins.
+ */
+function collapseParentChildCodes(items: ProblemItem[]): ProblemItem[] {
+  const byCategory = new Map<string, ProblemItem>();
+  const keepWithoutCode: ProblemItem[] = [];
+  for (const it of items) {
+    const prefix = icdCategoryPrefix(it.icdCode);
+    if (!prefix) {
+      keepWithoutCode.push(it);
+      continue;
+    }
+    const existing = byCategory.get(prefix);
+    if (!existing) {
+      byCategory.set(prefix, it);
+      continue;
+    }
+    const currentIsSpecific = it.icdCode?.includes(".") ?? false;
+    const existingIsSpecific = existing.icdCode?.includes(".") ?? false;
+    // Specific wins over parent; otherwise keep the first encountered.
+    if (currentIsSpecific && !existingIsSpecific) {
+      byCategory.set(prefix, it);
+    }
+  }
+  return [...byCategory.values(), ...keepWithoutCode];
 }
 
 function pickPrimary(candidates: ProblemItem[]): ProblemItem | null {

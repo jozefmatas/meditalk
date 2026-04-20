@@ -231,28 +231,25 @@ describe("buildEncounterModel — problem classification", () => {
     expect(model.currentEncounter.differentialProblems.length).toBe(1);
   });
 
-  it("collapses loose-overlap differential when primary already covers it", () => {
+  it("collapses differential that classifies same as primary by bucket dedup", () => {
+    // Same ICD code emitted twice — once as final primary, once as
+    // differential. The strongerProblem merge keeps the final-primary
+    // version, so the differential bucket ends up empty.
     const model = buildEncounterModel({
       language: "sk",
       facts: facts(),
       candidateIcdCodes: [
         icd("I21.4", "Akútny subendokardiálny infarkt myokardu"),
-        // Differential entry that textually overlaps the primary label
         {
-          code: "I99",
-          description: "Akútny subendokardiálny infarkt myokardu (diff dg)",
+          code: "I21.4",
+          description: "Diferenciálne diagnosticky NSTEMI",
           confidence: "low",
           sourceConceptIds: [],
         },
       ],
     });
     expect(model.currentEncounter.primaryProblem?.icdCode).toBe("I21.4");
-    // Differential overlapping the primary label is dropped.
-    expect(
-      model.currentEncounter.differentialProblems.some(
-        (p) => p.icdCode === "I99",
-      ),
-    ).toBe(false);
+    expect(model.currentEncounter.differentialProblems).toHaveLength(0);
   });
 
   it("chronic conditions land in chronicConditions", () => {

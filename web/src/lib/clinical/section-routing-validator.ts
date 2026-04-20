@@ -33,6 +33,8 @@ export type SectionRole =
   | "plan"
   | "personalHistory"
   | "socialHistory"
+  | "workHistory"
+  | "familyHistory"
   | "assessment"
   | "chiefComplaint"
   | "findings"
@@ -53,6 +55,8 @@ const ABBREVIATION_ROLE_MAP: Record<string, SectionRole> = {
   ea: "epidemiological",
   oa: "personalHistory",
   sa: "socialHistory",
+  pa: "workHistory",
+  ra: "familyHistory",
   to: "chiefComplaint",
 };
 
