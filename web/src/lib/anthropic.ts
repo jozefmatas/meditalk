@@ -27,8 +27,16 @@ import {
   formatAssignedFactsForPrompt,
 } from "./clinical/fact-section-assigner";
 import { scrubPhi } from "./clinical/phi-scrubber";
-import { enforceContentRouting } from "./clinical/section-routing-validator";
+import { runSanityGate } from "./clinical/sanity-gate";
+import type { SanityReport } from "./clinical/sanity-gate";
 import { renderSections } from "./clinical/section-renderer";
+import { buildEncounterModel } from "./clinical/encounter-model";
+import {
+  renderAssessmentFromModel,
+  modelHasAnyProblem,
+} from "./clinical/renderers/assessment";
+import { classifySection } from "./clinical/section-routing-validator";
+import { enforceSectionPurity } from "./clinical/section-purity";
 import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
@@ -192,6 +200,12 @@ If a section below has "SECTION-SPECIFIC GUIDANCE", that guidance ALWAYS takes a
 8. FORMAT: Return valid JSON with one key for each section ID listed below (string value, or "" if empty). No other keys.
 
 9. ASSESSMENT SCOPE: The Záver/Assessment section must be CONCISE. Include ONLY active current problems and management-relevant chronic conditions. Do NOT list every historical diagnosis. Background-only conditions go ONLY in OA.
+
+10. NEGATED FACTS: a fact prefixed with "[NEGATED]" documents the ABSENCE of the finding (pertinent negative) — the doctor deliberately recorded that this symptom, finding, or medication is NOT present / NOT taken. Render it as a natural negation in {{language}} that flows with the section:
+    - Slovak: "bez <genitív>" ("bez dušnosti"), "neguje <akuzatív>" ("neguje nauzeu"), "neudáva <akuzatív>" ("neudáva bolesť hlavy").
+    - Czech: "bez <genitiv>", "neguje", "neudává".
+    - English: "no <noun>", "denies <noun>", "no evidence of <noun>".
+    NEVER emit the literal string "[NEGATED]" in the output. Integrate negatives into the same section as affirmative facts of that category — pertinent negatives are clinically as important as positives, especially in the present-illness, symptoms, and examination sections.
 
 10. HISTORY COMPRESSION: For OA, RA, SA, PA, Ab sections — compact flowing prose, comma-separated or semicolon-separated inline lists. Do NOT expand abbreviations into verbose descriptions.
 
@@ -592,6 +606,8 @@ export async function generateFromTemplate(
   systemPrompt: string;
   /** Exact user message sent to the generator (for fingerprinting). */
   userMessage: string;
+  /** Structured sanity report produced by the post-render gate. */
+  sanityReport: SanityReport;
 }> {
   const allIds = flattenSectionIds(template);
   const sectionIdSet = new Set(allIds);
@@ -601,10 +617,20 @@ export async function generateFromTemplate(
     validatedFacts && countFacts(validatedFacts) > 0
   );
 
-  // Use tiered rendering when:
-  // 1. Validated facts are present (deterministic fact pipeline ran)
-  // 2. No custom system prompt override on the template
-  const useTieredRendering = hasValidatedFacts && !template.systemPrompt;
+  // Use tiered rendering whenever validated facts are present. A custom
+  // `template.systemPrompt` USED to disable this path, but its main role
+  // is formatting guidance that the tiered Opus prompt already enforces
+  // — the legacy path leaked Opus into Assessment/vitals/meds and
+  // degraded Záver into a flat diagnosis dump. When both are set we
+  // piggy-back the custom prompt as `styleGuide` so doctor-provided
+  // tone / abbreviation preferences still apply, but the deterministic
+  // pipeline runs for the sections that benefit from it.
+  const useTieredRendering = hasValidatedFacts;
+  if (hasValidatedFacts && template.systemPrompt) {
+    logger.debug(
+      "[generate] Template has a custom systemPrompt; tiered rendering still runs with it piped through as styleGuide.",
+    );
+  }
 
   // Build user message for fingerprinting (even for tiered path)
   const userMessage = buildTemplateUserMessage(
@@ -652,9 +678,40 @@ export async function generateFromTemplate(
 
   const sectionContents: Record<string, string> = {};
 
+  // Pre-compute the ICD block at the outer scope so the sanity gate can
+  // use it as an auto-rerender source for an empty Assessment section.
+  // Used by both the tiered renderer (below) and the gate (further down).
+  const preRenderedIcdBlock = clinicalAnalysis
+    ? buildPreRenderedIcdBlock(clinicalAnalysis.candidateIcdCodes)
+    : undefined;
+
+  // Stage 3 — Build the EncounterModel (single source of truth).
+  // One place decides: primary/secondary/chronic/differential, objective
+  // groupings (vitals/labs/ecg/imaging/exam), history slots. Every
+  // downstream renderer consumes this model and may only format.
+  const encounterModel =
+    clinicalAnalysis && validatedFacts
+      ? buildEncounterModel({
+          language,
+          visitDate,
+          facts: validatedFacts,
+          candidateIcdCodes: clinicalAnalysis.candidateIcdCodes,
+        })
+      : null;
+
+  // Assessment / Záver deterministic rendering from the model. This
+  // replaces the old `buildStructuredAssessment` + `cleanStructuredAssessment`
+  // + `renderStructuredAssessment` pipeline with a single model read.
+  const structuredAssessmentText =
+    encounterModel && modelHasAnyProblem(encounterModel)
+      ? renderAssessmentFromModel(encounterModel)
+      : undefined;
+
   if (useTieredRendering) {
     // ── TIERED PATH: deterministic + Haiku + Opus in parallel ──
-    logger.debug("[generate] Using tiered section rendering (deterministic + Haiku + Opus)");
+    logger.debug(
+      "[generate] Using tiered section rendering (deterministic + Haiku + Opus)",
+    );
 
     const factAssignment = assignFactsToSections(
       validatedFacts!,
@@ -662,11 +719,21 @@ export async function generateFromTemplate(
       sectionContexts,
     );
 
-    const icdBlock = clinicalAnalysis
-      ? buildPreRenderedIcdBlock(clinicalAnalysis.candidateIcdCodes)
-      : undefined;
+    // Prefer the structured Assessment rendering when available — the
+    // renderer consumes `icdBlock` verbatim, so passing the structured
+    // text here replaces the flat "- CODE description" dump with the
+    // primary / secondary / chronic / differential bucketed form.
+    const icdBlock = structuredAssessmentText ?? preRenderedIcdBlock;
 
     const templateSpecialty = template.specialties?.[0];
+
+    // Merge custom systemPrompt into styleGuide — the tiered Opus prompt
+    // enforces the structural rules; a template's custom prompt now
+    // contributes tone / abbreviation / phrasing preferences only.
+    const mergedStyleGuide =
+      template.systemPrompt && template.styleGuide
+        ? `${template.styleGuide}\n\n${template.systemPrompt}`
+        : (template.styleGuide ?? template.systemPrompt);
 
     const { sectionContents: rendered } = await renderSections(
       template,
@@ -677,10 +744,11 @@ export async function generateFromTemplate(
         sectionContexts,
         icdBlock,
         clinicalAnalysis,
+        chunks,
         doctorNotes,
         fileTexts,
         visitDate,
-        styleGuide: template.styleGuide,
+        styleGuide: mergedStyleGuide,
         templateSpecialty,
         onSection,
       },
@@ -705,17 +773,9 @@ export async function generateFromTemplate(
       sectionContents[id] = "";
     }
 
-    // Pass C — enforce section routing on Opus-rendered sections only.
-    // Deterministic and Haiku sections can't misroute, but Opus sees
-    // raw file texts and doctor notes, so it might deviate.
-    const routed = enforceContentRouting(
-      sectionContents,
-      sectionLabels,
-      sectionContexts,
-    );
-    for (const id of allIds) {
-      sectionContents[id] = routed[id] ?? sectionContents[id];
-    }
+    // Pass C has been folded into the sanity gate below — it runs on the
+    // PHI-scrubbed output so we catch PHI-only lines and misrouted content
+    // in a single pass with a structured report.
   } else {
     // ── LEGACY PATH: single Opus call (unchanged) ──
     logger.debug(
@@ -798,17 +858,9 @@ export async function generateFromTemplate(
       sectionContents[id] = "";
     }
 
-    // Post-processing Pass C — enforce section content routing (fact path only)
-    if (hasValidatedFacts) {
-      const routed = enforceContentRouting(
-        sectionContents,
-        sectionLabels,
-        sectionContexts,
-      );
-      for (const id of allIds) {
-        sectionContents[id] = routed[id] ?? sectionContents[id];
-      }
-    }
+    // Pass C has been folded into the sanity gate below — see the post-
+    // PHI-scrub block for the unified content-routing + PHI-only-line
+    // stripping pass with a structured report.
   }
 
   // ── Common post-processing (both paths) ──
@@ -828,6 +880,21 @@ export async function generateFromTemplate(
     }
   }
 
+  // Pass 2.05 — Structured Assessment override. When we have a
+  // StructuredAssessment with content, it is the single source of truth
+  // for the Záver section. Overwrite any section classified as the
+  // "assessment" role with the deterministic bucketed render so Opus
+  // (legacy path) or stray Haiku drift (tiered path) can't flatten the
+  // buckets back into a mixed list.
+  if (structuredAssessmentText) {
+    for (const id of allIds) {
+      const role = classifySection(sectionLabels[id], sectionContexts?.[id]);
+      if (role === "assessment") {
+        sectionContents[id] = structuredAssessmentText;
+      }
+    }
+  }
+
   // Pass 2.1 — Defensive PHI scrub on generated output. Even though
   // input was scrubbed (Pass 1.1), the LLM might reconstruct PHI from
   // partial clues. Re-apply scrubPhi to each section value.
@@ -841,6 +908,86 @@ export async function generateFromTemplate(
         patientId,
       ).scrubbed;
     }
+  }
+
+  // Pass 2.2 — Sanity gate. Runs AFTER PHI scrub so it can:
+  //   1. enforce section content routing (formerly Pass C),
+  //   2. strip lines that became entirely PHI tokens after scrubbing
+  //      (e.g. "[ADDRESS] (14:02)" in a vitals block),
+  //   3. flag empty critical sections (Assessment with no content when
+  //      diagnosis facts were validated),
+  //   4. act as a safety net for impossible measurements that slipped
+  //      through fact validation.
+  // The gate never throws — the returned report is surfaced to the caller
+  // via the `sanityReport` field of this function's return value so the
+  // API layer can log / display warnings.
+  const gate = runSanityGate({
+    sectionContents,
+    sectionLabels,
+    sectionContexts,
+    validatedFacts: validatedFacts
+      ? {
+          diagnoses: validatedFacts.diagnoses,
+          medications: validatedFacts.medications,
+        }
+      : undefined,
+    icdBlock: preRenderedIcdBlock,
+    runContentRouting: true,
+  });
+  for (const id of allIds) {
+    sectionContents[id] = gate.contents[id] ?? sectionContents[id];
+  }
+  const sanityReport = gate.report;
+
+  // Pass 2.3 — Section-target purity. Strips lines that landed in the
+  // WRONG section's renderer output (e.g. HPI narrative in LA,
+  // structured-assessment headings in EKG, raw vitals lines in Záver,
+  // CSV debris anywhere). Operates per-line so legitimate content is
+  // preserved; violations are surfaced on the sanity report for
+  // observability.
+  const purity = enforceSectionPurity(
+    sectionContents,
+    sectionLabels,
+    sectionContexts,
+  );
+  for (const id of allIds) {
+    sectionContents[id] = purity.contents[id] ?? sectionContents[id];
+  }
+  if (purity.violations.length > 0) {
+    logger.debug(
+      `[section-purity] stripped ${purity.violations.length} line(s) from mis-routed sections`,
+      purity.violations.slice(0, 10).map((v) => ({
+        sectionId: v.sectionId,
+        role: v.role,
+        reason: v.reason,
+      })),
+    );
+    // Surface in the sanity report as warnings so the API layer can log / UI.
+    for (const v of purity.violations) {
+      sanityReport.warnings.push({
+        code: "misrouted_content_stripped",
+        severity: "warning",
+        sectionId: v.sectionId,
+        message: `Section-purity: stripped "${v.reason}" from "${sectionLabels[v.sectionId] ?? v.sectionId}".`,
+        detail: v.snippet,
+      });
+    }
+  }
+
+  if (sanityReport.errors.length > 0 || sanityReport.warnings.length > 0) {
+    logger.debug(
+      `[sanity-gate] ${sanityReport.errors.length} error(s), ${sanityReport.warnings.length} warning(s), ${sanityReport.interventions.length} intervention(s)`,
+      {
+        errors: sanityReport.errors.map((e) => ({
+          code: e.code,
+          sectionId: e.sectionId,
+        })),
+        warnings: sanityReport.warnings.map((w) => ({
+          code: w.code,
+          sectionId: w.sectionId,
+        })),
+      },
+    );
   }
 
   // Extract the ICD codes that actually appear in the generated report.
@@ -925,5 +1072,6 @@ export async function generateFromTemplate(
     extractedIcdCodes,
     systemPrompt,
     userMessage,
+    sanityReport,
   };
 }

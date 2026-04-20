@@ -37,8 +37,47 @@ export {
   getIcdDescription,
   isValidIcdCode,
   searchIcd,
+  searchIcdNormalized,
   resolveIcdCodes,
+  lookupIcdByDescription,
+  normalizeIcdDescription,
 } from "./icd-index";
+export { resolveIcdFromFacts, computeFactId } from "./diagnosis-resolver";
+export {
+  buildEncounterModel,
+  classifyProblem,
+  factId,
+} from "./encounter-model";
+export type {
+  EncounterModel,
+  ProblemItem,
+  FactRef,
+  BuildEncounterModelInput,
+} from "./encounter-model";
+export {
+  renderAssessmentFromModel,
+  modelHasAnyProblem,
+} from "./renderers/assessment";
+export type {
+  ResolvedIcdCode,
+  DiagnosisResolutionResult,
+} from "./diagnosis-resolver";
+export {
+  buildStructuredAssessment,
+  cleanStructuredAssessment,
+  classifyDiagnosisBucket,
+  renderStructuredAssessment,
+  normalizeDiagnosisLabel,
+  hasStructuredContent,
+  isDifferentialLabel,
+  isHistoricalLabel,
+  isChronicLabel,
+} from "./assessment-structuring";
+export type {
+  StructuredAssessment,
+  ResolvedDiagnosisItem,
+  AssessmentBucket,
+} from "./assessment-structuring";
 export {
   buildMedicationReferenceForConcepts,
   getMedicationActiveIngredient,
@@ -83,6 +122,16 @@ export type {
   ResolutionReason,
 } from "./fact-resolver";
 export {
+  resolveTimelineCoherence,
+  extractTemporalAnchor,
+} from "./timeline-coherence";
+export type {
+  TemporalAnchor,
+  TemporalKind,
+  TimelineConflict,
+  TimelineCoherenceResult,
+} from "./timeline-coherence";
+export {
   filterCertainIcdCandidates,
   extractContentTokens,
 } from "./icd-certainty";
@@ -112,5 +161,49 @@ export {
   classifySectionTiers,
   renderMedications,
   renderAssessment,
+  renderVitals,
+  renderEkg,
+  renderLabs,
+  detectVitalsKindFromLabel,
 } from "./section-renderer";
 export type { RenderTier, SectionTier, RenderUsage } from "./section-renderer";
+export {
+  parseMeasurement,
+  checkMeasurementSanity,
+  validateMeasurementValue,
+} from "./numeric-sanity";
+export type {
+  MeasurementKind,
+  ParsedMeasurement,
+  SanityVerdict,
+} from "./numeric-sanity";
+export {
+  validateMedicationStrength,
+  getValidStrengthsForBase,
+  normalizeStrength,
+} from "./medication-strength";
+export type { StrengthVerdict } from "./medication-strength";
+export { runSanityGate, stripPhiOnlyLines } from "./sanity-gate";
+export { enforceSectionPurity } from "./section-purity";
+export type {
+  SectionPurityResult,
+  SectionPurityViolation,
+  PurityRejectionReason,
+} from "./section-purity";
+export {
+  extractNarrativeEvidence,
+  formatNarrativeEvidence,
+} from "./narrative-evidence";
+export type {
+  NarrativeSnippet,
+  NarrativeSources,
+  NarrativeEvidenceOptions,
+} from "./narrative-evidence";
+export type {
+  SanityReport,
+  SanityIssue,
+  SanityIntervention,
+  SanitySeverity,
+  SanityGateInput,
+  SanityGateResult,
+} from "./sanity-gate";
