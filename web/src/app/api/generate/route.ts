@@ -43,7 +43,7 @@ import {
 } from "@/lib/extraction/constants";
 import { logger } from "@/lib/logger";
 
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
   en: "Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up",
@@ -153,8 +153,8 @@ export async function POST(request: NextRequest) {
         `[generate] Recovery audio — client: ${audioPath || "NONE"}, pending: ${pendingAudioPath || "NONE"}, session: ${sessionAudioPath || "NONE"} → using: ${effectiveAudioPath}`,
       );
       lap("recovery-download-start");
-      // Retry once on transient failure (ElevenLabs timeout, network blip).
-      for (let attempt = 0; attempt <= 1; attempt++) {
+      const RECOVERY_MAX_RETRIES = 2; // 3 attempts total
+      for (let attempt = 0; attempt <= RECOVERY_MAX_RETRIES; attempt++) {
         try {
           const { data: audioData, error: dlError } = await supabase.storage
             .from("encounter-files")
@@ -162,11 +162,11 @@ export async function POST(request: NextRequest) {
 
           if (dlError || !audioData) {
             logger.error(
-              `[generate] Failed to download recovery audio (attempt ${attempt}):`,
+              `[generate] Failed to download recovery audio (attempt ${attempt + 1}/${RECOVERY_MAX_RETRIES + 1}):`,
               dlError,
             );
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 2000));
+            if (attempt < RECOVERY_MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
               continue;
             }
             break;
@@ -195,21 +195,21 @@ export async function POST(request: NextRequest) {
             );
           } else {
             logger.warn(
-              "[generate] Recovery transcription returned empty text",
+              `[generate] Recovery transcription returned empty text (attempt ${attempt + 1}/${RECOVERY_MAX_RETRIES + 1})`,
             );
-            if (attempt === 0) {
-              await new Promise((r) => setTimeout(r, 2000));
+            if (attempt < RECOVERY_MAX_RETRIES) {
+              await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
               continue;
             }
           }
           break; // Success or non-retryable
         } catch (err) {
           logger.warn(
-            `[generate] Recovery audio transcription failed (attempt ${attempt}):`,
+            `[generate] Recovery audio transcription failed (attempt ${attempt + 1}/${RECOVERY_MAX_RETRIES + 1}):`,
             err,
           );
-          if (attempt === 0) {
-            await new Promise((r) => setTimeout(r, 2000));
+          if (attempt < RECOVERY_MAX_RETRIES) {
+            await new Promise((r) => setTimeout(r, 3000 * (attempt + 1)));
             continue;
           }
           // Final attempt failed — fall through to other fallbacks

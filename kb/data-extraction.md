@@ -1,6 +1,6 @@
 # MediTalk Data Extraction
 
-_Last updated: 2026-04-15_
+_Last updated: 2026-04-16_
 
 How raw clinical data (audio, files, doctor notes) gets into the system before the generation pipeline takes over. For the pipeline itself, see [prompt-pipeline.md](prompt-pipeline.md).
 
@@ -52,20 +52,20 @@ Transcription is **Scribe v2 batch**, not Whisper. The server-side wrapper lives
 transcribeAudio(file, filename, languageCode?, ctx?) -> string
 ```
 
-- Model: `scribe_v2`. SDK timeout: **300s** (default was 60s — too short for long consultations).
+- Model: `scribe_v2`. SDK timeout: **600s** (default was 60s — covers even 45+ min recordings on slow networks).
 - **Two client-side helpers** in [transcribe-blob.ts](web/src/components/encounters/hooks/transcribe-blob.ts):
   1. `transcribeFromPath(storagePath, language, visitId)` — **preferred path** for full recordings. Sends a JSON body `{ storagePath, language, visitId }` to `/api/batch-transcribe`. The server downloads from Supabase storage and transcribes. Bypasses Vercel's 4.5 MB body limit.
   2. `transcribeBlob(blob, language, visitId)` — direct FormData upload for small blobs (pause-time snapshots < 4.5 MB). Subject to Vercel body limit.
-     Both include a **single retry** with 2s delay for transient HTTP errors (408, 429, 502, 503, 504) and `TypeError` (network failure).
+     Both include **2 retries** (3 attempts total) with exponential backoff (3s, 6s) for transient HTTP errors (408, 429, 502, 503, 504) and `TypeError` (network failure).
 - The upload filename is derived from the blob's actual MIME type via `blobMimeToExt()` (`audio/mp4` -> `.m4a`, `audio/ogg` -> `.ogg`, `audio/wav` -> `.wav`, default `.webm`) — critical because Safari records `audio/mp4` and sending it with a `.webm` filename confuses server-side format detection.
-- The server endpoint [batch-transcribe/route.ts](web/src/app/api/batch-transcribe/route.ts) (`maxDuration: 300`) accepts two modes:
-  1. **Storage path mode** (`Content-Type: application/json`) — downloads audio from Supabase storage, derives extension from the storage path, transcribes server-side.
+- The server endpoint [batch-transcribe/route.ts](web/src/app/api/batch-transcribe/route.ts) (`maxDuration: 600`) accepts two modes:
+  1. **Storage path mode** (`Content-Type: application/json`) — downloads audio from Supabase storage (with 3-attempt retry + exponential backoff for transient download failures), derives extension from the storage path, transcribes server-side.
   2. **Direct blob mode** (`Content-Type: multipart/form-data`) — receives audio as FormData. Fallback for small blobs.
 - Usage is logged via `logUsage` with provider `"elevenlabs"`, operation `"transcription"`.
 
 ### 1.4 Transcript flow
 
-**Normal path (single session):** User records -> pauses/generates -> `finalize()` stops recorder -> full blob -> uploaded to Supabase storage -> `transcribeFromPath(storagePath)` (server downloads & transcribes, bypasses Vercel 4.5 MB body limit) -> text -> sent as `transcriptText` to `/api/generate`. Falls back to direct `transcribeBlob()` if storage-path mode fails. If transcription fails entirely but a blob existed, a `toast.warning` informs the user that the note will be generated from files only.
+**Normal path (single session):** User records -> pauses/generates -> `finalize()` stops recorder -> full blob -> uploaded to Supabase storage -> `transcribeFromPath(storagePath)` (server downloads & transcribes, bypasses Vercel 4.5 MB body limit) -> text -> sent as `transcriptText` to `/api/generate`. Falls back to direct `transcribeBlob()` if storage-path mode fails. If transcription fails entirely but a blob existed and was uploaded to storage, a calm `toast.info` tells the user the server will process the recording automatically (since server-side recovery will handle it). Only when no storage upload exists does a `toast.warning` inform the user that the note will be generated from files only.
 
 **Restored session (page refresh mid-recording):** After a page refresh the recorder starts fresh, so the blob at generate time only contains post-refresh audio. The pre-refresh audio is at `recording_session.audioPath` in storage. `handleGenerate` in [use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) detects `isRestoredSession` and sends both:
 
@@ -78,7 +78,7 @@ The server downloads and transcribes `audioPath`, then **prepends** it to `trans
 
 **Pause-time transcription on native:** When recording is paused on native, the cumulative blob is uploaded to storage. Transcription uses `transcribeFromPath` (storage path -> server-side download) instead of `transcribeBlob` (FormData) to bypass Vercel's 4.5 MB body limit — native WAV recordings at 16 kHz can be 25+ MB. Web recordings use `transcribeBlob` since compressed webm/m4a blobs are typically small enough.
 
-**Server-side audio recovery:** The `/api/generate` route independently resolves an effective audio path from three sources (in priority order): (1) client-provided `audioPath`, (2) `metadata.generation_pending.audioPath`, (3) `metadata.recording_session.audioPath`. This belt-and-suspenders approach ensures recovery works even when the client fails to pass the path. Recovery transcription includes a single retry with 2s delay for transient failures (download errors, ElevenLabs timeouts, empty transcriptions).
+**Server-side audio recovery:** The `/api/generate` route (`maxDuration: 800`) independently resolves an effective audio path from three sources (in priority order): (1) client-provided `audioPath`, (2) `metadata.generation_pending.audioPath`, (3) `metadata.recording_session.audioPath`. This belt-and-suspenders approach ensures recovery works even when the client fails to pass the path. Recovery transcription includes **2 retries** (3 attempts total) with exponential backoff (3s, 6s, 9s) for transient failures (download errors, ElevenLabs timeouts, empty transcriptions).
 
 **Double-transcription guard:** Recovery audio transcription is only entered when: (1) the client explicitly passed `audioPath` (e.g. client transcription failed, or restored session prepend), OR (2) there is no `transcriptText` yet (full recovery needed). When the client already sent `transcriptText` (successful client-side batch transcription) AND did NOT pass `audioPath`, recovery is **skipped** — the `pendingAudioPath`/`sessionAudioPath` in metadata is the same blob the client already transcribed via `/api/batch-transcribe`, and re-transcribing it would double the transcript. The guard condition: `if (effectiveAudioPath && (audioPath || !transcriptText))`.
 
@@ -205,14 +205,15 @@ Doctor notes can contain not only clinical content but also **processing instruc
 | `requestData()` corrupting mp4 container on Safari iOS              | `requestData()` skipped on mp4 — `pause()` calls `recorder.pause()` directly; all data in one clean blob on `stop()` |
 | `getSupportedMimeType()` returning `""` on exotic browsers          | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`                                  |
 | Long recordings (>4.5 MB) failing transcription (Vercel body limit) | Blob uploaded to storage first; `transcribeFromPath` sends storage path via JSON — server downloads directly         |
-| ElevenLabs SDK timeout on long recordings                           | SDK `timeoutInSeconds` set to 300 (default was 60). Server `maxDuration` also 300s                                   |
+| ElevenLabs SDK timeout on long recordings                           | SDK `timeoutInSeconds` set to 600 (default was 60). Server `maxDuration` 600s (batch-transcribe) / 800s (generate)   |
 | Native foreground-service teardown disrupting WebView network       | `audioRecoveryPath = uploadedPath` safety net — server downloads and transcribes from storage                        |
 | Server-side recovery re-transcribing already-transcribed audio      | Double-transcription guard: skips when client sent `transcriptText` without `audioPath`                              |
 | File context save racing with generation (directive lost)           | `pendingContextSaves` Map + `awaitPendingContextSave()` before `/api/generate`                                       |
 | Doctor notes auto-save failing silently                             | `useSaveStatus` hook with visual indicator + single retry after 3s                                                   |
 | File extraction getting stuck (server crash mid-extraction)         | Generate route resets files stuck in `"extracting"` > 5 min to `"failed"` for retry                                  |
 | Extract RPC failing after successful OCR (lost extracted text)      | 3-attempt retry with backoff (500ms/1s/2s) on the final status update RPC                                            |
-| Client-side transcription failing on network hiccup                 | Both `transcribeBlob` and `transcribeFromPath` retry once with 2s delay for transient errors                         |
+| Client-side transcription failing on network hiccup                 | Both `transcribeBlob` and `transcribeFromPath` retry twice (3 attempts) with exponential backoff (3s, 6s)            |
+| Supabase storage download failing in batch-transcribe               | 3-attempt retry with exponential backoff (3s, 6s) on storage `.download()` call                                      |
 | Multiple files finishing extraction at once (redundant refreshes)   | 500ms debounce on `extraction-complete` event handler batches into single `refreshEncounter()`                       |
 | Transcription misspelling medication names                          | Fuzzy matching via `correctMedicationName` auto-corrects in Pass 1.6a using Levenshtein distance                     |
 

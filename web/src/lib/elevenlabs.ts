@@ -52,7 +52,8 @@ export async function transcribeAudio(
     {
       // Large recordings (30+ min) can take well over 60s to transcribe.
       // SDK default is 60s which causes timeouts for long consultations.
-      timeoutInSeconds: 300,
+      // 600s covers even the longest recordings (45+ min) on slow networks.
+      timeoutInSeconds: 600,
     },
   );
 

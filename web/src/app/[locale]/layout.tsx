@@ -13,6 +13,7 @@ import { ConditionalAnalytics } from "@/components/analytics/conditional-analyti
 import { Toaster } from "@/components/shared/sonner";
 import { ErudaLoader } from "@/components/debug/eruda-loader";
 import { NativeLifecycle } from "@/components/native/native-lifecycle";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "../globals.css";
 
 const figtree = Figtree({
@@ -79,6 +80,7 @@ export default async function LocaleLayout({
           <Toaster />
         </NextIntlClientProvider>
         <ConditionalAnalytics />
+        <SpeedInsights />
         <NativeLifecycle />
       </body>
     </html>

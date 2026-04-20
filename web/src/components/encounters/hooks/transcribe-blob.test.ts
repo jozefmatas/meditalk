@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { transcribeBlob } from "./transcribe-blob";
 
 /** Build a fake Blob of the given byte size. */
@@ -36,8 +36,28 @@ function throwingFetch(): typeof fetch {
 
 describe("transcribeBlob", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.clearAllMocks();
   });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run transcribeBlob while advancing fake timers so retries resolve. */
+  async function runWithTimers(
+    blob: Blob,
+    lang: string,
+    visitId: string,
+    deps: { fetch: typeof fetch },
+  ): Promise<string | null> {
+    const promise = transcribeBlob(blob, lang, visitId, deps);
+    // Advance past all retry delays (3s + 6s = 9s, add buffer)
+    for (let i = 0; i < 10; i++) {
+      await vi.advanceTimersByTimeAsync(3000);
+    }
+    return promise;
+  }
 
   it("POSTs the blob as multipart form-data with language + visitId", async () => {
     const fetchStub = okFetch("hello world");
@@ -92,20 +112,20 @@ describe("transcribeBlob", () => {
     expect(fetchStub).toHaveBeenCalledTimes(1);
   });
 
-  it("retries once on a transient HTTP error (502) then returns null", async () => {
+  it("retries on transient HTTP errors (502) then returns null", async () => {
     const fetchStub = errorFetch(502);
     const blob = makeBlob(1024);
 
-    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+    const result = await runWithTimers(blob, "sk", "visit-abc", {
       fetch: fetchStub,
     });
 
     expect(result).toBeNull();
-    // 502 is transient — retried once
-    expect(fetchStub).toHaveBeenCalledTimes(2);
+    // 502 is transient — retried twice (3 attempts total)
+    expect(fetchStub).toHaveBeenCalledTimes(3);
   });
 
-  it("retries once on a transient HTTP error then succeeds", async () => {
+  it("retries on a transient HTTP error then succeeds", async () => {
     const fetchStub = vi
       .fn()
       .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
@@ -116,7 +136,7 @@ describe("transcribeBlob", () => {
       }) as unknown as typeof fetch;
     const blob = makeBlob(1024);
 
-    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+    const result = await runWithTimers(blob, "sk", "visit-abc", {
       fetch: fetchStub,
     });
 
@@ -139,20 +159,20 @@ describe("transcribeBlob", () => {
     expect(result).toBeNull();
   });
 
-  it("retries once on TypeError (network failure) then returns null", async () => {
+  it("retries on TypeError (network failure) then returns null", async () => {
     const fetchStub = throwingFetch();
     const blob = makeBlob(1024);
 
-    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+    const result = await runWithTimers(blob, "sk", "visit-abc", {
       fetch: fetchStub,
     });
 
     expect(result).toBeNull();
-    // TypeError is transient — retried once
-    expect(fetchStub).toHaveBeenCalledTimes(2);
+    // TypeError is transient — retried twice (3 attempts total)
+    expect(fetchStub).toHaveBeenCalledTimes(3);
   });
 
-  it("retries once on TypeError then succeeds", async () => {
+  it("retries on TypeError then succeeds", async () => {
     const fetchStub = vi
       .fn()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
@@ -163,7 +183,7 @@ describe("transcribeBlob", () => {
       }) as unknown as typeof fetch;
     const blob = makeBlob(1024);
 
-    const result = await transcribeBlob(blob, "sk", "visit-abc", {
+    const result = await runWithTimers(blob, "sk", "visit-abc", {
       fetch: fetchStub,
     });
 

@@ -380,15 +380,24 @@ export function useEncounterGeneration({
         );
       }
 
-      // Warn user when a recording existed but transcription failed completely
+      // Warn user when a recording existed but client-side transcription failed.
+      // If the blob was uploaded to storage, server-side recovery will still
+      // transcribe it — use a calmer message so the doctor isn't alarmed.
       if (blobToProcess && !finalTranscript) {
         logger.error(
-          `[generate] Transcription failed for ${blobToProcess.size} byte blob`,
+          `[generate] Client transcription failed for ${blobToProcess.size} byte blob (uploaded=${!!uploadedPath})`,
         );
-        toast.warning(
-          "Recording transcription failed. The note will be generated from uploaded files only.",
-          { duration: 10_000 },
-        );
+        if (uploadedPath) {
+          toast.info(
+            "Transcription is taking longer than usual. The server will process your recording automatically.",
+            { duration: 8_000 },
+          );
+        } else {
+          toast.warning(
+            "Recording transcription failed. The note will be generated from uploaded files only.",
+            { duration: 10_000 },
+          );
+        }
       }
 
       // Transcription + upload done — safe to tear down the foreground service.

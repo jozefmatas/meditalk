@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import { logger } from "@/lib/logger";
 
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 /**
  * POST /api/batch-transcribe
@@ -48,23 +48,40 @@ export async function POST(request: NextRequest) {
         `[batch-transcribe] Storage mode: downloading ${storagePath}, language=${language ?? "auto"}`,
       );
 
-      const { data: audioData, error: dlError } =
-        await authResult.supabase.storage
-          .from("encounter-files")
-          .download(storagePath);
+      // Retry storage downloads — Supabase can return transient errors on
+      // large files or under load. 3 attempts with exponential backoff.
+      let buffer: Buffer | null = null;
+      for (let dlAttempt = 0; dlAttempt <= 2; dlAttempt++) {
+        const { data: audioData, error: dlError } =
+          await authResult.supabase.storage
+            .from("encounter-files")
+            .download(storagePath);
 
-      if (dlError || !audioData) {
-        logger.error(
-          "[batch-transcribe] Failed to download from storage:",
-          dlError,
-        );
+        if (dlError || !audioData) {
+          logger.error(
+            `[batch-transcribe] Failed to download from storage (attempt ${dlAttempt + 1}/3):`,
+            dlError,
+          );
+          if (dlAttempt < 2) {
+            await new Promise((r) => setTimeout(r, 3000 * (dlAttempt + 1)));
+            continue;
+          }
+          return NextResponse.json(
+            { error: "Failed to download audio from storage" },
+            { status: 500 },
+          );
+        }
+
+        buffer = Buffer.from(await audioData.arrayBuffer());
+        break;
+      }
+
+      if (!buffer) {
         return NextResponse.json(
           { error: "Failed to download audio from storage" },
           { status: 500 },
         );
       }
-
-      const buffer = Buffer.from(await audioData.arrayBuffer());
       const ext = storagePath.substring(storagePath.lastIndexOf("."));
 
       logger.info(
