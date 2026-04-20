@@ -26,6 +26,15 @@ import {
 } from "./narrative-evidence";
 import type { EncounterModel } from "./encounter-model";
 import { renderObjectiveSection } from "./renderers/objective";
+import {
+  renderAllergiesSection,
+  renderHabitsSection,
+  renderFamilyHistorySection,
+  renderPersonalHistorySection,
+  renderSocialHistorySection,
+  renderEpidemiologicalSection,
+  renderMedicationsSection,
+} from "./renderers/history";
 import { logger } from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
@@ -563,8 +572,31 @@ export async function renderSections(
   const sectionContexts = options?.sectionContexts ?? {};
   const onSection = options?.onSection;
 
-  // 1. Classify all sections into tiers
-  const tiers = classifySectionTiers(sectionLabels, options?.sectionContexts);
+  // 1. Classify all sections into tiers. When an EncounterModel is
+  // supplied, promote history-style roles (allergies, substanceUse,
+  // personal/social/work/family/epidemiological) to the deterministic
+  // tier — they render directly from `model.history.*` instead of
+  // going through Haiku. This is Phase 3 of the refactor.
+  const rawTiers = classifySectionTiers(
+    sectionLabels,
+    options?.sectionContexts,
+  );
+  const PROMOTABLE_TO_DETERMINISTIC: ReadonlySet<SectionRole> = new Set<
+    SectionRole
+  >([
+    "allergies",
+    "substanceUse",
+    "personalHistory",
+    "socialHistory",
+    "epidemiological",
+  ]);
+  const tiers: SectionTier[] = options?.encounterModel
+    ? rawTiers.map((t) =>
+        PROMOTABLE_TO_DETERMINISTIC.has(t.role)
+          ? { ...t, tier: "deterministic" as const }
+          : t,
+      )
+    : rawTiers;
   const deterministicSections = tiers.filter((t) => t.tier === "deterministic");
   const haikuSections = tiers.filter((t) => t.tier === "haiku");
   const opusSections = tiers.filter((t) => t.tier === "opus");
@@ -590,8 +622,27 @@ export async function renderSections(
   // 3. Render deterministic sections instantly
   for (const section of deterministicSections) {
     if (section.role === "medications") {
-      const medFacts = factAssignment[section.id] ?? [];
-      result[section.id] = renderMedications(medFacts);
+      if (options?.encounterModel) {
+        result[section.id] = renderMedicationsSection(options.encounterModel);
+      } else {
+        const medFacts = factAssignment[section.id] ?? [];
+        result[section.id] = renderMedications(medFacts);
+      }
+    } else if (section.role === "allergies" && options?.encounterModel) {
+      result[section.id] = renderAllergiesSection(options.encounterModel);
+    } else if (section.role === "substanceUse" && options?.encounterModel) {
+      result[section.id] = renderHabitsSection(options.encounterModel);
+    } else if (section.role === "personalHistory" && options?.encounterModel) {
+      result[section.id] = renderPersonalHistorySection(
+        options.encounterModel,
+      );
+    } else if (section.role === "socialHistory" && options?.encounterModel) {
+      result[section.id] = renderSocialHistorySection(options.encounterModel);
+    } else if (
+      section.role === "epidemiological" &&
+      options?.encounterModel
+    ) {
+      result[section.id] = renderEpidemiologicalSection(options.encounterModel);
     } else if (section.role === "assessment") {
       result[section.id] = renderAssessment(options?.icdBlock);
     } else if (section.role === "vitals") {

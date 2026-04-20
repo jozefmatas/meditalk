@@ -409,6 +409,14 @@ const IMAGING_KEYWORD_REGEX =
   /\brtg\b|\brontgen\b|\bxray\b|x-ray|\bct\b|\bmri\b|\bmr\b|\bmrt\b|\bultrazvuk\b|\busg\b|\becho\b|\btte\b|echokardio|sonograf|angiograf/i;
 
 /**
+ * Allergy-keyword regex — used to split allergy facts out of
+ * `personalHistory` / `substanceUse` into the dedicated AA slot.
+ * Covers Slovak / Czech / English clinical wording.
+ */
+const ALLERGY_KEYWORD_REGEX =
+  /\balergi|\balerg|alergic|allergic|alergia|hypersensit|precitlivel|anafylax|anaphylax|intoleranc|nkda|kl neguje|kontrastn[ée]\s+l[aá]tk|\balergia na\b/i;
+
+/**
  * Lab-test keywords — matches common cardiology / internal-medicine
  * lab names as they appear in Slovak / Czech / English reports, plus
  * the numeric-unit pattern (`ng/l`, `mg/l`, `g/l`, `U/l`, `IU/l`,
@@ -549,16 +557,33 @@ export function buildEncounterModel(
       !isLooseOverlapWithPrimary(p, primaryProblem),
   );
 
+  // Allergies don't have their own fact category — they're typically
+  // extracted into `personalHistory` or `substanceUse`. Split them out
+  // deterministically so the AA section has proper content.
+  const personalAll = asRefs(facts.personalHistory);
+  const habitsAll = asRefs(facts.substanceUse);
+  const allergies: FactRef[] = [];
+  const personalOnly: FactRef[] = [];
+  const habitsOnly: FactRef[] = [];
+  for (const r of personalAll) {
+    if (ALLERGY_KEYWORD_REGEX.test(r.value)) allergies.push(r);
+    else personalOnly.push(r);
+  }
+  for (const r of habitsAll) {
+    if (ALLERGY_KEYWORD_REGEX.test(r.value)) allergies.push(r);
+    else habitsOnly.push(r);
+  }
+
   return {
     language,
     visitDate,
     history: {
       family: asRefs(facts.familyHistory),
-      personal: asRefs(facts.personalHistory),
+      personal: personalOnly,
       social: asRefs(facts.socialHistory),
       work: asRefs(facts.workHistory),
-      allergies: [],
-      habits: asRefs(facts.substanceUse),
+      allergies,
+      habits: habitsOnly,
       medications: asRefs(facts.medications).filter((r) => !r.negated),
       epidemiological: asRefs(facts.epidemiologicalHistory),
     },
