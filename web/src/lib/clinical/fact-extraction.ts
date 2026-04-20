@@ -17,7 +17,22 @@ import { logger } from "@/lib/logger";
  * contract for the generated report.
  */
 
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+/**
+ * Model used for Pass 1.5 structured fact extraction.
+ *
+ * Defaults to Haiku 4.5 — fast, cheap, adequate for short encounters.
+ * Override via the `FACT_EXTRACTION_MODEL` env var when you need the
+ * quality ceiling that Sonnet 4.6 (or Opus) provides on dense
+ * encounters with many comorbidities / detailed echo / long transcripts
+ * where Haiku silently drops whole categories.
+ *
+ * Examples:
+ *   FACT_EXTRACTION_MODEL=claude-sonnet-4-6       # best quality / cost
+ *   FACT_EXTRACTION_MODEL=claude-opus-4-6         # highest quality, slowest
+ *   FACT_EXTRACTION_MODEL=claude-haiku-4-5-20251001  # default
+ */
+const FACT_EXTRACTION_MODEL =
+  process.env.FACT_EXTRACTION_MODEL ?? "claude-haiku-4-5-20251001";
 
 /** Source material fed into the fact extraction pass. */
 export interface FactExtractionInput {
@@ -309,7 +324,7 @@ export async function runFactExtraction(
   // first real-world STEMI encounter; 16384 gives ~4x headroom while still
   // being well under Haiku 4.5's per-call output limit.
   const response = await anthropic().messages.create({
-    model: HAIKU_MODEL,
+    model: FACT_EXTRACTION_MODEL,
     max_tokens: 16384,
     temperature: 0,
     system: systemPrompt,
@@ -318,7 +333,7 @@ export async function runFactExtraction(
 
   const elapsed = Date.now() - startTime;
   logger.debug(
-    `[fact-extraction] ${elapsed}ms, tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
+    `[fact-extraction] model=${FACT_EXTRACTION_MODEL} ${elapsed}ms, tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
   );
 
   if (ctx) {
@@ -326,7 +341,7 @@ export async function runFactExtraction(
       userId: ctx.userId,
       visitId: ctx.visitId,
       provider: "anthropic",
-      model: HAIKU_MODEL,
+      model: FACT_EXTRACTION_MODEL,
       operation: "fact_extraction",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
