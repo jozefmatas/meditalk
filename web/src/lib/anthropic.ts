@@ -3,7 +3,10 @@ import type { SupportedLanguage } from "./types";
 import type { Template, TemplateSection } from "./templates/types";
 import { buildTemplateHtml, flattenSectionIds } from "./templates/html";
 import { logUsage, type UsageContext } from "./usage";
-import { buildEnrichedSystemPrompt } from "./clinical/pipeline";
+import {
+  buildEnrichedSystemPrompt,
+  buildPreRenderedIcdBlock,
+} from "./clinical/pipeline";
 import { extractJson } from "./clinical/json-repair";
 import {
   validateIcdDescriptions,
@@ -25,6 +28,7 @@ import {
 } from "./clinical/fact-section-assigner";
 import { scrubPhi } from "./clinical/phi-scrubber";
 import { enforceContentRouting } from "./clinical/section-routing-validator";
+import { renderSections } from "./clinical/section-renderer";
 import { logger } from "@/lib/logger";
 
 export class InsufficientContextError extends Error {
@@ -591,6 +595,18 @@ export async function generateFromTemplate(
 }> {
   const allIds = flattenSectionIds(template);
   const sectionIdSet = new Set(allIds);
+
+  // Determine whether we have validated facts and can use the tiered path.
+  const hasValidatedFacts = !!(
+    validatedFacts && countFacts(validatedFacts) > 0
+  );
+
+  // Use tiered rendering when:
+  // 1. Validated facts are present (deterministic fact pipeline ran)
+  // 2. No custom system prompt override on the template
+  const useTieredRendering = hasValidatedFacts && !template.systemPrompt;
+
+  // Build user message for fingerprinting (even for tiered path)
   const userMessage = buildTemplateUserMessage(
     chunks,
     template,
@@ -602,12 +618,7 @@ export async function generateFromTemplate(
     visitDate,
   );
 
-  // Build system prompt — use the lean fact-based prompt when validated
-  // facts are present (they've already been pre-assigned to sections by
-  // the deterministic pipeline), otherwise fall back to the full prompt.
-  const hasValidatedFacts = !!(
-    validatedFacts && countFacts(validatedFacts) > 0
-  );
+  // Build system prompt for fingerprinting (even for tiered path)
   let systemPrompt = hasValidatedFacts
     ? buildFactBasedSystemPrompt(
         template,
@@ -622,8 +633,6 @@ export async function generateFromTemplate(
         sectionContexts,
       );
   if (clinicalAnalysis) {
-    // When the template declares a specialty, use it instead of Pass 1's
-    // inferred specialty — eliminates one source of cross-run variance.
     const templateSpecialty = template.specialties?.[0] as
       | SpecialtyId
       | undefined;
@@ -641,100 +650,64 @@ export async function generateFromTemplate(
     );
   }
 
-  logger.debug(
-    `[generate] Streaming generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
-  );
-
-  const startTime = Date.now();
-
-  // Stream response so we can emit sections as they complete
-  let accumulated = "";
-  const emittedSections = new Set<string>();
-
-  const stream = anthropic().messages.stream({
-    model: GENERATION_MODEL,
-    max_tokens: 8192,
-    temperature: 0,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  });
-
-  stream.on("text", (delta) => {
-    accumulated += delta;
-    if (onSection) {
-      extractSectionsFromStream(
-        accumulated,
-        sectionIdSet,
-        emittedSections,
-        sectionLabels,
-        onSection,
-      );
-    }
-  });
-
-  const finalMessage = await stream.finalMessage();
-
-  const elapsed = Date.now() - startTime;
-  logger.debug(
-    `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${finalMessage.usage.input_tokens} in / ${finalMessage.usage.output_tokens} out`,
-  );
-
-  if (ctx) {
-    logUsage({
-      userId: ctx.userId,
-      visitId: ctx.visitId,
-      provider: "anthropic",
-      model: GENERATION_MODEL,
-      operation: "generate_template",
-      inputTokens: finalMessage.usage.input_tokens,
-      outputTokens: finalMessage.usage.output_tokens,
-    });
-  }
-
-  const text =
-    finalMessage.content[0].type === "text" ? finalMessage.content[0].text : "";
-
-  const parsed = extractJson<Record<string, string | boolean>>(text);
-
-  // Check if Claude determined there's insufficient context
-  if (parsed.insufficient_context === true) {
-    throw new InsufficientContextError();
-  }
-
-  // Defensive cleanup — remove non-section keys the model may still emit
-  delete parsed.letter;
-  delete parsed.title;
-
-  // Fill section contents (empty string for missing keys)
   const sectionContents: Record<string, string> = {};
-  for (const id of allIds) {
-    const value = parsed[id];
-    sectionContents[id] = typeof value === "string" ? value : "";
-  }
 
-  // Post-processing Pass A — strip bullet markers.
-  // The model often ignores prompt instructions and produces bullets anyway.
-  // Belt-and-braces: strip them deterministically so the output never has
-  // bullet-prefixed lines regardless of model compliance.
-  for (const id of allIds) {
-    if (sectionContents[id]) {
-      sectionContents[id] = stripBulletMarkers(sectionContents[id]);
+  if (useTieredRendering) {
+    // ── TIERED PATH: deterministic + Haiku + Opus in parallel ──
+    logger.debug("[generate] Using tiered section rendering (deterministic + Haiku + Opus)");
+
+    const factAssignment = assignFactsToSections(
+      validatedFacts!,
+      sectionLabels,
+      sectionContexts,
+    );
+
+    const icdBlock = clinicalAnalysis
+      ? buildPreRenderedIcdBlock(clinicalAnalysis.candidateIcdCodes)
+      : undefined;
+
+    const templateSpecialty = template.specialties?.[0];
+
+    const { sectionContents: rendered } = await renderSections(
+      template,
+      sectionLabels,
+      factAssignment,
+      language,
+      {
+        sectionContexts,
+        icdBlock,
+        clinicalAnalysis,
+        doctorNotes,
+        fileTexts,
+        visitDate,
+        styleGuide: template.styleGuide,
+        templateSpecialty,
+        onSection,
+      },
+      ctx,
+    );
+
+    for (const id of allIds) {
+      sectionContents[id] = rendered[id] ?? "";
     }
-  }
 
-  // Post-processing Pass B — clear parent sections that have subsections.
-  // Content should live in the subsections only (e.g. Anamnézy parent is
-  // empty, all content goes into RA, OA, SA, etc.).
-  const parentIds = collectParentSectionIds(template.sections);
-  for (const id of parentIds) {
-    sectionContents[id] = "";
-  }
+    // Simplified post-processing for tiered path:
+    // Pass A — strip bullet markers (Haiku/Opus may still produce them)
+    for (const id of allIds) {
+      if (sectionContents[id]) {
+        sectionContents[id] = stripBulletMarkers(sectionContents[id]);
+      }
+    }
 
-  // Post-processing Pass C — enforce section content routing.
-  // Opus reads raw file content and may inject medication lists into OA or
-  // substance use details into SA. Strip misrouted content deterministically.
-  // Only runs when validated facts are present (legacy path gives Opus full latitude).
-  if (hasValidatedFacts) {
+    // Pass B — clear parent sections
+    const parentIds = collectParentSectionIds(template.sections);
+    for (const id of parentIds) {
+      sectionContents[id] = "";
+    }
+
+    // Pass C — enforce section routing on Opus-rendered sections only.
+    // Deterministic and Haiku sections can't misroute, but Opus sees
+    // raw file texts and doctor notes, so it might deviate.
     const routed = enforceContentRouting(
       sectionContents,
       sectionLabels,
@@ -743,7 +716,102 @@ export async function generateFromTemplate(
     for (const id of allIds) {
       sectionContents[id] = routed[id] ?? sectionContents[id];
     }
+  } else {
+    // ── LEGACY PATH: single Opus call (unchanged) ──
+    logger.debug(
+      `[generate] Using legacy single-model generation — system: ${systemPrompt.length} chars, user: ${userMessage.length} chars`,
+    );
+
+    const startTime = Date.now();
+    let accumulated = "";
+    const emittedSections = new Set<string>();
+
+    const stream = anthropic().messages.stream({
+      model: GENERATION_MODEL,
+      max_tokens: 8192,
+      temperature: 0,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    });
+
+    stream.on("text", (delta) => {
+      accumulated += delta;
+      if (onSection) {
+        extractSectionsFromStream(
+          accumulated,
+          sectionIdSet,
+          emittedSections,
+          sectionLabels,
+          onSection,
+        );
+      }
+    });
+
+    const finalMessage = await stream.finalMessage();
+
+    const elapsed = Date.now() - startTime;
+    logger.debug(
+      `[generate] Generation (${GENERATION_MODEL}) — ${elapsed}ms, tokens: ${finalMessage.usage.input_tokens} in / ${finalMessage.usage.output_tokens} out`,
+    );
+
+    if (ctx) {
+      logUsage({
+        userId: ctx.userId,
+        visitId: ctx.visitId,
+        provider: "anthropic",
+        model: GENERATION_MODEL,
+        operation: "generate_template",
+        inputTokens: finalMessage.usage.input_tokens,
+        outputTokens: finalMessage.usage.output_tokens,
+      });
+    }
+
+    const text =
+      finalMessage.content[0].type === "text"
+        ? finalMessage.content[0].text
+        : "";
+
+    const parsed = extractJson<Record<string, string | boolean>>(text);
+
+    if (parsed.insufficient_context === true) {
+      throw new InsufficientContextError();
+    }
+
+    delete parsed.letter;
+    delete parsed.title;
+
+    for (const id of allIds) {
+      const value = parsed[id];
+      sectionContents[id] = typeof value === "string" ? value : "";
+    }
+
+    // Post-processing Pass A — strip bullet markers
+    for (const id of allIds) {
+      if (sectionContents[id]) {
+        sectionContents[id] = stripBulletMarkers(sectionContents[id]);
+      }
+    }
+
+    // Post-processing Pass B — clear parent sections
+    const parentIds = collectParentSectionIds(template.sections);
+    for (const id of parentIds) {
+      sectionContents[id] = "";
+    }
+
+    // Post-processing Pass C — enforce section content routing (fact path only)
+    if (hasValidatedFacts) {
+      const routed = enforceContentRouting(
+        sectionContents,
+        sectionLabels,
+        sectionContexts,
+      );
+      for (const id of allIds) {
+        sectionContents[id] = routed[id] ?? sectionContents[id];
+      }
+    }
   }
+
+  // ── Common post-processing (both paths) ──
 
   // Validate ICD descriptions against canonical CSV data.
   // When validated facts are present, the ICD block was pre-rendered by

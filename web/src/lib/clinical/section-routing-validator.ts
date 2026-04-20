@@ -25,7 +25,7 @@ import { normalizeForMatch } from "./fact-validator";
 // Section role detection — reuses CATEGORY_SECTION_PATTERNS
 // ---------------------------------------------------------------------------
 
-type SectionRole =
+export type SectionRole =
   | "medications"
   | "substanceUse"
   | "allergies"
@@ -33,6 +33,9 @@ type SectionRole =
   | "plan"
   | "personalHistory"
   | "socialHistory"
+  | "assessment"
+  | "chiefComplaint"
+  | "findings"
   | "other";
 
 /**
@@ -47,6 +50,7 @@ const ABBREVIATION_ROLE_MAP: Record<string, SectionRole> = {
   ea: "epidemiological",
   oa: "personalHistory",
   sa: "socialHistory",
+  to: "chiefComplaint",
 };
 
 /**
@@ -69,6 +73,18 @@ const ROLE_PATTERNS: [SectionRole, string[]][] = [
   ],
   ["personalHistory", ["osobn", "personal history", "past medical"]],
   ["socialHistory", ["socialn", "social history"]],
+  [
+    "assessment",
+    ["zaver", "assessment", "conclusion", "diagnoz", "diagnostic impression"],
+  ],
+  [
+    "chiefComplaint",
+    ["terajsie", "present illness", "hpi", "chief complaint", "dovod"],
+  ],
+  [
+    "findings",
+    ["nalez", "finding", "objektivny", "status praesens", "physical exam", "vysetrenie"],
+  ],
 ];
 
 /**
@@ -77,7 +93,7 @@ const ROLE_PATTERNS: [SectionRole, string[]][] = [
  * Priority 1: Exact abbreviation match on label (most reliable).
  * Priority 2: Substring match on label or context.
  */
-function classifySection(label: string, context?: string): SectionRole {
+export function classifySection(label: string, context?: string): SectionRole {
   const normalizedLabel = normalizeForMatch(label);
 
   // Priority 1: exact abbreviation match

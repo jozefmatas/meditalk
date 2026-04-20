@@ -102,4 +102,15 @@ export type {
   ClassificationResult,
   ClassifiedCandidate,
 } from "./assessment-classifier";
-export { enforceContentRouting } from "./section-routing-validator";
+export {
+  enforceContentRouting,
+  classifySection,
+} from "./section-routing-validator";
+export type { SectionRole } from "./section-routing-validator";
+export {
+  renderSections,
+  classifySectionTiers,
+  renderMedications,
+  renderAssessment,
+} from "./section-renderer";
+export type { RenderTier, SectionTier, RenderUsage } from "./section-renderer";
