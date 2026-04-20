@@ -58,6 +58,12 @@ export {
   renderAssessmentFromModel,
   modelHasAnyProblem,
 } from "./renderers/assessment";
+export {
+  resolveSpecialtyPack,
+  registerSpecialtyPack,
+  listSpecialtyPacks,
+} from "./specialty-pack";
+export type { SpecialtyPack, DiagnosisSynonym } from "./specialty-pack";
 export type {
   ResolvedIcdCode,
   DiagnosisResolutionResult,
