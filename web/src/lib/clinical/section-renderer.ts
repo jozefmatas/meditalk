@@ -35,6 +35,10 @@ import {
   renderEpidemiologicalSection,
   renderMedicationsSection,
 } from "./renderers/history";
+import {
+  renderNarrativeFromModel,
+  type NarrativeTargetSection,
+} from "./renderers/narrative";
 import { logger } from "@/lib/logger";
 
 // ---------------------------------------------------------------------------
@@ -786,25 +790,60 @@ export async function renderSections(
       ? formatNarrativeEvidence(narrativeSnippets)
       : undefined;
 
+  // Opus narrative rendering — when the model is available, use the
+  // model-backed narrative renderer (TO/HPI + Plan only, scoped to
+  // model.currentEncounter.*). Legacy `renderWithOpus` is retained as
+  // fallback for callers without a model.
   const opusPromise =
     opusSections.length > 0
-      ? renderWithOpus(
-          opusSections,
-          factAssignment,
-          sectionContexts,
-          language,
-          {
-            medicationContext: medicationContext || undefined,
-            diagnosisContext: diagnosisContext || undefined,
-            narrativeEvidence,
-            visitDate: options?.visitDate,
-            styleGuide: options?.styleGuide,
-            templateSpecialty: options?.templateSpecialty,
-            clinicalAnalysis: options?.clinicalAnalysis,
-            onSection,
-          },
-          ctx,
-        )
+      ? options?.encounterModel
+        ? (async () => {
+            const targets: NarrativeTargetSection[] = opusSections
+              .filter(
+                (s) =>
+                  s.role === "chiefComplaint" || s.role === "plan",
+              )
+              .map((s) => ({
+                id: s.id,
+                label: s.label,
+                role: s.role as "chiefComplaint" | "plan",
+              }));
+            const r = await renderNarrativeFromModel(
+              options.encounterModel!,
+              targets,
+              {
+                sources: {
+                  chunks: options.chunks ?? [],
+                  doctorNotes: options.doctorNotes,
+                  files: options.fileTexts,
+                },
+                onSection,
+                ctx,
+              },
+            );
+            return {
+              contents: r.contents,
+              inputTokens: r.usage.inputTokens,
+              outputTokens: r.usage.outputTokens,
+            };
+          })()
+        : renderWithOpus(
+            opusSections,
+            factAssignment,
+            sectionContexts,
+            language,
+            {
+              medicationContext: medicationContext || undefined,
+              diagnosisContext: diagnosisContext || undefined,
+              narrativeEvidence,
+              visitDate: options?.visitDate,
+              styleGuide: options?.styleGuide,
+              templateSpecialty: options?.templateSpecialty,
+              clinicalAnalysis: options?.clinicalAnalysis,
+              onSection,
+            },
+            ctx,
+          )
       : Promise.resolve({
           contents: {} as Record<string, string>,
           inputTokens: 0,
