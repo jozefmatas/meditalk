@@ -423,8 +423,17 @@ const LAB_KINDS: ReadonlySet<MeasurementKind> = new Set([
   "glucose_mgdl",
 ]);
 
+/**
+ * EKG-interpretation signals — a fact value must carry one of these
+ * strong cues to be classified as an ECG finding. Weak single-token
+ * cues like `SF`/`SR` alone aren't enough because they also occur in
+ * plain vitals ("SF 68/min"). An EKG interpretation line has either
+ * the explicit "EKG:" prefix or at least one of the structural
+ * intervals / morphology markers (PQ, QRS, QT, ST with elevac/depres,
+ * T negative, AV blok, P mitrale, sínusový rytmus / AF rhythm).
+ */
 const EKG_KEYWORD_REGEX =
-  /\bekg\b|\becg\b|elektrokardio|electrocardio|\brytmus\b|\brhythm\b|\bsr\b\s|\bsf\b|\bst\b\s*(?:elevac|depres|elevat|depres)|\bqrs\b|qtc\b|av\s*blok/i;
+  /\bekg\b|\becg\b|elektrokardio|electrocardio|sinusov[yý]\s+rytm|rytmus\s+sinus|paroxyzm[aá]ln[aá]\s+fib|atri[aá]ln[aá]\s+fib|\baf\s+\d|\bpq\b\s*\d|\bqrs\b\s*\d|qtc\b|\bp\s*mitrale|\bst\b\s*(?:elevac|depres|elevat|depres|segm|v\s+izo)|\bt\s*negat|av\s*blok/i;
 
 const IMAGING_KEYWORD_REGEX =
   /\brtg\b|\brontgen\b|\bxray\b|x-ray|\bct\b|\bmri\b|\bmr\b|\bmrt\b|\bultrazvuk\b|\busg\b|\becho\b|\btte\b|echokardio|sonograf|angiograf/i;
@@ -449,6 +458,15 @@ const LAB_KEYWORD_REGEX =
 function classifyObjectiveFact(
   fact: ExtractedFact,
 ): "vitals" | "labs" | "ecg" | "imaging" | "exam" | "other" {
+  // EKG check runs FIRST regardless of category — a fact value starting
+  // with "EKG:" or carrying clear rhythm/QRS/QTc signals is EKG, even
+  // if the extractor labeled it `measurements` (which happens when the
+  // first clinical datum in the string happens to be "srdcová frekvencia"
+  // and parseMeasurement returns hr). Without this check, detailed EKG
+  // interpretations like "EKG: srdcová frekvencia 56/min, PQ 0,28 s,
+  // QRS do 0,08 s, ST v izočiare" leak into the vitals Pulz subsection.
+  if (EKG_KEYWORD_REGEX.test(fact.value)) return "ecg";
+
   if (fact.category === "measurements") {
     const parsed = parseMeasurement(fact.value);
     if (parsed) {
@@ -460,7 +478,6 @@ function classifyObjectiveFact(
     return "labs";
   }
   if (fact.category === "findings") {
-    if (EKG_KEYWORD_REGEX.test(fact.value)) return "ecg";
     if (IMAGING_KEYWORD_REGEX.test(fact.value)) return "imaging";
     if (LAB_KEYWORD_REGEX.test(fact.value)) return "labs";
     return "exam";

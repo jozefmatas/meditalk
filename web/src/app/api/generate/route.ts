@@ -17,7 +17,6 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { flattenSectionIds } from "@/lib/templates/html";
 import {
-  runClinicalAnalysis,
   runFactExtraction,
   validateFacts,
   resolveFacts,
@@ -541,30 +540,25 @@ export async function POST(request: NextRequest) {
           return { chunkContents: [] as string[], usedChunks: [] as string[] };
         })();
 
-    const clinicalPromise: Promise<ClinicalAnalysis | null> =
-      clinicalInputParts.length > 0
-        ? runClinicalAnalysis(clinicalInputParts, language, { userId, visitId })
-            .then((result) => {
-              logger.debug(
-                "Clinical analysis complete — specialty:",
-                result.inferredSpecialty,
-                "concepts:",
-                result.matchedConcepts.length,
-                "ICD codes:",
-                result.candidateIcdCodes.length,
-                "medications:",
-                result.mentionedMedications.length,
-              );
-              return result;
-            })
-            .catch((err) => {
-              logger.warn(
-                "Clinical analysis failed, proceeding without enrichment:",
-                err,
-              );
-              return null;
-            })
-        : Promise.resolve(null);
+    // Pass 1 (Sonnet clinical analysis) was deleted from the critical
+    // path. The deterministic diagnosis resolver + strict grounding
+    // + EncounterModel bucketing own ICD selection now. Synthesize a
+    // minimal `ClinicalAnalysis` so downstream code keeps its shape —
+    // candidateIcdCodes starts empty; the resolver fills it from
+    // validated facts a few lines below.
+    const syntheticClinicalAnalysis: ClinicalAnalysis = {
+      matchedConcepts: [],
+      inferredSpecialty:
+        (template.specialties?.[0] as ClinicalAnalysis["inferredSpecialty"]) ??
+        "general_practice",
+      problemClusters: [],
+      candidateIcdCodes: [],
+      mentionedMedications: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+    const clinicalPromise: Promise<ClinicalAnalysis | null> = Promise.resolve(
+      syntheticClinicalAnalysis,
+    );
 
     // When transcriptText is available, fact extraction input is known
     // up-front so Pass 1.5 (Haiku) can start in parallel with Pass 1

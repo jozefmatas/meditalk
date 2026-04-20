@@ -21,7 +21,6 @@ import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logUsage } from "@/lib/usage";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import {
-  runClinicalAnalysis,
   buildEnrichedSystemPrompt,
   extractJson,
   runFactExtraction,
@@ -342,18 +341,19 @@ Rules:
           usage: { inputTokens: 0, outputTokens: 0 },
         } as ClinicalAnalysis;
       } else if (chunkContents.length > 0) {
-        try {
-          clinicalAnalysis = await runClinicalAnalysis(
-            chunkContents,
-            language,
-            { userId, visitId },
-          );
-        } catch (analysisErr) {
-          logger.warn(
-            "Clinical analysis failed, proceeding without enrichment:",
-            analysisErr,
-          );
-        }
+        // Pass 1 (Sonnet) deleted from the critical path. Synthesize a
+        // minimal ClinicalAnalysis — the resolver populates
+        // candidateIcdCodes from validated facts below.
+        clinicalAnalysis = {
+          matchedConcepts: [],
+          inferredSpecialty:
+            (template.specialties?.[0] as ClinicalAnalysis["inferredSpecialty"]) ??
+            "general_practice",
+          problemClusters: [],
+          candidateIcdCodes: [],
+          mentionedMedications: [],
+          usage: { inputTokens: 0, outputTokens: 0 },
+        };
       }
 
       // Pass 1.5 — Structured fact extraction (same contract as /api/generate).
