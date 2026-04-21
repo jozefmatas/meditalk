@@ -486,47 +486,54 @@ If the source contains no present-illness narrative (unlikely but possible), out
       "diagnosis",
       "diagnostic assessment",
     ]),
-    context: `Záver — Clinical assessment: diagnosis + ICD-10 code for THIS encounter.
+    context: `Záver — Clinical assessment with ICD-10 codes. In Slovak/Czech clinical practice this section is the BILLABLE problem list — every clinically relevant diagnosis the patient has (acute for this encounter + ongoing chronic comorbidities) needs an ICD-10 code here. Be comprehensive.
 
-## CRITICAL: NO INVENTED ICD CODES
-NEVER output an ICD code for a condition that was not explicitly stated by the doctor in the source. Do NOT "round out" the assessment with plausible codes the doctor didn't mention. Do NOT convert every OA item into its own ICD code unless the doctor explicitly said so in the conclusion. Examples of forbidden fabrication: adding K80.0 Cholelitiáza when gallstones were never mentioned; adding D64.9 Anémia when no anaemia was diagnosed; adding R01.1 Srdečný šelest when no murmur was heard. A fabricated ICD code in the assessment is a clinical safety issue.
+## OWNS — include ALL of these (each with its ICD-10 code, one per line)
+- Primary (encounter-driving) diagnosis.
+- Differential diagnoses the doctor explicitly mentioned (diff dg, versus, rule out, nemožno vylúčiť) — include on a dedicated "Diferenciálna diagnóza:" line.
+- ALL chronic conditions from the patient's OA that are clinically relevant. Look at the OA list and produce an ICD line for each: hypertension → I10, paroxyzmal AF → I48.0 / I48.1, post-strumectomy / hypothyroidism → E06.2 / E03.9, moderate mitral regurgitation → I34.0 / I05.1, hyperuricaemia → E79.0, uterine myoma → D25, cataract (post-op) → H26.9 / Z96.1, sleep apnoea → G47.3, MGUS → D47.2, AV block 1st degree → I44.0, varicose veins → I83.9, chronic back pain → M54.9, GERD / "pálenie žalúdka" → K21, intermittent microscopic haematuria → R31.2, vertigo → R42, arthralgia → M25.5.
+- State-after-surgery items (st.p. strumektómii, st.p. operácii katarakty) → code the resulting condition (e.g. hypothyroidism on Euthyrox → E03.9; post-cataract status → Z96.1 or H25.9).
 
-## OWNS — include ONLY these, ONLY when the source supports them
-- Primary (encounter-driving) diagnosis with its ICD-10 code — the one the doctor explicitly identified as THE diagnosis for this encounter.
-- Differential diagnoses the doctor explicitly mentioned (diff dg, versus, rule out, nemožno vylúčiť) — keep the doctor's uncertainty wording.
-- Active chronic conditions the doctor explicitly brought into the conclusion (e.g. the doctor said "pri pacientkinej fibrilácii predsiení…" as part of their reasoning) — code only these, not every OA item.
+## CRITICAL: NO FABRICATION
+Never assign an ICD code for a condition that does NOT appear anywhere in the source (transcript + OCR + doctor notes). If a condition isn't in OA or TO, it does NOT get a code. Observed real fabrications to avoid: K80.0 Cholelitiáza (gallstones NEVER mentioned), D64.9 Anémia (no anaemia in source), R01.1 Srdečný šelest (no murmur heard), Z95.8 Prítomnosť iného implantátu (no implant mentioned). A fabricated ICD code is a clinical-safety issue.
 
 ## NEVER OWNS
-- Past surgeries listed in OA (unless the doctor explicitly names them in the conclusion) — they belong to OA.
-- Family diseases → RA.
-- Allergies → AA.
 - Narrative of how the diagnosis unfolded → TO.
 - Treatment steps, procedures, follow-ups → Postup a plán.
-- Every chronic condition from OA just to "be complete" — OA already lists them.
-
-## POSITIVE EXAMPLES
-- Source: "R07.4 Bolesti na hrudi, t.č. nemožno vylúčiť IAP, difdg. NSTEMI"
-  → Output:
-    R07.4 Bolesť v hrudníku, bližšie neurčená
-    Diferenciálna diagnóza: nemožno vylúčiť nestabilnú angínu pectoris, NSTEMI.
-- Source: "Akútny infarkt myokardu neurčitej lokalizácie"
-  → Output: "I21.9 Akútny infarkt myokardu, bližšie neurčený"
-
-## NEGATIVE EXAMPLES (these are fabrications — NEVER produce them)
-- Adding I10 Hypertenzia to Záver just because OA lists hypertension — the doctor must explicitly bring it into the conclusion.
-- Adding I48.1 Paroxizmálna fibrilácia because OA mentions paroxyzmal AF — same rule.
-- Adding K80.0 Cholelitiáza / D64.9 Anémia / R01.1 Srdečný šelest when NONE of these were mentioned in the source — pure fabrication.
-- "Stav po strumektómii" → belongs to OA; do NOT assign an ICD here.
+- Family diseases → RA.
+- Allergies → AA.
 
 ## FORMAT
-- One ICD code per line, prefixed with the code, then the canonical description.
-- Format: "I21.4 Akútny subendokardiálny infarkt myokardu" — code + single space + description.
-- Use dotted format (I21.4, not I214). The icd-validator reconciler will normalize anyway.
-- Preserve differential wording verbatim ("diferenciálne diagnosticky", "nemožno vylúčiť", "versus").
-- If the doctor's conclusion is just a single primary + optional differential, that's the correct output. Do NOT pad.
+- Exactly ONE diagnosis per line.
+- Each line format: "CODE Description" (example: "I21.4 Akútny subendokardiálny infarkt myokardu").
+- Dotted format (I21.4, not I214). The icd-validator reconciler will normalize.
+- Order: primary diagnosis first → differential line (if any) → chronic conditions (most clinically relevant first).
+- For the differential line, use: "Diferenciálna diagnóza: <speaker's wording verbatim>" — keep doctor's exact phrasing ("nemožno vylúčiť", "diferenciálne diagnosticky", "versus").
+- No prose explanations, no grouping headers, no bullet markers — just code + space + description, one per line.
+
+## POSITIVE EXAMPLE (what a full Záver looks like for a typical cardiology admission)
+Source has: "R074 Bolesť v hrudníku, difdg NSTEMI, IAP. OA: hypertenzia III., paroxyzmálna fibrilácia predsiení, stav po strumektómii, MGUS, sleep apnoe, kŕčové žily, pálenie žalúdka"
+
+Output:
+R07.4 Bolesť v hrudníku, bližšie neurčená
+Diferenciálna diagnóza: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI.
+I10 Primárna [esenciálna] artériová hypertenzia
+I48.0 Paroxyzmálna fibrilácia predsiení
+E03.9 Hypotyreóza, bližšie neurčená
+D47.2 Monoklonálna gamapatia nejasného významu
+G47.3 Syndróm spánkového apnoe
+I83.9 Varixy dolných končatín bez vredu alebo zápalu
+K21 Gastroezofageálna refluxná choroba
+
+## NEGATIVE EXAMPLES — do NOT produce these
+- K80.0 Cholelitiáza when no gallstones mentioned.
+- D64.9 Anémia when source has no anaemia diagnosis or lab.
+- R01.1 Srdcový šelest when auscultation was clean ("bez šelestov").
+- Z95.8 Prítomnosť iného implantátu unless an implant was actually stated.
+- Stav po operácii katarakty as a standalone line with no ICD code — assign H25.9 or Z96.1 based on context.
 
 ## WHEN EMPTY
-If the source contains no diagnostic conclusion (very rare), output ZERO characters. Do NOT invent one.`,
+If the source contains NO diagnostic content at all (extremely rare), output ZERO characters. Do NOT invent one to fill the space.`,
   },
 
   // ── Postup a plán ───────────────────────────────────────────────────
