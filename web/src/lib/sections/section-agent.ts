@@ -131,15 +131,11 @@ export async function renderSection(
 
 function buildSystemPrompt(
   section: SectionConfig,
-  priorSections: RenderedSection[],
+  _priorSections: RenderedSection[],
   language: Language,
   templateSystemPrompt?: string,
 ): string {
   const localeLabel = LANGUAGE_LABEL[language];
-  const prior =
-    priorSections.length > 0
-      ? priorSections.map((s) => `### ${s.title}\n${s.content}`).join("\n\n")
-      : "(no prior sections yet)";
 
   const templateBlock = templateSystemPrompt?.trim()
     ? `\n\n# Template-wide guardrails (apply to every section in this template)\n${templateSystemPrompt.trim()}`
@@ -169,10 +165,7 @@ You render ONE section of a structured medical note for a ${localeLabel}-speakin
 Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary.
 
 # Section contract (binding)
-${section.context}
-
-# Already-rendered sections (for dedup only — do NOT repeat their content)
-${prior}`;
+${section.context}`;
 }
 
 function buildUserMessage(source: RawSource): string {
