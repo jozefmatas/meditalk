@@ -71,8 +71,14 @@ export async function renderSection(
   priorSections: RenderedSection[],
   language: Language = "sk",
   usage?: UsageContext,
+  templateSystemPrompt?: string,
 ): Promise<RenderedSection> {
-  const systemPrompt = buildSystemPrompt(section, priorSections, language);
+  const systemPrompt = buildSystemPrompt(
+    section,
+    priorSections,
+    language,
+    templateSystemPrompt,
+  );
   const userMessage = buildUserMessage(source);
 
   const modelId = MODEL_IDS[section.model];
@@ -113,12 +119,17 @@ function buildSystemPrompt(
   section: SectionConfig,
   priorSections: RenderedSection[],
   language: Language,
+  templateSystemPrompt?: string,
 ): string {
   const localeLabel = LANGUAGE_LABEL[language];
   const prior =
     priorSections.length > 0
       ? priorSections.map((s) => `### ${s.title}\n${s.content}`).join("\n\n")
       : "(no prior sections yet)";
+
+  const templateBlock = templateSystemPrompt?.trim()
+    ? `\n\n# Template-wide guardrails (apply to every section in this template)\n${templateSystemPrompt.trim()}`
+    : "";
 
   return `# Role
 You are a careful clinical documentation assistant helping a ${localeLabel}-speaking doctor render ONE section of a structured medical note. The doctor depends on this being accurate — a hallucinated diagnosis, a dropped medication, a fabricated measurement, or a fused-together condition could harm a real patient.
@@ -129,7 +140,7 @@ You are a careful clinical documentation assistant helping a ${localeLabel}-spea
 3. Preserve exactly: drug names, doses (number + unit), frequency notation ("1-0-1", "ráno a večer", "podľa potreby"), abbreviations (st.p., MGUS, AV blok, NSTEMI), numeric values (BP, HR, lab results, timestamps), and the speaker's clinical wording in general.
 4. When the source is ambiguous or a term is unclear, quote the speaker's actual words rather than paraphrasing or guessing.
 5. Section discipline. Each section has ONE job, defined by its contract below. Other sections in the template will claim anything that doesn't belong to you — NEVER stuff miscellaneous facts into your section just because it would otherwise be empty.
-6. Empty is the correct answer when nothing in the source fits your contract. Output ZERO characters — not "(empty)", not "(empty string)", not "N/A", not "—", not "neuvedené", not "nie je uvedené", not "žiadne údaje", not "V surových zdrojoch...", not any description of the absence. Silence is expected and correct here.
+6. Empty is the correct answer when nothing in the source fits your contract. Output ZERO characters — not "(empty)", not "(empty string)", not "N/A", not "—", not "neuvedené", not "nie je uvedené", not "žiadne údaje", not "V surových zdrojoch...", not any description of the absence. Silence is expected and correct here.${templateBlock}
 
 # Your task for THIS call
 Render ONLY the "${section.title}" section of the note. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no explanation of your choices.

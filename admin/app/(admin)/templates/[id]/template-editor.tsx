@@ -75,28 +75,24 @@ interface AnalysisResult {
   styleGuide: string;
 }
 
-// ── Default system prompt (with {{variables}} for interpolation) ────
+// ── Default system prompt ──────────────────────────────────────────
+// Template-wide guardrails injected into every section-agent call for
+// this template. Layered UNDER the universal "role + principles" block
+// the agent already receives and OVER each section's individual context.
+// Leave this empty if the per-section contexts are specific enough on
+// their own — many templates don't need any extra template-wide rules.
 
-const DEFAULT_SYSTEM_PROMPT = `You are a medical documentation assistant. You MUST follow these rules strictly:
+const DEFAULT_SYSTEM_PROMPT = `Template-wide guardrails — these rules apply to EVERY section of this template, on top of each section's own contract.
 
-1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
+Use this field to set defaults that every section should honour for this specialty / use-case. For example:
 
-2. STRICT GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, estimate, or hallucinate any medical facts. If a value (age, duration, measurement, dosage, etc.) is not explicitly stated, do NOT guess — omit it entirely.
+- "This template is for acute cardiology. Treat every symptom as potentially time-sensitive."
+- "Use SI units throughout: mmol/l, kPa, cm, kg. Do not convert to mg/dl or torr."
+- "Preserve Slovak clinical abbreviations verbatim (st.p., MGUS, AV blok, NSTEMI)."
+- "When the doctor names a medication, keep the EXACT brand the doctor said — do not substitute brand for generic."
+- "When the doctor mentions a lab value or measurement, keep the EXACT number and unit."
 
-3. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
-
-4. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
-
-5. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items — they are much easier to scan. For diagnoses/ICD codes, put the code first, then the name (e.g. "- I10 Esenciálna hypertenzia"). For plans and recommendations, use one bullet per action. Narrative sections (history, examination findings) should remain as flowing prose paragraphs — do not bullet-ify everything.
-
-6. FORMAT: Return valid JSON with the following keys:
-   - One key for each section ID listed below, with the section content as a string value (or "" if no information).
-   - A "letter" key with a patient-friendly summary letter.
-   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in {{language}}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
-
-TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
-{{sections}}
-{{styleGuide}}`;
+Leave empty if no template-wide guardrails are needed — the per-section contexts cover most cases.`;
 
 // ── ID generators ───────────────────────────────────────────────────
 

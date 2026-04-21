@@ -52,6 +52,7 @@ export async function generateNote(
   const { template, source, language, onSection, usage } = input;
   const language4 = normalizeLanguage(language);
   const leaves = collectLeafSections(template.sections);
+  const templateSystemPrompt = template.systemPrompt?.trim() || undefined;
 
   const rendered: RenderedSection[] = [];
 
@@ -78,6 +79,7 @@ export async function generateNote(
         rendered,
         language4,
         usage,
+        templateSystemPrompt,
       );
       rendered.push(result);
       if (onSection) await onSection(result);
