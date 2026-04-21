@@ -533,6 +533,7 @@ export async function POST(request: NextRequest) {
           template,
           sectionContentsMap,
           sectionLabels,
+          { skipEmpty: true },
         );
 
         const columnPayload: Record<string, unknown> = {

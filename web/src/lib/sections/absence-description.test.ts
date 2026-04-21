@@ -85,10 +85,43 @@ describe("isAbsenceDescription", () => {
     expect(isAbsenceDescription("There is no mention of weight.")).toBe(true);
   });
 
-  it("does NOT strip responses longer than 300 chars", () => {
-    // Long outputs are assumed to be real content, not "describing absence".
-    const long = "V surových zdrojoch " + "text ".repeat(80);
-    expect(long.length).toBeGreaterThan(300);
+  it("does NOT strip responses longer than the cap", () => {
+    // Very-long outputs are assumed to be real content, not "describing absence".
+    const long = "V surových zdrojoch " + "text ".repeat(200);
+    expect(long.length).toBeGreaterThan(600);
     expect(isAbsenceDescription(long)).toBe(false);
+  });
+
+  it("catches absence prose prefixed by the section label", () => {
+    // Observed: "Hmotnosť nie je v zdrojoch uvedená."
+    expect(isAbsenceDescription("Hmotnosť nie je v zdrojoch uvedená.")).toBe(
+      true,
+    );
+    expect(isAbsenceDescription("Výška nie je uvedená.")).toBe(true);
+    expect(
+      isAbsenceDescription("BMI nie je možné vypočítať bez výšky a hmotnosti."),
+    ).toBe(true);
+  });
+
+  it("strips HTML comment prefixes before checking", () => {
+    // Observed: "<!-- BMI Section -->\nBez výšky a hmotnosti…"
+    expect(
+      isAbsenceDescription(
+        "<!-- BMI Section -->\nBez výšky a hmotnosti v zdrojoch nie je možné vypočítať BMI.",
+      ),
+    ).toBe(true);
+    expect(isAbsenceDescription("<!-- comment -->")).toBe(true);
+  });
+
+  it("catches the EA reasoning-essay failure mode", () => {
+    // Observed: Haiku wrote a numbered essay explaining why EA is empty,
+    // including the sentence "vrátim prázdny reťazec" at the bottom.
+    const essay = `Zbahňme všetko, čo sa týka epidemiologickej histórie z tohto textu:
+1. Ani v prepise, ani v OCR texte nie sú spomenuté: cestovanie, pobyt v endemických oblastiach, kliešťové kúsky, insektí expozície, kontakty s infekčnými chorými, ani informácie o očkovaniach.
+2. Pacientka spomína "pokašľávam, ale ja to mám stále" – to je chronický symptóm, nie epidemiologická expozícia.
+3. Peľová alergia a roztoče sú allerény, ktoré patria do AA.
+Podľa pravidiel: Ak žiadne zo štyroch kategórií EA nie sú explicitne spomenuté, vrátim prázdny reťazec.`;
+    expect(essay.length).toBeLessThan(700);
+    expect(isAbsenceDescription(essay)).toBe(true);
   });
 });

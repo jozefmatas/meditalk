@@ -177,6 +177,7 @@ export async function POST(request: NextRequest) {
           template,
           sectionContentsMap,
           sectionLabels,
+          { skipEmpty: true },
         );
 
         const { error: columnError } = await retrySupabaseCall(

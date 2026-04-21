@@ -212,9 +212,13 @@ function buildUserMessage(source: RawSource): string {
  * or parenthetical asides in the middle of a paragraph is never affected.
  */
 export function isAbsenceDescription(text: string): boolean {
-  const t = text.trim();
+  // Strip leading/trailing HTML comments — Haiku sometimes prefixes the
+  // response with "<!-- BMI Section -->" or similar before the absence prose.
+  const t = text.replace(/<!--[\s\S]*?-->/g, "").trim();
   if (t.length === 0) return true;
-  if (t.length > 300) return false;
+  // Raised cap: EA leaks have produced 400+ char "reasoning essays" about
+  // why the section is empty — we still want those caught.
+  if (t.length > 600) return false;
 
   // 1. Whole response wrapped in parentheses — "(empty)", "(No weight found)",
   //    "(prázdne - výška nie je uvedená)", etc.
@@ -227,25 +231,41 @@ export function isAbsenceDescription(text: string): boolean {
     return true;
   }
 
-  // 3. Short responses that OPEN with a known absence phrase and don't
-  //    contain any clinical content. 300-char cap above keeps us honest.
-  const openers = [
-    /^v\s+(surov|dostupn|zdrojov|poskytnut)/i,
+  // 3. "X nie je uvedená/dostupná/možné" — any short response where an
+  //    absence clause appears (not at the start, e.g. prefixed by the
+  //    section label: "Hmotnosť nie je v zdrojoch uvedená.")
+  if (
+    t.length < 250 &&
+    /\bnie\s+(je|s[uú])\s+(v\s+zdroj|v\s+surov|v\s+dostupn|uved|dostupn|explicitne|k\s+dispoz|možn)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  // 4. Short responses with a clear absence opener / signal phrase.
+  const patterns = [
+    /^v\s+(surov|dostupn|zdrojov|poskytnut|raw\s+source)/i,
     /^v\s+zdroj/i,
     /^ziadn[eyo]\s+[uú]daj/i,
-    /^ziadne\s+[uú]daje/i,
-    /^žiadne\s+[uú]daje/i,
-    /^žiadne\s+informáci/i,
-    /^nie\s+(je|s[uú])\s+(uved|dostupn|explicitne|k\s+dispoz)/i,
+    /^žiadne?\s+[uú]daj/i,
+    /^žiadne?\s+informáci/i,
+    /^nie\s+(je|s[uú])\s+(uved|dostupn|explicitne|k\s+dispoz|možn)/i,
     /^nebola\s+uved/i,
     /^neuvedené/i,
-    /^no\s+(data|information|weight|height|value|specific)/i,
+    /^bez\s+(v[ýy]šky|hmotnosti|[úu]dajov|informáci)/i,
+    /^pod[ľl]a\s+pravidiel/i,
+    /^zbahňme/i,
+    /^no\s+(data|information|weight|height|value|specific|mention)/i,
     /^not\s+(stated|available|specified|provided|mentioned|explicitly|documented)/i,
     /^there\s+(is|are)\s+no\s+/i,
     /^source\s+does\s+not/i,
     /^the\s+(source|raw\s+source)\s+(does\s+not|doesn['']?t)/i,
     /^bmi\s+nie\s+je\s+možn/i,
-    /^nie\s+je\s+možn/i,
+    // Agents sometimes quote the rule back at us before complying:
+    /vrátim\s+pr[aá]zdn/i,
+    /return\s+(?:an?\s+)?empty\s+string/i,
+    /respond\s+with\s+(?:an?\s+)?empty/i,
   ];
-  return openers.some((re) => re.test(t));
+  return patterns.some((re) => re.test(t));
 }
