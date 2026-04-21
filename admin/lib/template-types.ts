@@ -3,6 +3,12 @@ export interface TemplateSection {
   labels: Record<string, string>;
   context?: string;
   subsections?: TemplateSection[];
+  /** Claude model tier for this section (haiku / sonnet / opus). Preserved on save. */
+  model?: "haiku" | "sonnet" | "opus";
+  /** Named post-render reconcilers. Preserved on save. */
+  reconcilers?: string[];
+  /** Backup of prior context before a script rewrite. Preserved on save. */
+  previousContext?: string;
 }
 
 export interface TemplateRow {
