@@ -1,6 +1,11 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import type { MedicationEntry } from "./types";
+
+/** Medication entry from the CSV index. */
+export interface MedicationEntry {
+  name: string;
+  activeIngredient: string;
+}
 
 interface MedicationIndex {
   byName: Map<string, MedicationEntry>;

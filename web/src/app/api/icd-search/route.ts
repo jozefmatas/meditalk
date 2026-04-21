@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchIcd } from "@/lib/clinical";
+import { searchIcd } from "@/lib/lookup/icd";
 
 /**
  * GET /api/icd-search?q=<query>&locale=<locale>

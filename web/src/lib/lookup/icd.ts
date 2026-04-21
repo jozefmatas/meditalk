@@ -1,6 +1,19 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import type { IcdEntry, CandidateIcdCode } from "./types";
+
+/** ICD-10 entry from the CSV index. */
+export interface IcdEntry {
+  description: string;
+  code: string;
+}
+
+/** Minimal shape returned by ICD search / resolve helpers. */
+export interface CandidateIcdCode {
+  code: string;
+  description: string;
+  confidence: "high" | "medium" | "low";
+  sourceConceptIds: string[];
+}
 
 interface IcdIndex {
   byCode: Map<string, string>;
