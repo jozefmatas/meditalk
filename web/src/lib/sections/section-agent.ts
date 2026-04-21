@@ -106,6 +106,15 @@ export async function renderSection(
     .join("")
     .trim();
 
+  // Safety net for the "empty-return" rule. When the agent describes the
+  // absence of content instead of returning literal empty — e.g. "(empty)",
+  // "(No weight value found...)", "Žiadne údaje…", "V surových zdrojoch…" —
+  // we strip it here so the rendered note doesn't ship with descriptive
+  // placeholders. See `isAbsenceDescription` for the detection rules.
+  if (isAbsenceDescription(content)) {
+    content = "";
+  }
+
   for (const name of section.reconcilers ?? []) {
     const reconciler = RECONCILERS[name];
     if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
@@ -165,4 +174,53 @@ function buildUserMessage(source: RawSource): string {
     parts.push(`# File: ${file.name}\n${file.text.trim()}`);
   }
   return parts.join("\n\n");
+}
+
+/**
+ * Catches the common ways Claude describes an absence of content instead
+ * of actually being empty. Returns true when the ENTIRE output string is
+ * one of these "describing emptiness" phrases, so the caller can swap it
+ * for literal "".
+ *
+ * Intentionally strict: only flags responses that are short and match a
+ * known absence pattern — so real content that happens to mention "N/A"
+ * or parenthetical asides in the middle of a paragraph is never affected.
+ */
+export function isAbsenceDescription(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0) return true;
+  if (t.length > 300) return false;
+
+  // 1. Whole response wrapped in parentheses — "(empty)", "(No weight found)",
+  //    "(prázdne - výška nie je uvedená)", etc.
+  if (/^\([^()]*\)$/i.test(t)) {
+    return /empty|no\s|not\s|nie\s|neuv|žiadn|žiadne|pr[aá]zdn|n\/a|—/i.test(t);
+  }
+
+  // 2. Bare absence tokens.
+  if (/^(n\/a|none|—|-|žiadne|neuvedené|neuvedeno|not\s+stated)\.?$/i.test(t)) {
+    return true;
+  }
+
+  // 3. Short responses that OPEN with a known absence phrase and don't
+  //    contain any clinical content. 300-char cap above keeps us honest.
+  const openers = [
+    /^v\s+(surov|dostupn|zdrojov|poskytnut)/i,
+    /^v\s+zdroj/i,
+    /^ziadn[eyo]\s+[uú]daj/i,
+    /^ziadne\s+[uú]daje/i,
+    /^žiadne\s+[uú]daje/i,
+    /^žiadne\s+informáci/i,
+    /^nie\s+(je|s[uú])\s+(uved|dostupn|explicitne|k\s+dispoz)/i,
+    /^nebola\s+uved/i,
+    /^neuvedené/i,
+    /^no\s+(data|information|weight|height|value|specific)/i,
+    /^not\s+(stated|available|specified|provided|mentioned|explicitly|documented)/i,
+    /^there\s+(is|are)\s+no\s+/i,
+    /^source\s+does\s+not/i,
+    /^the\s+(source|raw\s+source)\s+(does\s+not|doesn['']?t)/i,
+    /^bmi\s+nie\s+je\s+možn/i,
+    /^nie\s+je\s+možn/i,
+  ];
+  return openers.some((re) => re.test(t));
 }

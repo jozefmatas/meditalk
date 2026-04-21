@@ -99,6 +99,23 @@ Correct alternatives when source is ambiguous:
     block: `Preserve the speaker's exact wording for epidemiological exposures (travel, tick exposure, infectious contacts, vaccinations). If the source contains an ambiguous or unclear term, quote it verbatim rather than substituting a similar-sounding word. If nothing about travel / tick bites / infectious contacts / vaccinations is mentioned, return an empty string.`,
   },
   {
+    tag: "ea-concrete-negatives-v3",
+    labelMatch:
+      /^(ea|epidem|epidemiologick[áa]\s+anamn[éze]|epidemiological\s+history)$/i,
+    block: `EA overflow examples — these have actually leaked into EA in past generations. Do NOT let them leak again. For each trap below, the CORRECT action is noted:
+
+- "pokašľáva" / chronic cough / coughing seasonally → TO (if current) or OA (if chronic). NEVER EA.
+- "peľová alergia" / pollen allergy / pollen-related symptoms → AA. NEVER EA. Pollen is an allergen, not an infectious exposure.
+- "roztoče" / dust mites → AA. NEVER EA.
+- "žije s manželom / manželkou" / marital / cohabitation → SA. NEVER EA.
+- "bol fajčiar" / smoking history → Ab. NEVER EA.
+- "rodičia / súrodenci / prarodičia" / family diseases → RA. NEVER EA.
+- "úraz", "hospitalizácia", "operácia" / past injuries or surgeries → OA. NEVER EA.
+- "bolesť hrudníka" / presenting symptoms of this encounter → TO. NEVER EA.
+
+EA belongs to ONLY these four things, all of which must be EXPLICITLY mentioned in the source: foreign travel, tick / insect exposure, sick contacts with infectious disease, vaccination history. If none of those four are explicitly mentioned, the section MUST be zero characters — nothing more, nothing less.`,
+  },
+  {
     tag: "ea-strict-scope-v2",
     labelMatch:
       /^(ea|epidem|epidemiologick[áa]\s+anamn[éze]|epidemiological\s+history)$/i,
