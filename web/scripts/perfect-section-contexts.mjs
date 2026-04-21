@@ -601,42 +601,198 @@ If the source contains no plan content, output ZERO characters.`,
     labels: new Set(["vyska", "height"]),
     context: `Výška — Patient's height in centimetres.
 
-## CRITICAL: NO INVENTION
-NEVER invent, estimate, or fabricate a height value. NEVER output a "plausible" height like 170, 175, 180 cm when the source is silent on height. A fabricated height in a clinical note can harm the patient.
+## OWNS (only)
+- A specific height value stated in the source in cm.
 
-## WHEN A HEIGHT IS STATED IN THE SOURCE
-Output the exact number + "cm" as the speaker stated it (e.g. if the source says "má 168 centimetrov" then output exactly the stated number + "cm", nothing else).
+## NEVER OWNS (explicit redirect)
+- Physical examination findings (consciousness, GCS, habitus, skin, posture, orientation) → Celkové vyšetrenie. Even when the source has exam content and no height, DO NOT steal exam content into this section.
+- Weight → Hmotnosť.
+- Vital signs (BP, HR, SpO2, temperature) → Krvný tlak / Pulz.
+
+## CRITICAL: NO INVENTION
+NEVER invent, estimate, or fabricate a height. NEVER pick a "plausible" default like 170 / 175 / 180 cm when the source is silent.
+
+## WHEN A HEIGHT IS STATED
+Output exactly the number + "cm" as the speaker stated it. Nothing else.
 
 ## WHEN THE SOURCE IS SILENT ON HEIGHT (the common case)
-Output ZERO characters. Absolute silence. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence. Do NOT pick a default.`,
+Output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any prose describing absence. Do NOT redirect content from other sections here.`,
   },
   {
     id: "hmotnost",
     labels: new Set(["hmotnost", "weight"]),
     context: `Hmotnosť — Patient's weight in kilograms.
 
+## OWNS (only)
+- A specific weight value stated in the source in kg.
+
+## NEVER OWNS (explicit redirect)
+- EKG findings (rhythm, rate, ST, T, PQ, QRS, AV blok) → EKG. Even when the source has EKG content and no weight, DO NOT steal it into this section.
+- Physical examination → Celkové vyšetrenie.
+- Height → Výška.
+- Vital signs → Krvný tlak / Pulz.
+
 ## CRITICAL: NO INVENTION
-NEVER invent, estimate, or fabricate a weight value. NEVER output a "plausible" weight like 70, 75, 80 kg when the source is silent on weight. A fabricated weight in a clinical note can harm the patient (dose calculations, BMI, etc.).
+NEVER invent, estimate, or fabricate a weight. NEVER pick a "plausible" default like 70 / 75 / 80 kg when the source is silent. A fabricated weight impacts dose calculations and BMI.
 
-## WHEN A WEIGHT IS STATED IN THE SOURCE
-Output the exact number + "kg" as the speaker stated it (e.g. if the source says "váži 72 kíl" then output exactly the stated number + "kg", nothing else).
+## WHEN A WEIGHT IS STATED
+Output exactly the number + "kg" as the speaker stated it. Nothing else.
 
-## WHEN THE SOURCE IS SILENT ON WEIGHT (the common case)
-Output ZERO characters. Absolute silence. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence. Do NOT pick a default.`,
+## WHEN THE SOURCE IS SILENT (the common case)
+Output ZERO characters. Do NOT write prose describing absence. Do NOT redirect content from other sections here.`,
   },
   {
     id: "bmi",
     labels: new Set(["bmi"]),
     context: `BMI — Body Mass Index.
 
-## CRITICAL: NO INVENTION
-NEVER compute or output a BMI unless BOTH height AND weight were EXPLICITLY stated in the source by the speaker. NEVER invent, estimate, or "use a typical adult BMI" to fill this section. A fabricated BMI in a clinical note can harm the patient.
+## OWNS (only)
+- A computed BMI value, ONLY when BOTH height AND weight were EXPLICITLY stated in the source.
+
+## NEVER OWNS
+- Any other content — do NOT redirect exam findings, EKG, vitals, or anamnestic content here.
+
+## CRITICAL: NO INVENTION / NO INFERENCE
+NEVER output a BMI unless BOTH height AND weight are explicitly stated. Do NOT compute from estimated values. Do NOT "use a typical adult BMI".
 
 ## WHEN BOTH VALUES ARE STATED
-Compute BMI = weight(kg) / height(m)². Output the result as a number with a Slovak decimal comma (a decimal with one digit after the comma). Nothing else.
+BMI = weight(kg) / height(m)². Output as a number with Slovak decimal comma, one digit after the comma. Nothing else.
 
-## WHEN EITHER HEIGHT OR WEIGHT IS MISSING (the common case)
-Output ZERO characters. Absolute silence. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať", "chýbajú údaje", or anything similar. Silence is the correct output.`,
+## WHEN EITHER VALUE IS MISSING (the common case)
+Output ZERO characters. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať", "chýbajú údaje".`,
+  },
+
+  // ── Objective vitals + exam + EKG (strict, replaces short hint contexts)
+  {
+    id: "krvny-tlak",
+    labels: new Set(["krvny tlak", "krevni tlak", "tlak", "blood pressure", "bp"]),
+    context: `Krvný tlak — Blood pressure measurement values from this encounter.
+
+## OWNS (only)
+- Systolic/diastolic value in mmHg, as stated in the source.
+- Limb (ĽHK / PHK) when stated.
+- Position (sediac / ležiac / v stoji) when stated.
+- Multiple time-point measurements when the source provides them — keep all, with timestamps.
+- Heart rate (HR) when stated in the same vital-signs block.
+- SpO2, TT (temperature), respiratory rate when stated in the same block.
+
+## NEVER OWNS
+- Hypertension as a diagnosis → OA (chronic) or Záver (billable dx).
+- Antihypertensive medication → LA.
+- Chronic BP trend / "liečená hypertenzia" as history → OA.
+- Physical exam findings → Celkové vyšetrenie.
+
+## CRITICAL: NO INVENTION
+Output ONLY explicit numeric values from the source. If the source says "zvýšený tlak" without a number, output only "zvýšený tlak" verbatim — do NOT fabricate a specific value. If the source says nothing about BP, output ZERO characters.
+
+## FORMAT
+- One compact line with comma-separated values.
+- Preserve the speaker's notation: "TK ĽHK 165/75 mmHg, PHK 155/77 mmHg, HR 51/min reg, SatO2 97 %, TT 36,8 °C."
+- Multi-timepoint series on one line: "TK 150/80 mmHg (14:02), 145/80 mmHg (14:31), 143/80 mmHg (15:12)."
+- No prose framing, no "TK pacientky je…".
+
+## WHEN EMPTY
+If the source contains no BP / vitals measurement, output ZERO characters.`,
+  },
+  {
+    id: "pulz",
+    labels: new Set(["pulz", "tep", "srdcova frekvencia", "heart rate", "pulse"]),
+    context: `Pulz — Heart rate from this encounter.
+
+## OWNS (only)
+- Rate per minute.
+- Rhythm (pravidelný / nepravidelný).
+- Volume (plný / slabý).
+- Central/peripheral distinction when the source provides it.
+
+## NEVER OWNS
+- Arrhythmia as a diagnosis (fibrilácia, AV blok) → OA or Záver.
+- EKG interpretation (PQ, QRS, ST-T) → EKG.
+- BP → Krvný tlak.
+
+## CRITICAL: NO INVENTION
+Output ONLY the explicit heart-rate value stated in the source. Never fabricate a rate.
+
+## FORMAT
+- Compact: "65/min, pravidelný, plný" or "HR 51/min reg".
+- Preserve the speaker's wording.
+
+## WHEN EMPTY
+If no heart rate is stated, output ZERO characters.`,
+  },
+  {
+    id: "celkove-vysetrenie",
+    labels: new Set([
+      "celkove vysetrenie",
+      "celkove vysetreni",
+      "general examination",
+      "physical examination",
+      "objective findings",
+    ]),
+    context: `Celkové vyšetrenie — Physical examination findings from this encounter.
+
+## OWNS — include ALL of these when mentioned in the source
+- Level of consciousness, orientation, GCS.
+- Cooperativeness, habitus, nutrition, hydration, skin (ikteru, cyanózy), periférne prekrvenie.
+- Head exam: zrenice, fotoreakcia, nystagmus, sliznice, jazyk, šija.
+- Chest exam: dýchanie (vezikulárne, bez VDF), hrudník symmetry.
+- Cor auscultation: akcia, ozvy, šelesty.
+- Abdomen: palpácia, rezistencie, peritoneálne dráždenie, peristaltika, Blumberg, Rovsing, Murphy, Plenci, tapott.
+- Lower extremities: edémy, pulzácie, lýtka, Homans, HŽT / ischémia.
+- Upper + lower limb strength (svalová sila).
+
+## NEVER OWNS
+- BP / HR / SpO2 / temperature → Krvný tlak / Pulz.
+- EKG reading → EKG.
+- Height / weight / BMI → their own sections.
+- Lab values (troponin, NT-proBNP, CRP) → part of TO narrative for THIS encounter.
+- Diagnoses → OA / Záver.
+- Chronic history → OA.
+
+## CRITICAL: NO INVENTION
+Only include findings explicitly documented in the source. Do NOT add "normal" findings the doctor didn't state ("sliznice vlhké" only if the source says so).
+
+## FORMAT
+- One flowing paragraph of Slovak clinical prose, comma-separated compact facts grouped by anatomical system.
+- Preserve abbreviations verbatim (VDF, GCS, HŽT, DK, HKK).
+- No bullets, no subheadings.
+
+## WHEN EMPTY
+If no physical examination findings are in the source, output ZERO characters.`,
+  },
+  {
+    id: "ekg",
+    labels: new Set(["ekg", "ecg"]),
+    context: `EKG — Electrocardiogram reading from this encounter.
+
+## OWNS — include ALL of these when in the source
+- Rhythm (sinusový, fibrilácia, flutter).
+- Rate (frequency, f:).
+- Axis (os elektrická) when stated.
+- P-wave, PR / PQ interval.
+- QRS width and morphology.
+- ST segment (v izočiare, elevácia, depresia).
+- T-wave changes (negatívne, invertované, vo zvodoch …).
+- Conduction blocks (AV blok I./II./III. stupňa, LBBB, RBBB).
+- SVES, VES when stated.
+- The doctor's interpretive conclusion ("bez akútnych ischemických zmien", "AV blok 1. stupňa").
+
+## NEVER OWNS
+- BP / HR as a vital sign → Krvný tlak / Pulz. (Heart rate as part of the EKG reading stays here.)
+- Physical exam → Celkové vyšetrenie.
+- Diagnoses → Záver.
+- Treatment → Postup a plán.
+
+## CRITICAL: NO INVENTION
+Only include EKG findings explicitly documented. Do NOT add "normal intervals" the doctor didn't read.
+
+## FORMAT
+- Compact one-line or short-sentence sequence, preserving the doctor's exact interval and wave wording.
+- Example: "Sínusový rytmus, f 56/min, PQ 0,28 s, QRS do 0,08 s, ST v izočiare, T negat. V1–V3, AV blok 1. stupňa. Bez známok akútnych ischemických zmien."
+- Preserve Slovak decimal comma (0,28 not 0.28).
+
+## WHEN EMPTY
+If no EKG reading is in the source, output ZERO characters.`,
   },
 ];
 
