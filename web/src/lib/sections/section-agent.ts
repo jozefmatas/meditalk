@@ -85,6 +85,11 @@ export async function renderSection(
   const response = await client().messages.create({
     model: modelId,
     max_tokens: 2000,
+    // temperature=0 for deterministic clinical documentation. Run-to-run
+    // drift at default 1.0 is unacceptable when the same raw source should
+    // produce the same note. Anthropic t=0 is still not byte-identical
+    // across GPUs but it is as close as the API gets.
+    temperature: 0,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
@@ -140,49 +145,33 @@ function buildSystemPrompt(
     ? `\n\n# Template-wide guardrails (apply to every section in this template)\n${templateSystemPrompt.trim()}`
     : "";
 
+  // Three-layer prompt stack, deliberately minimal at the universal level:
+  //
+  //   1. ROLE + 3 universal rules (this block) — truly universal, no
+  //      specialty or section assumptions. Everything else moved out.
+  //   2. Template-wide guardrails (worldview) — HARD EXTRACTION MODE,
+  //      tone, unit conventions. Specialty-specific.
+  //   3. Section contract — OWNS / NEVER OWNS / FORMAT / LIMITS / WHEN
+  //      EMPTY. Section-specific.
+  //
+  // Rules that belong in the template or section contract (completeness,
+  // summarization, contradictions, abbreviation lists, caps) were removed
+  // from the universal block to prevent conflicts across layers.
   return `# Role
-You are a careful clinical documentation assistant helping a ${localeLabel}-speaking doctor render ONE section of a structured medical note. The doctor depends on this being accurate — a hallucinated diagnosis, a dropped medication, a fabricated measurement, or a fused-together condition could harm a real patient.
+You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation.
 
-# Principles (apply to every section, every time)
-1. Grounded transformation.
-   Transform the source into structured clinical text for this section.
-   You MAY:
-   - select relevant facts for this section
-   - normalize phrasing for clarity
-   - group related facts into flowing prose
-   You MUST NOT:
-   - invent new facts
-   - drop facts that belong to this section
-   - reinterpret meaning
-2. Completeness is mandatory.
-   If multiple facts in the source match this section, you must include ALL of them.
-   Never summarize by dropping facts.
-   Never keep only a subset.
-3. No summarization.
-   This is a clinical document, not a summary.
-   Do not shorten by removing details.
-   Do not replace multiple facts with a general statement.
-4. Preserve exactly.
-   Preserve drug names, doses, frequency, abbreviations, numeric values, and clinical wording.
-5. Strict section ownership.
-   Only include facts that clearly belong to this section.
-   Do not include facts from other sections.
-   Do not "rescue" unrelated facts.
-6. Contradictions.
-   If two statements conflict, include only one consistent version.
-   Prefer the more specific or more recent statement.
-7. Meaning preservation.
-   Do not simplify or generalize clinical meaning.
-8. Empty is valid.
-   If nothing matches, output nothing.${templateBlock}
+# Core rules (absolute)
+1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
+2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
+3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.${templateBlock}
 
-# Your task for THIS call
-Render ONLY the "${section.title}" section of the note. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no explanation of your choices.
+# Your task
+Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary.
 
-# Section contract
+# Section contract (binding)
 ${section.context}
 
-# Prior rendered sections (for dedup and consistency — do NOT repeat their content)
+# Already-rendered sections (for dedup only — do NOT repeat their content)
 ${prior}`;
 }
 
