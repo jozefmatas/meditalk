@@ -504,26 +504,19 @@ Never assign an ICD code for a condition that does NOT appear anywhere in the so
 - Allergies → AA.
 
 ## FORMAT
-- Exactly ONE diagnosis per line.
-- Each line format: "CODE Description" (example: "I21.4 Akútny subendokardiálny infarkt myokardu").
-- Dotted format (I21.4, not I214). The icd-validator reconciler will normalize.
-- Order: primary diagnosis first → differential line (if any) → chronic conditions (most clinically relevant first).
-- For the differential line, use: "Diferenciálna diagnóza: <speaker's wording verbatim>" — keep doctor's exact phrasing ("nemožno vylúčiť", "diferenciálne diagnosticky", "versus").
-- No prose explanations, no grouping headers, no bullet markers — just code + space + description, one per line.
+- ALL diagnoses on ONE LINE, comma-separated. No newlines between codes.
+- Each diagnosis written as: "CODE Description" (example: "I21.4 Akútny subendokardiálny infarkt myokardu").
+- Dotted code format (I21.4, not I214) — icd-validator will normalize anyway.
+- Order on the line: (1) primary diagnosis first, (2) differential clause immediately after the primary in parentheses, (3) chronic conditions afterwards, most clinically relevant first.
+- Differential clause format: "(diferenciálna dg.: <speaker's wording verbatim>)" — keep the doctor's exact phrasing ("nemožno vylúčiť", "diferenciálne diagnosticky", "versus").
+- If there is no differential, simply skip the parenthetical.
+- End the full line with a period.
 
 ## POSITIVE EXAMPLE (what a full Záver looks like for a typical cardiology admission)
 Source has: "R074 Bolesť v hrudníku, difdg NSTEMI, IAP. OA: hypertenzia III., paroxyzmálna fibrilácia predsiení, stav po strumektómii, MGUS, sleep apnoe, kŕčové žily, pálenie žalúdka"
 
-Output:
-R07.4 Bolesť v hrudníku, bližšie neurčená
-Diferenciálna diagnóza: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI.
-I10 Primárna [esenciálna] artériová hypertenzia
-I48.0 Paroxyzmálna fibrilácia predsiení
-E03.9 Hypotyreóza, bližšie neurčená
-D47.2 Monoklonálna gamapatia nejasného významu
-G47.3 Syndróm spánkového apnoe
-I83.9 Varixy dolných končatín bez vredu alebo zápalu
-K21 Gastroezofageálna refluxná choroba
+Output (one line):
+R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI), I10 Primárna [esenciálna] artériová hypertenzia, I48.0 Paroxyzmálna fibrilácia predsiení, E03.9 Hypotyreóza, bližšie neurčená, D47.2 Monoklonálna gamapatia nejasného významu, G47.3 Syndróm spánkového apnoe, I83.9 Varixy dolných končatín, K21 Gastroezofageálna refluxná choroba.
 
 ## NEGATIVE EXAMPLES — do NOT produce these
 - K80.0 Cholelitiáza when no gallstones mentioned.

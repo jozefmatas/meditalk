@@ -19,14 +19,6 @@
 import type { Reconciler } from "./index";
 import { getIcdDescription } from "../../lookup/icd";
 
-// Matches an ICD code anywhere in a line:
-//   "I21.4 Akútny…"       → code = "I21.4"
-//   "- I10 Esenciálna…"   → code = "I10"
-//   "R074 Bolesť…"        → code = "R074" (will normalize to R07.4)
-// Groups: (bullet/indent prefix)(code)(whitespace)(rest of line)
-const CODE_LINE_RE =
-  /^(\s*[-•*]?\s*)([A-Z]\d{2,4}(?:\.\d{1,4})?)(\s+)([^\n]+)/gm;
-
 /** "R074" → "R07.4"; "I21" → "I21"; "I21.4" → "I21.4". */
 function normalizeCode(raw: string): string {
   if (raw.includes(".")) return raw;
@@ -34,22 +26,82 @@ function normalizeCode(raw: string): string {
   return raw.substring(0, 3) + "." + raw.substring(3);
 }
 
+// Splits the text into "entry chunks" — the content between commas and
+// newlines that could hold one "CODE Description" pair. Parenthetical
+// differential clauses are kept intact (commas INSIDE parens don't split
+// the entry).
+function splitIntoEntries(text: string): Array<{
+  start: number;
+  end: number;
+  text: string;
+}> {
+  const entries: Array<{ start: number; end: number; text: string }> = [];
+  let depth = 0;
+  let chunkStart = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (ch === "," || ch === "\n")) {
+      entries.push({
+        start: chunkStart,
+        end: i,
+        text: text.substring(chunkStart, i),
+      });
+      chunkStart = i + 1;
+    }
+  }
+  if (chunkStart < text.length) {
+    entries.push({
+      start: chunkStart,
+      end: text.length,
+      text: text.substring(chunkStart),
+    });
+  }
+  return entries;
+}
+
+// Matches the "CODE Description" pattern at the START of a single entry
+// (after any leading whitespace or bullet marker).
+const ENTRY_CODE_RE =
+  /^(\s*[-•*]?\s*)([A-Z]\d{2,4}(?:\.\d{1,4})?)(\s+)([^\n]+?)$/s;
+
 export const icdValidator: Reconciler = (text, _source, ctx) => {
   if (!text.trim()) return text;
   const locale = ctx.language;
 
-  return text.replace(
-    CODE_LINE_RE,
-    (_match, prefix: string, rawCode: string, gap: string, rest: string) => {
+  const entries = splitIntoEntries(text);
+  let rebuilt = "";
+  let cursor = 0;
+
+  for (const entry of entries) {
+    // Copy any separator characters between the previous entry and this one.
+    rebuilt += text.substring(cursor, entry.start);
+
+    const m = entry.text.match(ENTRY_CODE_RE);
+    if (m) {
+      const [, prefix, rawCode, gap, rest] = m;
       const code = normalizeCode(rawCode);
       const canonical = getIcdDescription(code, locale);
       if (canonical) {
-        return `${prefix}${code}${gap}${canonical}`;
+        // Preserve any trailing parenthetical from the agent's description
+        // (e.g. "(diferenciálna dg.: …)") — it's clinical context the CSV
+        // canonical doesn't carry.
+        const parenMatch = rest.match(/\s*\([^()]*\)\s*$/);
+        const trailingParen = parenMatch ? parenMatch[0] : "";
+        rebuilt += `${prefix}${code}${gap}${canonical}${trailingParen}`;
+      } else {
+        rebuilt += `${prefix}${code}${gap}${rest}`;
       }
-      // Code unknown to the CSV — keep the agent's description but still
-      // emit the normalized code (R074 → R07.4) so downstream parsing is
-      // consistent.
-      return `${prefix}${code}${gap}${rest}`;
-    },
-  );
+    } else {
+      rebuilt += entry.text;
+    }
+
+    cursor = entry.end;
+  }
+
+  // Append any trailing separator characters after the last entry.
+  rebuilt += text.substring(cursor);
+
+  return rebuilt;
 };
