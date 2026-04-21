@@ -486,16 +486,32 @@ If the source contains no present-illness narrative (unlikely but possible), out
       "diagnosis",
       "diagnostic assessment",
     ]),
-    context: `Záver — Clinical assessment with ICD-10 codes. In Slovak/Czech clinical practice this section is the BILLABLE problem list — every clinically relevant diagnosis the patient has (acute for this encounter + ongoing chronic comorbidities) needs an ICD-10 code here. Be comprehensive.
+    context: `Záver — Clinical assessment with ICD-10 codes. Concise, professional, extracted ONLY from what the doctor explicitly stated.
 
-## OWNS — include ALL of these (each with its ICD-10 code, one per line)
-- Primary (encounter-driving) diagnosis.
-- Differential diagnoses the doctor explicitly mentioned (diff dg, versus, rule out, nemožno vylúčiť) — include on a dedicated "Diferenciálna diagnóza:" line.
-- ALL chronic conditions from the patient's OA that are clinically relevant. Look at the OA list and produce an ICD line for each: hypertension → I10, paroxyzmal AF → I48.0 / I48.1, post-strumectomy / hypothyroidism → E06.2 / E03.9, moderate mitral regurgitation → I34.0 / I05.1, hyperuricaemia → E79.0, uterine myoma → D25, cataract (post-op) → H26.9 / Z96.1, sleep apnoea → G47.3, MGUS → D47.2, AV block 1st degree → I44.0, varicose veins → I83.9, chronic back pain → M54.9, GERD / "pálenie žalúdka" → K21, intermittent microscopic haematuria → R31.2, vertigo → R42, arthralgia → M25.5.
-- State-after-surgery items (st.p. strumektómii, st.p. operácii katarakty) → code the resulting condition (e.g. hypothyroidism on Euthyrox → E03.9; post-cataract status → Z96.1 or H25.9).
+## DIAGNOSIS RULES (STRICT)
 
-## CRITICAL: NO FABRICATION
-Never assign an ICD code for a condition that does NOT appear anywhere in the source (transcript + OCR + doctor notes). If a condition isn't in OA or TO, it does NOT get a code. Observed real fabrications to avoid: K80.0 Cholelitiáza (gallstones NEVER mentioned), D64.9 Anémia (no anaemia in source), R01.1 Srdečný šelest (no murmur heard), Z95.8 Prítomnosť iného implantátu (no implant mentioned). A fabricated ICD code is a clinical-safety issue.
+Include ONLY diagnoses that are:
+- explicitly written in the doctor's notes, transcript, or OCR as a diagnosis
+- clearly stated as a diagnosis (not a finding, not a suspicion — unless explicitly marked as "nemožno vylúčiť", "versus", "diferenciálne diagnosticky")
+
+Do NOT include:
+- raw findings (e.g. EF value, MR grade, lab result number)
+- interpretations
+- derived diagnoses inferred from findings
+- differential diagnoses unless the doctor EXPLICITLY labeled them as such
+
+## LIMITS — DO NOT OVERFLOW
+- 1 primary diagnosis (encounter-driving).
+- 3-6 secondary diagnoses (active chronic comorbidities relevant to this encounter).
+
+If the OA contains more than 6 conditions, select only the CLINICALLY RELEVANT ones for this encounter's context (e.g. for a cardiology visit: cardiac conditions, hypertension, diabetes, coagulation-related, and other directly-impacting comorbidities come first; purely historical surgeries, dermatologic issues, or unrelated items can be omitted).
+
+## CRITICAL: NO FABRICATION / NO INFERENCE
+- Never assign an ICD code for a condition that does NOT appear anywhere in the source.
+- Never derive a diagnosis from a finding ("EF 45 %" → do NOT invent "systolic HF").
+- Never expand an abbreviation into a new diagnosis.
+- Observed real fabrications to avoid: K80.0 Cholelitiáza, D64.9 Anémia, R01.1 Srdečný šelest, Z95.8 Prítomnosť iného implantátu.
+- If unsure → OMIT.
 
 ## NEVER OWNS
 - Narrative of how the diagnosis unfolded → TO.
@@ -507,16 +523,18 @@ Never assign an ICD code for a condition that does NOT appear anywhere in the so
 - ALL diagnoses on ONE LINE, comma-separated. No newlines between codes.
 - Each diagnosis written as: "CODE Description" (example: "I21.4 Akútny subendokardiálny infarkt myokardu").
 - Dotted code format (I21.4, not I214) — icd-validator will normalize anyway.
-- Order on the line: (1) primary diagnosis first, (2) differential clause immediately after the primary in parentheses, (3) chronic conditions afterwards, most clinically relevant first.
-- Differential clause format: "(diferenciálna dg.: <speaker's wording verbatim>)" — keep the doctor's exact phrasing ("nemožno vylúčiť", "diferenciálne diagnosticky", "versus").
-- If there is no differential, simply skip the parenthetical.
+- Order on the line: (1) primary diagnosis first, (2) differential clause immediately after the primary in parentheses, (3) 3-6 secondary diagnoses after, most clinically relevant first.
+- Differential clause format: "(diferenciálna dg.: <speaker's wording verbatim>)" — keep the doctor's exact phrasing.
+- If there is no differential, skip the parenthetical entirely.
 - End the full line with a period.
 
-## POSITIVE EXAMPLE (what a full Záver looks like for a typical cardiology admission)
-Source has: "R074 Bolesť v hrudníku, difdg NSTEMI, IAP. OA: hypertenzia III., paroxyzmálna fibrilácia predsiení, stav po strumektómii, MGUS, sleep apnoe, kŕčové žily, pálenie žalúdka"
+## POSITIVE EXAMPLE (cardiology admission with differential + 5 secondaries)
+Source has: "R074 Bolesť v hrudníku, difdg NSTEMI, IAP. OA: hypertenzia III., paroxyzmálna fibrilácia predsiení, stav po strumektómii, MGUS, sleep apnoe, kŕčové žily, pálenie žalúdka, myóm maternice, mikroskopická hematúria, vertigo"
 
-Output (one line):
-R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI), I10 Primárna [esenciálna] artériová hypertenzia, I48.0 Paroxyzmálna fibrilácia predsiení, E03.9 Hypotyreóza, bližšie neurčená, D47.2 Monoklonálna gamapatia nejasného významu, G47.3 Syndróm spánkového apnoe, I83.9 Varixy dolných končatín, K21 Gastroezofageálna refluxná choroba.
+Output (one line, SELECTED to 1 primary + 5 most relevant secondary):
+R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI), I10 Primárna [esenciálna] artériová hypertenzia, I48.0 Paroxyzmálna fibrilácia predsiení, E03.9 Hypotyreóza, bližšie neurčená, D47.2 Monoklonálna gamapatia nejasného významu, G47.3 Syndróm spánkového apnoe.
+
+Note: the OA had 10+ items but only the 5 most clinically relevant to this cardiology encounter made it to Záver. Uterine myoma, varicose veins, microscopic haematuria, vertigo were omitted — they're documented in OA, they don't need to repeat here.
 
 ## NEGATIVE EXAMPLES — do NOT produce these
 - K80.0 Cholelitiáza when no gallstones mentioned.
