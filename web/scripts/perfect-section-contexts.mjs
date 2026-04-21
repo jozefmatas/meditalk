@@ -488,38 +488,45 @@ If the source contains no present-illness narrative (unlikely but possible), out
     ]),
     context: `Záver — Clinical assessment: diagnosis + ICD-10 code for THIS encounter.
 
-## OWNS — include ALL of these
-- Primary (encounter-driving) diagnosis with its ICD-10 code.
-- Differential diagnoses the doctor mentioned (diff dg, versus, rule out, nemožno vylúčiť).
-- Active chronic conditions that are clinically relevant to this encounter (hypertension, diabetes, AF) — with their ICD codes.
-- Any condition the doctor explicitly identified in their conclusion.
+## CRITICAL: NO INVENTED ICD CODES
+NEVER output an ICD code for a condition that was not explicitly stated by the doctor in the source. Do NOT "round out" the assessment with plausible codes the doctor didn't mention. Do NOT convert every OA item into its own ICD code unless the doctor explicitly said so in the conclusion. Examples of forbidden fabrication: adding K80.0 Cholelitiáza when gallstones were never mentioned; adding D64.9 Anémia when no anaemia was diagnosed; adding R01.1 Srdečný šelest when no murmur was heard. A fabricated ICD code in the assessment is a clinical safety issue.
+
+## OWNS — include ONLY these, ONLY when the source supports them
+- Primary (encounter-driving) diagnosis with its ICD-10 code — the one the doctor explicitly identified as THE diagnosis for this encounter.
+- Differential diagnoses the doctor explicitly mentioned (diff dg, versus, rule out, nemožno vylúčiť) — keep the doctor's uncertainty wording.
+- Active chronic conditions the doctor explicitly brought into the conclusion (e.g. the doctor said "pri pacientkinej fibrilácii predsiení…" as part of their reasoning) — code only these, not every OA item.
 
 ## NEVER OWNS
-- Past surgeries (unless still an active clinical concern) → OA.
+- Past surgeries listed in OA (unless the doctor explicitly names them in the conclusion) — they belong to OA.
 - Family diseases → RA.
 - Allergies → AA.
 - Narrative of how the diagnosis unfolded → TO.
-- Treatment steps → Postup a plán.
+- Treatment steps, procedures, follow-ups → Postup a plán.
+- Every chronic condition from OA just to "be complete" — OA already lists them.
 
 ## POSITIVE EXAMPLES
-- "R07.4 Bolesť v hrudníku, t.č. nemožno vylúčiť IAP, difdg. NSTEMI" → produces:
-  R07.4 Bolesť v hrudníku, bližšie neurčená
-  Diferenciálna diagnóza: nemožno vylúčiť nestabilnú angínu pectoris, NSTEMI.
-- "Akútny infarkt myokardu neurčitej lokalizácie" → "I21.9 Akútny infarkt myokardu, bližšie neurčený"
+- Source: "R07.4 Bolesti na hrudi, t.č. nemožno vylúčiť IAP, difdg. NSTEMI"
+  → Output:
+    R07.4 Bolesť v hrudníku, bližšie neurčená
+    Diferenciálna diagnóza: nemožno vylúčiť nestabilnú angínu pectoris, NSTEMI.
+- Source: "Akútny infarkt myokardu neurčitej lokalizácie"
+  → Output: "I21.9 Akútny infarkt myokardu, bližšie neurčený"
 
-## NEGATIVE EXAMPLES
-- "Stav po strumektómii" → goes to OA (past surgery, not active dx).
-- "Pacientka neguje nauseu, vracanie" → goes to TO (pertinent negatives of the complaint).
+## NEGATIVE EXAMPLES (these are fabrications — NEVER produce them)
+- Adding I10 Hypertenzia to Záver just because OA lists hypertension — the doctor must explicitly bring it into the conclusion.
+- Adding I48.1 Paroxizmálna fibrilácia because OA mentions paroxyzmal AF — same rule.
+- Adding K80.0 Cholelitiáza / D64.9 Anémia / R01.1 Srdečný šelest when NONE of these were mentioned in the source — pure fabrication.
+- "Stav po strumektómii" → belongs to OA; do NOT assign an ICD here.
 
 ## FORMAT
 - One ICD code per line, prefixed with the code, then the canonical description.
-- Format: "I21.4 Akútny subendokardiálny infarkt myokardu" — code + space + description.
+- Format: "I21.4 Akútny subendokardiálny infarkt myokardu" — code + single space + description.
 - Use dotted format (I21.4, not I214). The icd-validator reconciler will normalize anyway.
 - Preserve differential wording verbatim ("diferenciálne diagnosticky", "nemožno vylúčiť", "versus").
-- One differential line after the primary dx is acceptable.
+- If the doctor's conclusion is just a single primary + optional differential, that's the correct output. Do NOT pad.
 
 ## WHEN EMPTY
-If the source contains no diagnostic conclusion (very rare), output ZERO characters.`,
+If the source contains no diagnostic conclusion (very rare), output ZERO characters. Do NOT invent one.`,
   },
 
   // ── Postup a plán ───────────────────────────────────────────────────
@@ -576,33 +583,42 @@ If the source contains no plan content, output ZERO characters.`,
     labels: new Set(["vyska", "height"]),
     context: `Výška — Patient's height in centimetres.
 
-## OUTPUT FORMAT
-Just the value. Example: "175 cm".
+## CRITICAL: NO INVENTION
+NEVER invent, estimate, or fabricate a height value. NEVER output a "plausible" height like 170, 175, 180 cm when the source is silent on height. A fabricated height in a clinical note can harm the patient.
 
-## WHEN EMPTY (almost always)
-If the source does not explicitly state a height in cm, output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence.`,
+## WHEN A HEIGHT IS STATED IN THE SOURCE
+Output the exact number + "cm" as the speaker stated it (e.g. if the source says "má 168 centimetrov" then output exactly the stated number + "cm", nothing else).
+
+## WHEN THE SOURCE IS SILENT ON HEIGHT (the common case)
+Output ZERO characters. Absolute silence. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence. Do NOT pick a default.`,
   },
   {
     id: "hmotnost",
     labels: new Set(["hmotnost", "weight"]),
     context: `Hmotnosť — Patient's weight in kilograms.
 
-## OUTPUT FORMAT
-Just the value. Example: "78 kg".
+## CRITICAL: NO INVENTION
+NEVER invent, estimate, or fabricate a weight value. NEVER output a "plausible" weight like 70, 75, 80 kg when the source is silent on weight. A fabricated weight in a clinical note can harm the patient (dose calculations, BMI, etc.).
 
-## WHEN EMPTY (almost always)
-If the source does not explicitly state a weight in kg, output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence.`,
+## WHEN A WEIGHT IS STATED IN THE SOURCE
+Output the exact number + "kg" as the speaker stated it (e.g. if the source says "váži 72 kíl" then output exactly the stated number + "kg", nothing else).
+
+## WHEN THE SOURCE IS SILENT ON WEIGHT (the common case)
+Output ZERO characters. Absolute silence. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any parenthetical describing absence. Do NOT pick a default.`,
   },
   {
     id: "bmi",
     labels: new Set(["bmi"]),
     context: `BMI — Body Mass Index.
 
-## WHEN TO PRODUCE A VALUE
-ONLY when BOTH height AND weight are explicitly stated in the source. Compute BMI = weight(kg) / height(m)². Format as: "24,8".
+## CRITICAL: NO INVENTION
+NEVER compute or output a BMI unless BOTH height AND weight were EXPLICITLY stated in the source by the speaker. NEVER invent, estimate, or "use a typical adult BMI" to fill this section. A fabricated BMI in a clinical note can harm the patient.
 
-## WHEN EMPTY (almost always)
-If height OR weight is missing, output ZERO characters. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať". Silence is the correct output.`,
+## WHEN BOTH VALUES ARE STATED
+Compute BMI = weight(kg) / height(m)². Output the result as a number with a Slovak decimal comma (a decimal with one digit after the comma). Nothing else.
+
+## WHEN EITHER HEIGHT OR WEIGHT IS MISSING (the common case)
+Output ZERO characters. Absolute silence. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať", "chýbajú údaje", or anything similar. Silence is the correct output.`,
   },
 ];
 
