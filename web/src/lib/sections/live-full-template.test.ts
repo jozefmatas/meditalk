@@ -15,6 +15,7 @@ import { generateNote } from "./pipeline";
 import type { RawSource } from "./section-agent";
 
 const RAW_PATH =
+  process.env.RAW_PATH ??
   "/Users/jozefmatas/conductor/workspaces/meditalk/wellington/.context/attachments/pasted_text_2026-04-21_08-55-39.txt";
 
 function loadEnv() {

@@ -346,42 +346,41 @@ If the source explicitly says the patient has no allergies ("NKDA", "žiadne ale
       "aktualni medikace",
       "liekova anamneza",
     ]),
-    context: `LA — Medications. ALL medications the patient is taking, both at home and those given during this encounter.
+    context: `LA — Medications. Include EVERY medication mentioned ANYWHERE in the source (transcript, doctor notes, AND every attached file: discharge summaries, referrals, OCR PDFs, prior hospital records).
+
+## CRITICAL: DO NOT DROP MEDICATIONS
+The source for this encounter often includes a discharge summary or referral letter from another doctor. Those documents have a "Liečba", "Medikácia", "Medication", "Odporúčania", "Lieky pri prepustení" block with the full current medication list. You MUST include every medication listed in those blocks, NOT just what the patient named aloud in the conversation.
+
+If the OCR / discharge note lists 7 medications with doses and the transcript adds 1 more, your LA must have all 8.
 
 ## OWNS — include ALL of these
-- Chronic home medications (the patient's regular regimen).
-- Medications administered during this encounter (Heparin, Aspirin, morphine, nitroglycerín, ambulance / ED medications).
-- Over-the-counter or as-needed medications the patient uses (Tunol podľa potreby, etc.).
-- Dose (number + unit) when the speaker states it.
-- Frequency (1-0-1, 1-0-0, ráno a večer, podľa potreby) verbatim.
-- Route (per os, i.v., i.m.) when stated.
+- Chronic home medications (the patient's regular regimen) — from the discharge letter's medication list, referral letter, or patient-stated during conversation.
+- Medications administered during THIS encounter (Heparin, Aspirin, morphine, Arixtra, etc.) — both those given in the ambulance / ED AND those given on the ward.
+- Over-the-counter or as-needed medications the patient uses (Tunol, nitroglycerín striek, etc.).
+- Dose (number + unit) when stated anywhere in the source.
+- Frequency / Slovak dosing notation verbatim (1-0-1, 1-0-0, 1/2-0-1/2, ráno a večer, podľa potreby).
+- Route (per os, sc, iv, im, inhalačne) when stated.
 
 ## NEVER OWNS
 - Allergies → AA.
-- Past medications the patient STOPPED / is no longer taking → skip (do not list them).
+- Medications the patient EXPLICITLY stopped ("prestala brať", "vysadené") — skip those.
 - Patient's diseases → OA.
-- Recommendations for new medications to start → Postup a plán.
+- Plan-level medication recommendations ("odporúčame začať statín") → Postup a plán.
 
 ## POSITIVE EXAMPLES
-- "Eliquis 5 mg ráno a večer" → one line: "Eliquis 5 mg ráno a večer"
-- "Heparin 8000 UI i.v." (ED-given) → one line: "Heparin 8000 UI i.v."
-- "Tunol podľa potreby kvôli žalúdku" → one line: "Tunol podľa potreby"
-
-## NEGATIVE EXAMPLES
-- "Alergia na mukolytiká" → belongs to AA.
-- "Prestala brať Aspirín minulý rok" → SKIP (discontinued).
-- "Odporúčame začať statín" → belongs to Postup a plán.
+- OCR has "PRESTARIUM A 5 mg 1/2-0-1/2" → line: "PRESTARIUM A 5 mg, 1/2-0-1/2"
+- OCR has "Arixtra 2,5 mg sc a 24h (15:00)" → line: "Arixtra 2,5 mg sc à 24h (15:00)"
+- Transcript adds "Suplasin raz za pol roka" → line: "Suplasin, raz za pol roka (i.a.)"
 
 ## FORMAT
 - ONE medication per line.
-- Preserve brand name EXACTLY as the doctor wrote (do not substitute brand for generic).
-- Include dose + frequency when stated: "Eliquis 5 mg, ráno a večer" / "Betaloc ZOK 25 mg, 1-0-0 ráno".
-- Preserve Slovak dose-frequency notation verbatim: "1-0-1", "1-0-0", "ráno a večer", "podľa potreby".
-- Enrich from the transcript when the OCR list is missing details — if the patient said "Euthyrox 112 mikrogramov" aloud, include the dose even if the referral just says "Euthyrox".
+- Preserve brand name EXACTLY as written (no generic substitution).
+- Include dose + frequency + route when stated.
+- Preserve Slovak dosing notation verbatim ("1-0-1", "1/2-0-1/2", "ráno a večer", "podľa potreby", "sc à 24h").
 - No bullets, no numbering, no commas between meds — newlines only.
 
 ## WHEN EMPTY
-If the source mentions no medications at all, output ZERO characters.`,
+If the source truly mentions no medications anywhere, output ZERO characters. This is rare — discharge letters almost always include a medication list.`,
   },
 
   // ── Ab ──────────────────────────────────────────────────────────────
@@ -612,10 +611,10 @@ If the source contains no plan content, output ZERO characters.`,
 ## CRITICAL: NO INVENTION
 NEVER invent, estimate, or fabricate a height. NEVER pick a "plausible" default like 170 / 175 / 180 cm when the source is silent.
 
-## WHEN A HEIGHT IS STATED
-Output exactly the number + "cm" as the speaker stated it. Nothing else.
+## WHEN A HEIGHT IS STATED ANYWHERE
+Output exactly the number + "cm". Look at ALL source files — transcript, doctor notes, AND every attached OCR (discharge summary, referral letter, echo report, cardiology note). Referral letters often have a line like "Výška: 164 cm" or "Výška: 164 cm BMI: 27,9" — if you see it, include the value. Do NOT limit yourself to what the patient said aloud in the conversation.
 
-## WHEN THE SOURCE IS SILENT ON HEIGHT (the common case)
+## WHEN THE SOURCE IS SILENT ON HEIGHT (only if no value anywhere)
 Output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any prose describing absence. Do NOT redirect content from other sections here.`,
   },
   {
@@ -635,10 +634,10 @@ Output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…
 ## CRITICAL: NO INVENTION
 NEVER invent, estimate, or fabricate a weight. NEVER pick a "plausible" default like 70 / 75 / 80 kg when the source is silent. A fabricated weight impacts dose calculations and BMI.
 
-## WHEN A WEIGHT IS STATED
-Output exactly the number + "kg" as the speaker stated it. Nothing else.
+## WHEN A WEIGHT IS STATED ANYWHERE
+Output exactly the number + "kg". Look at ALL source files — transcript, doctor notes, AND every attached OCR (discharge summary, referral letter, echo report). Referral letters often have a line like "Hmotnosť: 75 kg" or "Hmotnosť: 75 kg Výška: 164 cm" — if you see it, include the value. Do NOT limit yourself to what the patient said aloud.
 
-## WHEN THE SOURCE IS SILENT (the common case)
+## WHEN THE SOURCE IS SILENT (only if no value anywhere)
 Output ZERO characters. Do NOT write prose describing absence. Do NOT redirect content from other sections here.`,
   },
   {
@@ -655,10 +654,13 @@ Output ZERO characters. Do NOT write prose describing absence. Do NOT redirect c
 ## CRITICAL: NO INVENTION / NO INFERENCE
 NEVER output a BMI unless BOTH height AND weight are explicitly stated. Do NOT compute from estimated values. Do NOT "use a typical adult BMI".
 
-## WHEN BOTH VALUES ARE STATED
-BMI = weight(kg) / height(m)². Output as a number with Slovak decimal comma, one digit after the comma. Nothing else.
+## WHEN BMI IS EXPLICITLY STATED IN THE SOURCE
+If the source already states a BMI (e.g. OCR referral letter says "BMI: 27,9"), output that value verbatim.
 
-## WHEN EITHER VALUE IS MISSING (the common case)
+## WHEN BOTH HEIGHT AND WEIGHT ARE STATED (and BMI isn't)
+Compute BMI = weight(kg) / height(m)². Output as a number with Slovak decimal comma, one digit after the comma. Nothing else.
+
+## WHEN EITHER VALUE IS MISSING (only if nothing in any source)
 Output ZERO characters. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať", "chýbajú údaje".`,
   },
 
