@@ -109,7 +109,7 @@ export async function renderSection(
   for (const name of section.reconcilers ?? []) {
     const reconciler = RECONCILERS[name];
     if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
-    content = reconciler(content, source);
+    content = reconciler(content, source, { language });
   }
 
   return { id: section.id, title: section.title, content };

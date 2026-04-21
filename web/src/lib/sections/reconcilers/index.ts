@@ -9,14 +9,23 @@
  * section's `context` in the template). This keeps section config purely
  * declarative while letting us add/remove quality checks in code.
  */
-import type { RawSource } from "../section-agent";
+import type { Language, RawSource } from "../section-agent";
+import { drugNormalizer } from "./drug-normalizer";
 
-/** Post-render hook: takes the section text + raw source, returns corrected text. */
-export type Reconciler = (text: string, source: RawSource) => string;
+export interface ReconcilerContext {
+  language: Language;
+}
+
+/** Post-render hook: takes the section text + raw source + context, returns corrected text. */
+export type Reconciler = (
+  text: string,
+  source: RawSource,
+  ctx: ReconcilerContext,
+) => string;
 
 export const RECONCILERS: Record<string, Reconciler> = {
-  // Intentionally empty — helpers land here as we need them.
-  // First candidates (from the user's notes): drug-normalizer, icd-validator, bp-sanity.
+  "drug-normalizer": drugNormalizer,
+  // Next candidates: icd-validator, bp-sanity, sat-sanity.
 };
 
 export type ReconcilerName = keyof typeof RECONCILERS;
