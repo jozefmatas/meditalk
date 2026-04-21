@@ -1,6 +1,6 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-20_
+_Last updated: 2026-04-21_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
@@ -149,74 +149,65 @@ When the doctor hits **Generate**:
 
 ## 6. The Generation Pipeline (Server-Side)
 
-This is the core engine. For the full canonical reference, see [kb/note-generation-engine.md](note-generation-engine.md).
+This is the core engine. For the full canonical reference, see [prompt-pipeline.md](prompt-pipeline.md).
 
 ### Inputs gathered:
 
 - Transcript text (from recording)
-- Doctor notes (from `metadata.doctor_notes`)
-- Extracted file texts (from uploaded images/PDFs/audio)
+- Doctor notes (from `metadata.doctor_notes`, also scanned by the preprocessor)
+- Extracted file texts (from uploaded images/PDFs/audio) with optional per-file `context` (the upload dialog's "focus on …" input)
 
-### Pipeline passes:
+### Pipeline stages:
 
-| Pass                                     | Model               | Purpose                                                                                                                                          |
-| ---------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Pass 1.1** — PHI Scrub                 | Pure TypeScript     | Remove patient name, birth number, phone, email, addresses from all inputs before any LLM call; protects clinical values (BP, GCS, pupils)       |
-| **Pass 1** — Clinical Analysis           | Sonnet 4.6 (temp=0) | Match clinical concepts, infer specialty, cluster problems, suggest ICD-10 codes, extract medication names                                       |
-| **Pass 1.5** — Fact Extraction           | Haiku 4.5 (temp=0)  | Extract structured facts into 15 categories with verbatim evidence; visit_date injected for temporal resolution                                  |
-| **Pass 1.6a** — Fact Validation          | Pure TypeScript     | Verify evidence in source, cross-source fallback, base-name-only medication correction (preserves dose/freq)                                     |
-| **Pass 1.6b** — Fact Resolution          | Pure TypeScript     | Detect speaker self-corrections, drop superseded facts                                                                                           |
-| **Pass 1.7** — ICD Certainty Filter      | Pure TypeScript     | Drop ICD candidates not grounded in diagnoses/history-subcategory facts                                                                          |
-| **Pass 1.8** — Assessment Classification | Pure TypeScript     | Tier ICD candidates (active/chronic/background), cap at 4+5, exclude background                                                                  |
-| **Prompt Assembly**                      | Pure TypeScript     | Template specialty override + pre-rendered ICD block (VERBATIM, sorted) + facts pre-assigned to sections (transcript omitted when facts present) |
-| **Pass 2** — Generation                  | Opus 4.6 (temp=0)   | Opus as formatter: copies ICD block verbatim, places pre-assigned facts into sections. Streamed via SSE                                          |
-| **Pass C** — Section Routing Validator   | Pure TypeScript     | Strip misrouted meds/substance/allergy content; cross-section dedup (OA↔LA, SA↔Ab, EA↔AA)                                                       |
-| **Pass 2.1** — Output PHI Scrub          | Pure TypeScript     | Defensive re-scrub of generated section values                                                                                                   |
-| **Pass 2.5** — Post-Generation           | Pure TypeScript     | Strip ungrounded ICD codes from output                                                                                                           |
+| Stage                                         | Engine                     | Purpose                                                                                                                                                                                                               |
+| --------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Stage 1** — PHI Scrub                       | Pure TypeScript            | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                      |
+| **Stage 2** — Structured-facts preprocessor   | Pure TypeScript            | Regex scan of every source carrier (transcript + doctorNotes + files[]) — extracts OCR med blocks, vital lines, EKG readings, loose HR, transcript brand mentions. Emits `<STRUCTURED_FACTS>` XML the agents see.     |
+| **Stage 3a** — ICD suggester                  | Claude Haiku               | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §3b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                              |
+| **Stage 3b** — Section-agent loop             | Claude (Haiku by default)  | Walks template leaves in order, skipping the Záver leaf (fed by 3a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.          |
+| **Stage 3c** — Reconcilers                    | Pure TypeScript            | Post-render transforms per section: `drug-normalizer` (alias map + fuzzy), `icd-validator` (canonical swap + CM rejection).                                                                                            |
+| **Stage 4** — Format Záver from suggester    | Pure TypeScript            | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Injected into the Záver slot before HTML build.                          |
+| **Stage 5** — HTML assembly                   | Pure TypeScript            | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                            |
+
+Clinical knowledge lives in four places: `template.styleExamples` (reference-notes corpus, few-shot), `template.systemPrompt` (template-wide worldview), `section.context` (per-section contract), and the named reconcilers.
 
 ### Streaming Protocol (SSE events):
 
-| Event               | When                          |
-| ------------------- | ----------------------------- |
-| `analysis_complete` | After Pass 1                  |
-| `facts_extracted`   | After Pass 1.5/1.6/1.7        |
-| `streaming_start`   | Right before Opus starts      |
-| `section`           | Each time a section completes |
-| `complete`          | Final payload with full note  |
-| `error`             | On failure                    |
+| Event             | When                                                                           |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                   |
+| `section`         | Each time a section completes. Synthetic Záver event fires after suggester.    |
+| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes` |
+| `error`           | On failure                                                                     |
 
-### Persistence (split save):
+### Persistence:
 
-1. Column update: `encounter_note`, `title`, `status: "to_review"`
-2. Atomic metadata merge: `clinical_analysis`, `generation_fingerprint`, `generation_history`
+1. Column update: `encounter_note`, `status: "to_review"`
+2. Atomic metadata merge: `template_id`, raw `transcript` / `doctor_notes`, `clinical_analysis.suggestedIcdCodes`
 
 **Key files:**
 
-- [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — main generation endpoint
-- [web/src/lib/clinical/phi-scrubber.ts](web/src/lib/clinical/phi-scrubber.ts) — Pass 1.1 + Pass 2.1 PHI scrubbing
-- [web/src/lib/clinical/pipeline.ts](web/src/lib/clinical/pipeline.ts) — Pass 1 + enriched prompt assembly
-- [web/src/lib/clinical/fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) — Pass 1.5
-- [web/src/lib/clinical/fact-validator.ts](web/src/lib/clinical/fact-validator.ts) — Pass 1.6a
-- [web/src/lib/clinical/medication-normalizer.ts](web/src/lib/clinical/medication-normalizer.ts) — medication fact parsing/reconstruction
-- [web/src/lib/clinical/fact-resolver.ts](web/src/lib/clinical/fact-resolver.ts) — Pass 1.6b
-- [web/src/lib/clinical/icd-certainty.ts](web/src/lib/clinical/icd-certainty.ts) — Pass 1.7
-- [web/src/lib/clinical/assessment-classifier.ts](web/src/lib/clinical/assessment-classifier.ts) — Pass 1.8
-- [web/src/lib/clinical/fact-section-assigner.ts](web/src/lib/clinical/fact-section-assigner.ts) — deterministic fact-to-section assignment
-- [web/src/lib/clinical/section-routing-validator.ts](web/src/lib/clinical/section-routing-validator.ts) — Pass C section routing
-- [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts) — Pass 2 + prompt builders + Pass 2.1/2.5
-- [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
+- [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — main generation endpoint (orchestrates all stages above)
+- [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts) — regeneration endpoint (same pipeline from cached source)
+- [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
+- [web/src/lib/sections/source-preprocessor.ts](../web/src/lib/sections/source-preprocessor.ts) — structured-facts extraction
+- [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
+- [web/src/lib/sections/format-zaver.ts](../web/src/lib/sections/format-zaver.ts) — suggester → Záver formatter
+- [web/src/lib/sections/pipeline.ts](../web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection`)
+- [web/src/lib/sections/section-agent.ts](../web/src/lib/sections/section-agent.ts) — generic section-agent (injects `# Voice examples` block)
+- [web/src/lib/sections/reconcilers/index.ts](../web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
+- [web/src/lib/templates/reference-notes.ts](../web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
+- [web/src/lib/templates/html.ts](../web/src/lib/templates/html.ts) — `buildTemplateHtml`
+- [web/src/lib/parse-note-sections.ts](../web/src/lib/parse-note-sections.ts) — HTML → per-section map (label-based matching — fixes cascade shift when `skipEmpty` drops a middle subsection)
+- [web/src/lib/api/sse.ts](../web/src/lib/api/sse.ts) — SSE streaming helpers
+
+See [prompt-pipeline.md](prompt-pipeline.md) for the deep dive.
 
 ---
 
 ## 7. Regeneration
 
-Three paths via [web/src/app/api/regenerate/route.ts](web/src/app/api/regenerate/route.ts):
-
-- **Structured rerender** (preferred) — template changed + cached `validated_facts` → re-runs fact-to-section assignment with new template, no re-analysis
-- **Fast reformat** (legacy) — template changed but no cached facts → Haiku reformats existing note into new layout
-- **Full path** — content changed → identical pipeline to generate, optionally reuses cached `clinical_analysis` from metadata to skip Pass 1
-
-Fingerprint diffing (SHA-256 over every pipeline component) detects whether differences between runs are from prompt changes (our code) or LLM sampling variance (model noise).
+Via [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts). Reads the visit's cached raw source (`metadata.transcript`, `metadata.doctor_notes`, `metadata.files[].extracted_text`) and runs the same section-agent pipeline with a possibly-new template. No special rerender/reformat branches — one path.
 
 ---
 
@@ -311,16 +302,29 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
 ```jsonc
 {
   "transcript": "...",
-  "files": [{ "id": "...", "name": "...", "extracted_text": "...", "extraction_status": "completed" }],
+  "files": [
+    {
+      "id": "...",
+      "name": "...",
+      "extracted_text": "...",
+      "extraction_status": "completed",
+    },
+  ],
   "template_id": "soap_v1",
   "doctor_notes": "...",
-  "recording_session": { "state": "paused", "durationAtPause": 127, "audioPath": "..." },
-  "generation_pending": { "templateId": "soap_v1", "startedAt": "2026-04-10T12:00:00Z" },
-  "clinical_analysis": { "inferredSpecialty": "cardiology", "candidateIcdCodes": [...] },
-  "generation_fingerprint": "sha256:...",
-  "generation_history": [{ "timestamp": "...", "fingerprint": {...}, "model": "...", "duration_ms": 42300 }]
+  "recording_session": {
+    "state": "paused",
+    "durationAtPause": 127,
+    "audioPath": "...",
+  },
+  "generation_pending": {
+    "templateId": "soap_v1",
+    "startedAt": "2026-04-10T12:00:00Z",
+  },
 }
 ```
+
+Legacy keys (`clinical_analysis`, `generation_fingerprint`, `generation_history`, `validated_facts`) may still appear on older visits from the previous pipeline — ignored by the current code but harmless to leave in place.
 
 All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` merge).
 
@@ -380,12 +384,20 @@ started → recording → processing → to_review → completed/archived
 
 Separate Next.js app at `admin/`:
 
-| Page       | Purpose                                            |
-| ---------- | -------------------------------------------------- |
-| Dashboard  | Pricing metrics, cost analysis per model/operation |
-| Users      | User management (invite, delete, view activity)    |
-| Templates  | Create, edit, visibility toggle, sorting           |
-| Encounters | View all encounters across users                   |
+| Page       | Purpose                                                                                                                                                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard  | Pricing metrics, cost analysis per model/operation                                                                                                                          |
+| Users      | User management (invite, delete, view activity)                                                                                                                             |
+| Templates  | Create, edit, visibility toggle, sorting. Template editor includes **Reference Notes Corpus** panel — upload real attending notes (PDF/image/text) → PHI-scrubbed → persisted to `templates.style_examples` jsonb → injected as few-shot examples at generation time. |
+| Encounters | View all encounters across users                                                                                                                                            |
+
+**Reference-notes ingestion** (template editor → Corpus panel → "Add note"):
+1. File POSTed to `/api/templates/analyze-note` (admin).
+2. [`admin/lib/file-extraction.ts`](admin/lib/file-extraction.ts) extracts text (PDF/image via Sonnet vision, plain text direct).
+3. [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.ts) strips rodné číslo, phone, email, PSČ+city.
+4. Response includes `proposedExample: { name, text }` + Claude-detected section labels.
+5. Client-side preview ([`admin/lib/reference-notes-parser.ts`](admin/lib/reference-notes-parser.ts)) matches extracted sections against the current template's labels and shows a per-section capture table.
+6. On confirm, `style_examples` array is updated + saved via `PATCH /api/templates/[id]` (validates shape: `{name, text}[]`, each `text.length ≤ 20000`, max 50 entries).
 
 ---
 
@@ -431,36 +443,33 @@ Separate Next.js app at `admin/`:
 
 ## 16. Model Map
 
-| Pass                       | Model                                          | Role                                |
-| -------------------------- | ---------------------------------------------- | ----------------------------------- |
-| File OCR (image/PDF)       | Sonnet 4.6 (temp=0)                            | Image + PDF → text                  |
-| Pass 1 — Clinical analysis | Sonnet 4.6 (temp=0)                            | Concepts, specialty, ICDs, clusters |
-| Pass 1.5 — Fact extraction | Haiku 4.5 (temp=0)                             | Grounded facts with evidence        |
-| Pass 2 — Generation        | Opus 4.6 (temp=0, fallbacks: Sonnet 4.6/4.5/4) | Prose note (no title)               |
-| Reformat (regen fast path) | Haiku 4.5                                      | Template swap                       |
-| Transcription              | Scribe v2 (ElevenLabs)                         | Audio → text                        |
+| Call                             | Model                                               | Role                                          |
+| -------------------------------- | --------------------------------------------------- | --------------------------------------------- |
+| File OCR (image/PDF)             | Sonnet 4.6 (temp=0)                                 | Image + PDF → text                            |
+| Section-agent (per leaf section) | Haiku 4.5 by default; per-section override possible | Render ONE section from raw source + contract |
+| Transcription                    | Scribe v2 (ElevenLabs)                              | Audio → text                                  |
+
+Section-agent model is configurable per template via `section.model: "haiku" | "sonnet" | "opus"`. Defaults to Haiku for speed and cost. Upgrade only where a section's contract demonstrably benefits from a larger model.
 
 ---
 
 ## 17. Key Guarantees
 
-1. **Every fact has verbatim evidence** — Pass 1.5 requires quotes; Pass 1.6a drops unverifiable facts
-2. **Every ICD code is grounded and pre-rendered** — Pass 1.7 drops ungrounded candidates; Pass 1.8 tiers by relevance; `buildPreRenderedIcdBlock` sorts and formats them; Opus copies the block VERBATIM; Pass 2.5 defensively strips any Opus snuck past
-3. **Deterministic pipeline** — LLM non-determinism absorbed by pure-TypeScript gates (1.6a, 1.6b, 1.7, 1.8, fact-section-assigner, pre-rendered ICD, Pass C, 2.5). Template specialty overrides Pass 1 inference. Transcript omitted when facts present.
-4. **No hallucinated clinical content** — Opus told "validated facts are the factual contract"
-5. **No cross-section contamination** — Pass C strips misrouted medications, substance use, and allergy content from wrong sections
-6. **No PHI reaches LLMs** — Pass 1.1 scrubs inputs; Pass 2.1 defensively re-scrubs outputs
-7. **Atomic metadata** — concurrent writers can't clobber each other thanks to JSONB merge RPC
+1. **Single source of truth per section** — the admin-editable `section.context` IS the clinical contract. Change the prose → change behavior; no code deploy needed.
+2. **Cross-section consistency** — each section receives all prior-rendered sections as context, so later sections dedup against earlier ones. Each `context` also declares explicit exclusions ("NEVER include X here — belongs to Y").
+3. **No invented content** — every section-agent prompt includes "use ONLY facts present in the raw source below. No invention." Reconcilers can add stricter post-checks (e.g. `icd-validator` to canonicalize ICD descriptions).
+4. **No PHI reaches LLMs** — `scrubPhi` runs on raw source before any section-agent call.
+5. **Per-section error isolation** — if one section's render fails, the pipeline logs and continues with an empty content for that section. The note still ships with all successful sections.
+6. **Atomic metadata** — concurrent writers can't clobber each other thanks to the JSONB merge RPC.
 
 ---
 
 ## 18. Testing
 
-- **790+ tests** across the clinical pipeline, hooks, utilities
-- Every clinical module has matching `*.test.ts`
-- Route-level integration tests for `/api/generate` and `/api/regenerate`
+- **370+ tests** across utilities, hooks, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
+- A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
 
 ---
 

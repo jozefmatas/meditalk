@@ -198,8 +198,11 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [data, generation]);
 
   // --- Derived state ---
-  // Block generation while any file is still uploading so the pipeline
-  // doesn't race the uploads and miss their extracted content.
+  // Only block while bytes are still in flight to the server. OCR /
+  // extraction happens server-side and is fully handled by the generate
+  // endpoint (which waits for any pending extraction to land). Doctors
+  // don't wait for a light to turn green — they click, and the server
+  // does the waiting.
   const filesUploading = hasUploadingFiles(data.files);
   const canGenerate =
     !!(

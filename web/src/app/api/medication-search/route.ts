@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchMedications } from "@/lib/clinical";
+import { searchMedications } from "@/lib/lookup/medications";
 
 /**
  * GET /api/medication-search?q=<query>&locale=<locale>

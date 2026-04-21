@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveIcdCodes } from "@/lib/clinical";
+import { resolveIcdCodes } from "@/lib/lookup/icd";
 
 /**
  * POST /api/icd-resolve

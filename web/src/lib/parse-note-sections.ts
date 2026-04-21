@@ -197,8 +197,11 @@ export function filterEmptySectionsHtml(html: string): string {
  * The HTML from buildTemplateHtml has:
  *   <h2>Title</h2><p>content</p><h3>Sub</h3><p>sub content</p>...
  *
- * We split on <h2> to get top-level sections (mapped by index to template),
- * then split each section's content on <h3> to get subsection content.
+ * Matching is done by LABEL (case-insensitive, diacritic-stripped),
+ * NOT by position. When buildTemplateHtml was called with skipEmpty:true,
+ * empty sections are omitted from the HTML — positional matching would
+ * then pair <h3>Pulz</h3> with template.subsections[0] (Krvný tlak) and
+ * cascade-shift everything after. Label matching is resilient to that.
  */
 export function parseNoteToSectionMap(
   html: string,
@@ -209,48 +212,120 @@ export function parseNoteToSectionMap(
   const map: Record<string, string> = {};
   const h2Parts = html.split(/(?=<h2[^>]*>)/i).filter((p) => p.trim());
 
-  for (let i = 0; i < h2Parts.length; i++) {
-    const templateSection = template.sections[i];
-    if (!templateSection) break;
+  // Build a label → template-section index for O(1) lookups. Every label
+  // (across all locales stored on the section) is indexed, so the parser
+  // matches regardless of which locale the HTML was rendered in.
+  const sectionByLabel = buildLabelIndex(template.sections);
 
-    const part = h2Parts[i];
+  for (const part of h2Parts) {
+    const titleMatch = part.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+    if (!titleMatch) continue;
+    const title = decodeEntities(titleMatch[1]);
+    const templateSection = sectionByLabel.get(normalizeLabel(title));
+    if (!templateSection) continue;
 
-    // Strip the <h2>...</h2> tag to get the body
     const bodyStart = part.indexOf("</h2>");
     if (bodyStart === -1) continue;
     const body = part.slice(bodyStart + 5).trim();
 
     if (!templateSection.subsections?.length) {
-      // No subsections — entire body is this section's content
       map[templateSection.id] = htmlToInlineContent(body);
+      continue;
+    }
+
+    const subByLabel = buildLabelIndex(templateSection.subsections);
+
+    // Split body on <h3> to separate parent content from subsection content.
+    const h3Parts = body.split(/(?=<h3[^>]*>)/i);
+
+    // First chunk (before any <h3>) is the parent section's own content.
+    if (h3Parts[0] && !h3Parts[0].startsWith("<h3")) {
+      map[templateSection.id] = htmlToInlineContent(h3Parts[0]);
     } else {
-      // Split body on <h3> to separate parent content from subsection content
-      const h3Parts = body.split(/(?=<h3[^>]*>)/i);
+      map[templateSection.id] = "";
+    }
 
-      // First chunk (before any <h3>) is the parent section content
-      if (h3Parts[0] && !h3Parts[0].startsWith("<h3")) {
-        map[templateSection.id] = htmlToInlineContent(h3Parts[0]);
-      } else {
-        map[templateSection.id] = "";
-      }
+    for (const h3Part of h3Parts) {
+      if (!h3Part.startsWith("<h3")) continue;
+      const subTitleMatch = h3Part.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+      if (!subTitleMatch) continue;
+      const subTitle = decodeEntities(subTitleMatch[1]);
+      const sub = subByLabel.get(normalizeLabel(subTitle));
+      if (!sub) continue;
 
-      // Remaining chunks are subsections, mapped by index
-      let subIdx = 0;
-      for (const h3Part of h3Parts) {
-        if (!h3Part.startsWith("<h3")) continue;
-        const sub = templateSection.subsections[subIdx];
-        if (!sub) break;
-
-        const subBodyStart = h3Part.indexOf("</h3>");
-        if (subBodyStart === -1) {
-          subIdx++;
-          continue;
-        }
-        map[sub.id] = htmlToInlineContent(h3Part.slice(subBodyStart + 5));
-        subIdx++;
-      }
+      const subBodyStart = h3Part.indexOf("</h3>");
+      if (subBodyStart === -1) continue;
+      map[sub.id] = htmlToInlineContent(h3Part.slice(subBodyStart + 5));
     }
   }
 
   return map;
+}
+
+/**
+ * Build a Map<normalizedLabel, section> for a single level of template
+ * sections. Indexes every locale-label stored on each section so that a
+ * heading rendered in any language resolves back to the right section.id.
+ */
+export function buildLabelIndex(
+  sections: import("./templates/types").TemplateSection[],
+): Map<string, import("./templates/types").TemplateSection> {
+  const byLabel = new Map<
+    string,
+    import("./templates/types").TemplateSection
+  >();
+  for (const s of sections) {
+    for (const label of Object.values(s.labels ?? {})) {
+      if (typeof label !== "string") continue;
+      const key = normalizeLabel(label);
+      if (!key) continue;
+      // First-write wins — language-specific labels might collide rarely
+      // (e.g. "EKG" in every locale), but they all point at the same
+      // section, so collision is harmless.
+      if (!byLabel.has(key)) byLabel.set(key, s);
+    }
+  }
+  return byLabel;
+}
+
+/**
+ * Recursive flat index covering every section AND subsection. Used when
+ * parsing a reference note that writes all sections at one level (doctors
+ * don't wrap subsections under their parent heading — they write "RA …
+ * OA … Krvný tlak …" flat).
+ */
+export function buildFlatLabelIndex(
+  sections: import("./templates/types").TemplateSection[],
+): Map<string, import("./templates/types").TemplateSection> {
+  const out = new Map<string, import("./templates/types").TemplateSection>();
+  const walk = (list: import("./templates/types").TemplateSection[]) => {
+    for (const s of list) {
+      for (const label of Object.values(s.labels ?? {})) {
+        if (typeof label !== "string") continue;
+        const key = normalizeLabel(label);
+        if (!key) continue;
+        if (!out.has(key)) out.set(key, s);
+      }
+      if (s.subsections?.length) walk(s.subsections);
+    }
+  };
+  walk(sections);
+  return out;
+}
+
+export function normalizeLabel(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"');
 }

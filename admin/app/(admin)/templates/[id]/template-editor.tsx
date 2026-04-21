@@ -73,30 +73,34 @@ interface AnalysisResult {
   extractedText: string;
   sections: AnalyzedSection[];
   styleGuide: string;
+  /** PHI-scrubbed full note, persisted on `style_examples`. */
+  proposedExample?: { name: string; text: string };
+  phiRedactions?: number;
 }
 
-// ── Default system prompt (with {{variables}} for interpolation) ────
+interface StyleExample {
+  name: string;
+  text: string;
+}
 
-const DEFAULT_SYSTEM_PROMPT = `You are a medical documentation assistant. You MUST follow these rules strictly:
+// ── Default system prompt ──────────────────────────────────────────
+// Template-wide guardrails injected into every section-agent call for
+// this template. Layered UNDER the universal "role + principles" block
+// the agent already receives and OVER each section's individual context.
+// Leave this empty if the per-section contexts are specific enough on
+// their own — many templates don't need any extra template-wide rules.
 
-1. INSUFFICIENT CONTEXT CHECK: Before generating, assess whether the provided input contains enough meaningful clinical information (symptoms, findings, diagnoses, treatments, etc.) to produce a useful medical note. If the input is too vague, too short, or lacks any real clinical content (e.g. just a greeting, a single word, or unrelated text), return ONLY this exact JSON: {"insufficient_context": true}. Do NOT attempt to generate a note from insufficient input.
+const DEFAULT_SYSTEM_PROMPT = `Template-wide guardrails — these rules apply to EVERY section of this template, on top of each section's own contract.
 
-2. STRICT GROUNDING: Only use information explicitly present in the provided transcript chunks, uploaded file contents, and doctor's notes. Do NOT infer, assume, estimate, or hallucinate any medical facts. If a value (age, duration, measurement, dosage, etc.) is not explicitly stated, do NOT guess — omit it entirely.
+Use this field to set defaults that every section should honour for this specialty / use-case. For example:
 
-3. OUTPUT LANGUAGE: Write ALL content exclusively in {{language}}. This includes section content, the patient letter, and the encounter title. The only exceptions are established Latin/international medical terminology (e.g. "status praesens", "per os") and proper nouns (drug brand names, institution names). Do not mix languages.
+- "This template is for acute cardiology. Treat every symptom as potentially time-sensitive."
+- "Use SI units throughout: mmol/l, kPa, cm, kg. Do not convert to mg/dl or torr."
+- "Preserve Slovak clinical abbreviations verbatim (st.p., MGUS, AV blok, NSTEMI)."
+- "When the doctor names a medication, keep the EXACT brand the doctor said — do not substitute brand for generic."
+- "When the doctor mentions a lab value or measurement, keep the EXACT number and unit."
 
-4. MISSING SECTIONS: If a section or subsection has no relevant information from the source material, output an empty string "" for that key. Do NOT write placeholder text like "Not stated" or "Neuvedené" — just use "".
-
-5. FORMATTING: Use bullet points (starting with "- ") for lists of diagnoses, ICD codes, medications, and action items — they are much easier to scan. For diagnoses/ICD codes, put the code first, then the name (e.g. "- I10 Esenciálna hypertenzia"). For plans and recommendations, use one bullet per action. Narrative sections (history, examination findings) should remain as flowing prose paragraphs — do not bullet-ify everything.
-
-6. FORMAT: Return valid JSON with the following keys:
-   - One key for each section ID listed below, with the section content as a string value (or "" if no information).
-   - A "letter" key with a patient-friendly summary letter.
-   - A "title" key with a short encounter title (max 6 words) summarizing the main reason for the visit in {{language}}. Example: "Kontrola krvného tlaku" or "Acute back pain consultation".
-
-TEMPLATE SECTIONS (fill each one, or "" if no relevant information):
-{{sections}}
-{{styleGuide}}`;
+Leave empty if no template-wide guardrails are needed — the per-section contexts cover most cases.`;
 
 // ── ID generators ───────────────────────────────────────────────────
 
@@ -399,6 +403,9 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     initialData.system_prompt ?? "",
   );
   const [styleGuide, setStyleGuide] = useState(initialData.style_guide ?? "");
+  const [styleExamples, setStyleExamples] = useState<StyleExample[]>(
+    initialData.style_examples ?? [],
+  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [translating, setTranslating] = useState(false);
@@ -543,6 +550,71 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     }
   }
 
+  // ── Corpus upload (separate from the sections/style-guide analyzer) ──
+
+  const [corpusUploading, setCorpusUploading] = useState(false);
+  const [corpusPreview, setCorpusPreview] = useState<{
+    proposedExample: StyleExample;
+    preview: import("@/lib/reference-notes-parser").PerSectionPreview[];
+    phiRedactions: number;
+  } | null>(null);
+  const corpusInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleCorpusUpload(file: File) {
+    setCorpusUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/templates/analyze-note", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Analysis failed");
+        return;
+      }
+
+      const result: AnalysisResult = await res.json();
+      if (!result.proposedExample) {
+        alert("No proposed example returned from analyzer");
+        return;
+      }
+
+      const { previewReferenceNote } =
+        await import("@/lib/reference-notes-parser");
+      const preview = previewReferenceNote(
+        result.proposedExample.text,
+        sections,
+      );
+
+      setCorpusPreview({
+        proposedExample: result.proposedExample,
+        preview,
+        phiRedactions: result.phiRedactions ?? 0,
+      });
+    } finally {
+      setCorpusUploading(false);
+    }
+  }
+
+  function confirmCorpusAdd() {
+    if (!corpusPreview) return;
+    const { proposedExample } = corpusPreview;
+    // Dedupe by name — replace existing entry with the same filename.
+    setStyleExamples((prev) => {
+      const filtered = prev.filter((e) => e.name !== proposedExample.name);
+      return [...filtered, proposedExample];
+    });
+    setCorpusPreview(null);
+  }
+
+  function removeStyleExample(name: string) {
+    setStyleExamples((prev) => prev.filter((e) => e.name !== name));
+  }
+
   // ── New template detection ──
   // Track whether the template has ever been successfully saved
   const [hasBeenSaved, setHasBeenSaved] = useState(() =>
@@ -569,6 +641,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       sections: initialData.sections,
       system_prompt: initialData.system_prompt ?? "",
       style_guide: initialData.style_guide ?? "",
+      style_examples: initialData.style_examples ?? [],
     }),
   );
 
@@ -582,6 +655,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         sections,
         system_prompt: systemPrompt,
         style_guide: styleGuide,
+        style_examples: styleExamples,
       }) !== savedSnapshot,
     [
       name,
@@ -591,6 +665,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
       sections,
       systemPrompt,
       styleGuide,
+      styleExamples,
       savedSnapshot,
     ],
   );
@@ -762,6 +837,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             ? null
             : systemPrompt.trim(),
         style_guide: styleGuide.trim() || null,
+        style_examples: styleExamples.length > 0 ? styleExamples : [],
       };
       const res = await fetch(`/api/templates/${initialData.id}`, {
         method: "PATCH",
@@ -779,6 +855,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
             sections: finalSections,
             system_prompt: systemPrompt,
             style_guide: styleGuide,
+            style_examples: styleExamples,
           }),
         );
         setHasBeenSaved(true);
@@ -1187,8 +1264,144 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
               </p>
             )}
           </div>
+
+          {/* Reference Notes Corpus */}
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Reference Notes Corpus
+                {styleExamples.length > 0 && (
+                  <span className="ml-1.5 text-muted-foreground/60">
+                    ({styleExamples.length})
+                  </span>
+                )}
+              </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={corpusUploading}
+                onClick={() => corpusInputRef.current?.click()}
+              >
+                {corpusUploading ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Upload />
+                )}
+                {corpusUploading ? "Uploading..." : "Add note"}
+              </Button>
+              <input
+                ref={corpusInputRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.txt,.md"
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files?.[0])
+                    handleCorpusUpload(e.target.files[0]);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+            {styleExamples.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Attach real finished notes (PDF / image / text) to teach the
+                model this template&apos;s voice. Each section&apos;s agent sees
+                up to 3 matching snippets as few-shot examples at generation
+                time.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {styleExamples.map((ex) => (
+                  <li
+                    key={ex.name}
+                    className="flex items-center justify-between gap-2 rounded border border-border bg-muted/30 px-2.5 py-1.5 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{ex.name}</div>
+                      <div className="text-muted-foreground">
+                        {ex.text.length.toLocaleString()} chars
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-muted-foreground"
+                      onClick={() => removeStyleExample(ex.name)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Corpus preview dialog */}
+      <Dialog
+        open={corpusPreview !== null}
+        onOpenChange={(open) => !open && setCorpusPreview(null)}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Reference note preview</DialogTitle>
+            <DialogDescription>
+              {corpusPreview?.preview.length ?? 0} section
+              {corpusPreview?.preview.length !== 1 && "s"} matched this
+              template&apos;s labels.
+              {corpusPreview?.phiRedactions ? (
+                <>
+                  {" "}
+                  <span className="text-muted-foreground">
+                    {corpusPreview.phiRedactions} PHI identifier
+                    {corpusPreview.phiRedactions !== 1 && "s"} scrubbed.
+                  </span>
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-96 overflow-y-auto rounded border border-border">
+            {corpusPreview?.preview.length === 0 ? (
+              <p className="p-4 text-sm text-muted-foreground">
+                No section labels from this template were found in the uploaded
+                note. Check that the note&apos;s headings match the
+                template&apos;s section names (e.g. &ldquo;RA&rdquo;,
+                &ldquo;OA&rdquo;, &ldquo;Záver&rdquo;) — or save anyway and the
+                runtime parser will attempt a second pass.
+              </p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Section</th>
+                    <th className="px-3 py-2 text-right font-medium">Chars</th>
+                    <th className="px-3 py-2 text-left font-medium">Snippet</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {corpusPreview?.preview.map((p) => (
+                    <tr key={p.sectionId} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{p.label}</td>
+                      <td className="px-3 py-2 text-right text-muted-foreground">
+                        {p.charCount}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {p.snippet}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setCorpusPreview(null)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmCorpusAdd}>Add to corpus</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Analysis result dialog */}
       <Dialog open={showAnalysisDialog} onOpenChange={setShowAnalysisDialog}>

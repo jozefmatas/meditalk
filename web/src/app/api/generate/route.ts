@@ -3,39 +3,22 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
 import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
 import { embedText, LEGACY_EMBEDDING_MODEL } from "@/lib/openai";
-import {
-  generateFromTemplate,
-  InsufficientContextError,
-} from "@/lib/anthropic";
 import { extractFileText } from "@/lib/extraction/extract-file";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
-  buildSectionContextsFromTemplate,
 } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
-import { flattenSectionIds } from "@/lib/templates/html";
-import {
-  runClinicalAnalysis,
-  runFactExtraction,
-  validateFacts,
-  resolveFacts,
-  countFacts,
-  emptyExtractedFacts,
-  computeFingerprint,
-  filterCertainIcdCandidates,
-  scrubPhi,
-  classifyAssessment,
-} from "@/lib/clinical";
+import { flattenSectionIds, buildTemplateHtml } from "@/lib/templates/html";
+import { scrubPhi } from "@/lib/phi-scrubber";
+import { generateNote, findZaverSection } from "@/lib/sections/pipeline";
+import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
+import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
+import type { RawSource } from "@/lib/sections/section-agent";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
-import type { ClinicalAnalysis } from "@/lib/clinical/types";
-import type {
-  ExtractedFacts,
-  FactExtractionInput,
-} from "@/lib/clinical/fact-extraction";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
 import {
@@ -122,8 +105,6 @@ export async function POST(request: NextRequest) {
     }
 
     const language = (visit.language as SupportedLanguage) || "en";
-    const visitDate: string | undefined =
-      typeof visit.visit_date === "string" ? visit.visit_date : undefined;
     const patientName: string | undefined =
       typeof visit.patient_name === "string" ? visit.patient_name : undefined;
     const patientId: string | undefined =
@@ -274,22 +255,22 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Wait for in-progress extractions ─────────────────────
-    // Poll until all pending/extracting files resolve (or timeout).
+    // Poll until every file with a path has `extracted_text`. Include
+    // files with status = undefined in the poll set — the client fires
+    // the extract API as fire-and-forget right after upload, so there's
+    // a brief window where the row exists without a status field while
+    // the extract call is in flight. Dropping these (the old filter
+    // only matched "extracting" / "pending") is exactly the race that
+    // made first-gen worse than regenerate.
     const pendingIds = new Set(
-      uploadedFiles
-        .filter(
-          (f) =>
-            f.extraction_status === "extracting" ||
-            f.extraction_status === "pending",
-        )
-        .map((f) => f.id),
+      uploadedFiles.filter((f) => f.path && !f.extracted_text).map((f) => f.id),
     );
 
     if (pendingIds.size > 0) {
       logger.debug(
         `[generate] Waiting for ${pendingIds.size} extraction(s): ${uploadedFiles
           .filter((f) => pendingIds.has(f.id))
-          .map((f) => f.name)
+          .map((f) => `${f.name} [${f.extraction_status ?? "no-status"}]`)
           .join(", ")}`,
       );
       const pollStart = Date.now();
@@ -311,14 +292,14 @@ export async function POST(request: NextRequest) {
         const stillPending = uploadedFiles.filter(
           (f) =>
             pendingIds.has(f.id) &&
-            (f.extraction_status === "extracting" ||
-              f.extraction_status === "pending"),
+            !f.extracted_text &&
+            f.extraction_status !== "failed",
         );
         if (stillPending.length === 0) break;
       }
 
       const completed = uploadedFiles.filter(
-        (f) => pendingIds.has(f.id) && f.extraction_status === "completed",
+        (f) => pendingIds.has(f.id) && f.extracted_text,
       ).length;
       const failed = uploadedFiles.filter(
         (f) => pendingIds.has(f.id) && f.extraction_status === "failed",
@@ -329,15 +310,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Inline extraction for unprocessed files ────────────────
-    // Files that are "failed" (retrying) or legacy (no status) get extracted
-    // inline in parallel. Files still "extracting" or "pending" are skipped
-    // (they're being handled by background extraction).
+    // Fallback path: any file that still lacks `extracted_text` after
+    // polling (stuck OCR, failed retry, or never-queued legacy upload)
+    // gets extracted inline. Blocking, but guarantees the discharge
+    // letter reaches the pipeline. Duplicate-work risk with the client's
+    // fire-and-forget extract is acceptable — the final text is identical.
     const unprocessed = uploadedFiles.filter(
-      (f) =>
-        !f.extracted_text &&
-        f.path &&
-        f.extraction_status !== "extracting" &&
-        f.extraction_status !== "pending",
+      (f) => !f.extracted_text && f.path,
     );
     const extractionErrors: string[] = [];
 
@@ -345,9 +324,14 @@ export async function POST(request: NextRequest) {
       const retrying = unprocessed.filter(
         (f) => f.extraction_status === "failed",
       );
+      const stuck = unprocessed.filter(
+        (f) =>
+          f.extraction_status === "extracting" ||
+          f.extraction_status === "pending",
+      );
       const legacy = unprocessed.filter((f) => !f.extraction_status);
       logger.debug(
-        `[generate] Extracting ${unprocessed.length} file(s) inline: ${retrying.length} retrying, ${legacy.length} legacy`,
+        `[generate] Extracting ${unprocessed.length} file(s) inline: ${retrying.length} retrying, ${stuck.length} stuck-after-poll, ${legacy.length} legacy`,
       );
       lap("extraction-start");
 
@@ -454,66 +438,26 @@ export async function POST(request: NextRequest) {
 
     // Look up the template (DB with static fallback)
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
-
-    // Build section labels and contexts directly from the template
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
-    const sectionContexts = buildSectionContextsFromTemplate(template);
 
-    // Semantic search on legacy transcript chunks + clinical analysis — run in parallel
-    let chunkContents: string[] = [];
+    // Legacy chunk-based encounters: when transcriptText is empty we fall
+    // back to semantic retrieval over transcript_chunks. New encounters
+    // skip this entirely — transcriptText is already the full source.
     let usedChunks: string[] = [];
-    const hasFileContent = fileTexts.length > 0;
+    if (!transcriptText) {
+      const { count: chunkCount } = await supabase
+        .from("transcript_chunks")
+        .select("id", { count: "exact", head: true })
+        .eq("visit_id", visitId);
 
-    // Build clinical input from all extracted text + doctor notes.
-    // When transcriptText is available, include it so Pass 1 (Sonnet)
-    // sees the full picture for specialty detection and ICD grounding.
-    const clinicalInputParts: string[] = [];
-    if (transcriptText) {
-      clinicalInputParts.push(transcriptText);
-    }
-    for (const ft of fileTexts) {
-      const directive = ft.context
-        ? `\nDOCTOR'S DIRECTIVE FOR THIS FILE: ${ft.context}`
-        : "";
-      clinicalInputParts.push(`[File: ${ft.name}]${directive}\n${ft.text}`);
-    }
-    if (doctorNotes?.trim()) {
-      clinicalInputParts.push(`[Doctor Notes]\n${doctorNotes}`);
-    }
-
-    // Run embedding search, clinical analysis, and (when possible) fact
-    // extraction in parallel. When transcriptText is available the fact
-    // extraction input is fully known up-front so Pass 1.5 can start
-    // immediately without waiting for embedding results.
-    // @deprecated transcript_chunks — new encounters store transcript in
-    // metadata.transcript; this legacy path only fires for old encounters
-    // created before the batch-only migration.
-    lap("parallel-start");
-    const embeddingPromise = transcriptText
-      ? Promise.resolve({
-          chunkContents: [] as string[],
-          usedChunks: [] as string[],
-        })
-      : (async () => {
-          const { count: chunkCount } = await supabase
-            .from("transcript_chunks")
-            .select("id", { count: "exact", head: true })
-            .eq("visit_id", visitId);
-
-          if (!chunkCount || chunkCount === 0) {
-            return {
-              chunkContents: [] as string[],
-              usedChunks: [] as string[],
-            };
-          }
-
+      if (chunkCount && chunkCount > 0) {
+        try {
           const queryEmbedding = await embedText(
             RETRIEVAL_QUERY[language],
             { userId, visitId },
             LEGACY_EMBEDDING_MODEL,
           );
-
           const { data: matches, error: rpcError } = await supabase.rpc(
             "match_chunks",
             {
@@ -522,213 +466,23 @@ export async function POST(request: NextRequest) {
               p_visit_id: visitId,
             },
           );
-
           if (rpcError) {
             logger.error("match_chunks RPC error:", rpcError);
-            return {
-              chunkContents: [] as string[],
-              usedChunks: [] as string[],
-            };
+          } else if (matches && matches.length > 0) {
+            const joined = matches
+              .map((m: { content: string }) => m.content)
+              .join("\n\n");
+            transcriptText = joined;
+            usedChunks = matches.map((m: { id: string }) => m.id as string);
           }
-
-          if (matches && matches.length > 0) {
-            return {
-              chunkContents: matches.map((m: { content: string }) => m.content),
-              usedChunks: matches.map((m: { id: string }) => m.id as string),
-            };
-          }
-          return { chunkContents: [] as string[], usedChunks: [] as string[] };
-        })();
-
-    const clinicalPromise: Promise<ClinicalAnalysis | null> =
-      clinicalInputParts.length > 0
-        ? runClinicalAnalysis(clinicalInputParts, language, { userId, visitId })
-            .then((result) => {
-              logger.debug(
-                "Clinical analysis complete — specialty:",
-                result.inferredSpecialty,
-                "concepts:",
-                result.matchedConcepts.length,
-                "ICD codes:",
-                result.candidateIcdCodes.length,
-                "medications:",
-                result.mentionedMedications.length,
-              );
-              return result;
-            })
-            .catch((err) => {
-              logger.warn(
-                "Clinical analysis failed, proceeding without enrichment:",
-                err,
-              );
-              return null;
-            })
-        : Promise.resolve(null);
-
-    // When transcriptText is available, fact extraction input is known
-    // up-front so Pass 1.5 (Haiku) can start in parallel with Pass 1
-    // (Sonnet) — saves ~4-8s of wall time vs the sequential path.
-    // For legacy chunk encounters, fact extraction runs after embedding.
-    const earlyFactInput: FactExtractionInput | null = transcriptText
-      ? {
-          chunks: [transcriptText],
-          doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
-          files: fileTexts.length > 0 ? fileTexts : undefined,
-          visitDate,
-        }
-      : null;
-
-    const factExtractionPromise: Promise<ExtractedFacts | null> = earlyFactInput
-      ? runFactExtraction(earlyFactInput, language, { userId, visitId }).catch(
-          (err) => {
-            logger.warn(
-              "[generate] Parallel fact extraction failed, will retry sequentially:",
-              err,
-            );
-            return null;
-          },
-        )
-      : Promise.resolve(null);
-
-    const [embeddingResult, rawClinicalAnalysis, earlyRawFacts] =
-      await Promise.all([
-        embeddingPromise,
-        clinicalPromise,
-        factExtractionPromise,
-      ]);
-    let clinicalAnalysis: ClinicalAnalysis | null = rawClinicalAnalysis;
-
-    lap("parallel-done");
-    chunkContents = embeddingResult.chunkContents;
-    usedChunks = embeddingResult.usedChunks;
-
-    // Add chunk contents to clinical input (for generation, not re-analysis)
-    if (chunkContents.length > 0) {
-      clinicalInputParts.unshift(...chunkContents);
-    }
-
-    // Use transcriptText if available (real-time streaming), otherwise use chunk contents
-    const transcriptChunks = transcriptText ? [transcriptText] : chunkContents;
-
-    // Pass 1.5 — Structured fact extraction + deterministic validation.
-    // For transcriptText encounters, raw facts were extracted in parallel
-    // above (earlyRawFacts). For legacy chunk encounters, extraction runs
-    // sequentially here. Failures are non-fatal: we fall back to an empty
-    // fact set and proceed with the current pipeline.
-    let validatedFacts: ExtractedFacts = emptyExtractedFacts();
-    let factWarnings: string[] = [];
-    let factRemovedCount = 0;
-    let factResolutionDropCount = 0;
-    const factExtractionInput: FactExtractionInput = earlyFactInput ?? {
-      chunks: transcriptChunks,
-      doctorNotes: doctorNotes?.trim() ? doctorNotes : undefined,
-      files: fileTexts.length > 0 ? fileTexts : undefined,
-      visitDate,
-    };
-    const hasAnyFactSource =
-      factExtractionInput.chunks.length > 0 ||
-      !!factExtractionInput.doctorNotes ||
-      (factExtractionInput.files?.length ?? 0) > 0;
-    if (hasAnyFactSource) {
-      try {
-        // Use early results if available, otherwise run extraction now
-        const rawFacts =
-          earlyRawFacts ??
-          (await runFactExtraction(factExtractionInput, language, {
-            userId,
-            visitId,
-          }));
-        const validation = validateFacts(rawFacts, factExtractionInput, {
-          pass1: clinicalAnalysis,
-          locale: language,
-        });
-        // Pass 1.6 — deterministic fact resolution. Drops facts that were
-        // contradicted by a self-correction phrase. Rule-based and
-        // deterministic by design so it doesn't reintroduce the LLM
-        // non-determinism we're fighting.
-        const resolution = resolveFacts(
-          validation.validFacts,
-          factExtractionInput,
-          language,
-        );
-        validatedFacts = resolution.resolvedFacts;
-        factWarnings = validation.warnings;
-        factRemovedCount = validation.counts.removed;
-        factResolutionDropCount = resolution.counts.total;
-        logger.debug(
-          `[generate] Fact extraction — ${validation.counts.total} valid, ${factRemovedCount} removed by validator, ${factResolutionDropCount} dropped by resolver (${resolution.counts.correctionDrops} correction), ${factWarnings.length} warnings`,
-        );
-        lap("fact-extraction-done");
-      } catch (err) {
-        logger.warn(
-          "[generate] Fact extraction failed, proceeding without fact contract:",
-          err,
-        );
-      }
-    }
-
-    // Preserve the full Pass 1 candidate list BEFORE certainty filtering.
-    // These are shown as suggestions in the ICD panel so the doctor can
-    // pick codes that the certainty filter dropped.
-    const allCandidateIcdCodes = clinicalAnalysis?.candidateIcdCodes ?? [];
-
-    // Pass 1.7 — Diagnosis certainty filter. Drop any candidate ICD code
-    // that isn't lexically grounded in the validated diagnosis/history facts.
-    // This is the deterministic gate that eliminates run-to-run drift in
-    // the final Záver: Opus only sees codes that survived this filter, and
-    // the system prompt forbids it from inventing new ones.
-    if (clinicalAnalysis && clinicalAnalysis.candidateIcdCodes.length > 0) {
-      // Debug: log fact values per category so we can trace grounding decisions
-      const factSummary: Record<string, string[]> = {};
-      for (const cat of [
-        "diagnoses",
-        "chiefComplaint",
-        "symptoms",
-        "findings",
-        "medications",
-        "personalHistory",
-        "plan",
-      ] as const) {
-        const facts = validatedFacts[cat];
-        if (facts.length > 0) {
-          factSummary[cat] = facts.map((f) => f.value);
+        } catch (err) {
+          logger.warn("[generate] Legacy chunk retrieval failed:", err);
         }
       }
-      logger.debug(
-        `[generate] ICD grounding facts:`,
-        JSON.stringify(factSummary, null, 2),
-      );
-
-      const certainty = filterCertainIcdCandidates(
-        clinicalAnalysis.candidateIcdCodes,
-        validatedFacts,
-      );
-      logger.debug(
-        `[generate] ICD certainty — kept ${certainty.counts.kept}/${certainty.counts.total}`,
-        certainty.dropped.slice(0, 5),
-      );
-      // Pass 1.8 — Assessment relevance classification: cap diagnosis
-      // dumps by tier so the Záver stays focused.
-      const assessment = classifyAssessment(certainty.kept, validatedFacts);
-      const assessmentKept = [
-        ...assessment.activeCurrent,
-        ...assessment.chronicRelevant,
-      ];
-      logger.debug(
-        `[generate] Assessment classification — ${assessment.counts.active} active, ${assessment.counts.chronic} chronic, ${assessment.counts.background} background`,
-      );
-
-      clinicalAnalysis = {
-        ...clinicalAnalysis,
-        candidateIcdCodes: assessmentKept,
-      };
     }
 
-    if (
-      transcriptChunks.length === 0 &&
-      !doctorNotes?.trim() &&
-      !hasFileContent
-    ) {
+    const hasFileContent = fileTexts.length > 0;
+    if (!transcriptText?.trim() && !doctorNotes?.trim() && !hasFileContent) {
       if (extractionErrors.length > 0) {
         logger.error(
           `[generate] File processing failed: ${extractionErrors.join("; ")}`,
@@ -740,42 +494,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use two-pass generation (Haiku draft → Opus refinement)
-    logger.debug(
-      `[generate] Starting two-pass generation (${transcriptChunks.length} chunks, ${fileTexts.length} files)`,
-    );
+    // Single raw-source bundle — every section-agent reads from this.
+    // `context` is the doctor's per-file instruction (upload dialog) —
+    // surfaces to the LLM as "Doctor's focus for this file: …" header.
+    const source: RawSource = {
+      transcript: transcriptText?.trim() || undefined,
+      doctorNotes: doctorNotes?.trim() || undefined,
+      files: fileTexts.map((f) => ({
+        name: f.name,
+        text: f.text,
+        context: f.context,
+      })),
+    };
 
-    // Use two-pass generation via generateFromTemplate
+    logger.debug(
+      `[generate] Starting section-agent pipeline (transcript: ${transcriptText?.length ?? 0} chars, files: ${fileTexts.length}, doctorNotes: ${doctorNotes?.length ?? 0} chars)`,
+    );
     lap("generation-start");
 
     const readable = createSSEStream(async ({ sendEvent, safeClose }) => {
-      // Notify client that clinical analysis is complete
-      if (clinicalAnalysis) {
-        sendEvent({
-          type: "analysis_complete",
-          specialty: clinicalAnalysis.inferredSpecialty,
-          icdCodeCount: clinicalAnalysis.candidateIcdCodes.length,
-          conceptCount: clinicalAnalysis.matchedConcepts.length,
-        });
-      }
-
-      // Phase 2 — notify client that fact extraction is complete
-      const factCount = countFacts(validatedFacts);
-      if (
-        factCount > 0 ||
-        factRemovedCount > 0 ||
-        factResolutionDropCount > 0
-      ) {
-        sendEvent({
-          type: "facts_extracted",
-          factCount,
-          removedCount: factRemovedCount,
-          warningCount: factWarnings.length,
-          resolvedCount: factResolutionDropCount,
-        });
-      }
-
-      // Notify client that generation is starting
       sendEvent({
         type: "streaming_start",
         sectionIds: allIds,
@@ -783,96 +520,74 @@ export async function POST(request: NextRequest) {
       });
 
       try {
-        // Call generateFromTemplate with streaming section extraction
-        const {
-          generatedNote,
-          suggestedTitle,
-          extractedIcdCodes,
-          systemPrompt,
-          userMessage,
-        } = await generateFromTemplate(
-          transcriptChunks,
-          template,
+        const sectionContentsMap: Record<string, string> = {};
+
+        // Phase 1: ICD suggester runs FIRST (on source alone). Its output
+        // feeds BOTH the right-side panel AND the Záver section —
+        // single source of truth for diagnostic codes. Runs in parallel
+        // with section generation below.
+        const suggesterPromise = suggestIcdCodes(
+          source,
+          [], // no rendered sections yet — source-only mode
           language,
-          sectionLabels,
-          doctorNotes,
-          fileTexts,
           { userId, visitId },
-          clinicalAnalysis ?? undefined,
-          sectionContexts,
-          (id, title, content) => {
-            sendEvent({ type: "section", id, title, content });
-          },
-          factCount > 0 ? validatedFacts : undefined,
-          visitDate,
-          patientName,
-          patientId,
         );
+
+        // Phase 2: generate every section EXCEPT Záver (pipeline skips
+        // Záver by label match; we inject it from suggester output).
+        const { sections: renderedSections } = await generateNote({
+          template,
+          source,
+          language,
+          usage: { userId, visitId },
+          onSection: (section) => {
+            sectionContentsMap[section.id] = section.content;
+            sendEvent({
+              type: "section",
+              id: section.id,
+              title: section.title,
+              content: section.content,
+            });
+          },
+        });
 
         lap("generation-done");
 
-        // Determinism audit — fingerprint every logical input to the
-        // generator. Compare fingerprints across runs to tell upstream
-        // divergence (inputs differ) from downstream variance (same inputs,
-        // different LLM output). Appended to metadata.generation_history so
-        // a visit keeps the history of all its generations.
-        const fingerprint = computeFingerprint({
-          templateId: template.id,
-          language,
-          transcriptChunks,
-          doctorNotes,
-          files: fileTexts,
-          clinicalAnalysis,
-          facts: validatedFacts,
-          systemPrompt,
-          userMessage,
-        });
-        logger.info(
-          `[generate] fingerprint visit=${visitId} composite=${fingerprint.composite}`,
+        const suggestedIcdCodes = await suggesterPromise;
+        lap("icd-suggestions-done");
+
+        // Phase 3: inject Záver content from the suggester. Emit a
+        // synthetic section event so the streaming UI shows Záver at
+        // completion time.
+        const zaver = findZaverSection(template);
+        if (zaver) {
+          const zaverContent = formatZaverFromSuggestions(suggestedIcdCodes);
+          sectionContentsMap[zaver.id] = zaverContent;
+          sendEvent({
+            type: "section",
+            id: zaver.id,
+            title: zaver.title,
+            content: zaverContent,
+          });
+          // Add to renderedSections so downstream metadata reflects it.
+          renderedSections.push({
+            id: zaver.id,
+            title: zaver.title,
+            content: zaverContent,
+          });
+        }
+
+        const generatedNote = buildTemplateHtml(
+          template,
+          sectionContentsMap,
+          sectionLabels,
+          { skipEmpty: true },
         );
 
-        // Override the Pass-1 Haiku candidate ICD list with the codes that
-        // actually appear in the generated report. This keeps the sidebar,
-        // DB metadata, and the Záver in lock-step. Defensive copy so we never
-        // mutate the clinicalAnalysis reference held elsewhere.
-        const finalAnalysis = clinicalAnalysis
-          ? { ...clinicalAnalysis, candidateIcdCodes: extractedIcdCodes }
-          : null;
-
-        // Save to DB (must complete before sending complete event,
-        // so the email API can read the latest encounter_note)
-        // Use refreshedMetadata to preserve cached extracted_text from file processing
-        // Auto-set title if the visit has none and AI suggested one
-        const autoTitle =
-          suggestedTitle && !visit.title ? suggestedTitle : undefined;
-
-        // Append this run to generation_history for determinism audit.
-        // Keep the most recent 10 runs so the JSONB doesn't grow unbounded.
-        const priorHistory = Array.isArray(
-          (refreshedMetadata as Record<string, unknown>).generation_history,
-        )
-          ? ((refreshedMetadata as Record<string, unknown>)
-              .generation_history as unknown[])
-          : [];
-        const historyEntry = {
-          at: new Date().toISOString(),
-          operation: "generate" as const,
-          fingerprint,
-        };
-        const generationHistory = [...priorHistory, historyEntry].slice(-10);
-
-        // Save non-metadata columns and metadata atomically via separate
-        // operations:
-        // 1. Regular .update() for non-JSONB columns (last-writer-wins, safe)
-        // 2. mergeVisitMetadata RPC for JSONB merge (atomic, no race)
         const columnPayload: Record<string, unknown> = {
           encounter_note: generatedNote,
           status: "to_review",
-          ...(autoTitle ? { title: autoTitle } : {}),
         };
-        // Retry transient fetch failures — long Opus runs leave the Supabase
-        // keepalive connection idle past Cloudflare's 100s timeout, causing
-        // undici to reuse a dead socket. See lib/supabase/retry.ts.
         const { error: columnError } = await retrySupabaseCall(
           () =>
             supabase
@@ -885,38 +600,16 @@ export async function POST(request: NextRequest) {
           { label: "generate-save-columns" },
         );
 
-        // Atomic metadata merge — sets new keys and deletes transient ones
-        // (generation_pending, recording_session) in one database operation.
+        const clinicalAnalysis =
+          suggestedIcdCodes.length > 0 ? { suggestedIcdCodes } : undefined;
+
         const metadataPartial: Record<string, unknown> = {
           template_id: template.id,
-          generation_fingerprint: fingerprint,
-          generation_history: generationHistory,
-          // Delete transient keys (null → deleted by the RPC)
           generation_pending: null,
           recording_session: null,
           ...(transcriptText ? { transcript: transcriptText } : {}),
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
-          // Persist validated facts so future regeneration (template changes)
-          // can do a deterministic fact-based rerender instead of prose
-          // reformatting. Only stored when facts were actually extracted.
-          ...(countFacts(validatedFacts) > 0
-            ? { validated_facts: validatedFacts }
-            : {}),
-          ...(finalAnalysis
-            ? {
-                clinical_analysis: {
-                  inferredSpecialty: finalAnalysis.inferredSpecialty,
-                  secondarySpecialty: finalAnalysis.secondarySpecialty,
-                  matchedConcepts: finalAnalysis.matchedConcepts,
-                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
-                  // Full Pass 1 candidates (pre-filter) for the ICD panel
-                  // so the doctor sees all suggestions, not just certain ones
-                  suggestedIcdCodes: allCandidateIcdCodes,
-                  problemClusters: finalAnalysis.problemClusters,
-                  mentionedMedications: finalAnalysis.mentionedMedications,
-                },
-              }
-            : {}),
+          ...(clinicalAnalysis ? { clinical_analysis: clinicalAnalysis } : {}),
         };
 
         let metadataError: unknown = null;
@@ -929,8 +622,6 @@ export async function POST(request: NextRequest) {
         const saveError = columnError || metadataError;
         if (saveError) {
           logger.error("Failed to save generated content:", saveError);
-          // Last-ditch recovery log — the generated note is otherwise lost
-          // to the user. Dump it so it can be rescued from server logs.
           logger.error(
             `[generate] LOST NOTE visit=${visitId} note_len=${generatedNote.length}`,
           );
@@ -942,40 +633,20 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        // Note: Usage logging is handled inside generateFromTemplate for two-pass generation
-
-        // Send final complete event and close stream so client gets response immediately
         sendEvent({
           type: "complete",
           generatedNote,
-          suggestedTitle,
           usedChunks,
           templateId: template.id,
-          ...(finalAnalysis
-            ? {
-                clinicalAnalysis: {
-                  inferredSpecialty: finalAnalysis.inferredSpecialty,
-                  secondarySpecialty: finalAnalysis.secondarySpecialty,
-                  candidateIcdCodes: finalAnalysis.candidateIcdCodes,
-                  suggestedIcdCodes: allCandidateIcdCodes,
-                  matchedConcepts: finalAnalysis.matchedConcepts,
-                  problemClusters: finalAnalysis.problemClusters,
-                  mentionedMedications: finalAnalysis.mentionedMedications,
-                },
-              }
-            : {}),
+          ...(clinicalAnalysis ? { clinicalAnalysis } : {}),
         });
 
-        // Send email BEFORE closing stream — client already has the
-        // "complete" event so there's no perceived delay. Sending after
-        // safeClose() risks the runtime killing the function before the
-        // email is dispatched.
         if (sendAsEmail) {
           try {
             await dispatchNoteEmail({
               userId,
               visitId,
-              title: autoTitle || visit.title || "Untitled",
+              title: visit.title || "Untitled",
               noteHtml: generatedNote,
               language,
             });
@@ -986,7 +657,6 @@ export async function POST(request: NextRequest) {
         }
 
         // Clean up recovery audio blob from storage (fire-and-forget).
-        // Check both the request audioPath and metadata for the path.
         const pendingAudioPath =
           audioPath ||
           (
@@ -1012,14 +682,6 @@ export async function POST(request: NextRequest) {
         safeClose();
       } catch (err) {
         logger.error("Generate stream error:", err);
-
-        // Handle insufficient context error specially
-        if (err instanceof InsufficientContextError) {
-          sendEvent({ type: "error", error: "insufficient_context" });
-          safeClose();
-          return;
-        }
-
         sendEvent({
           type: "error",
           error: err instanceof Error ? err.message : "Generation failed",
