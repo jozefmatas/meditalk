@@ -18,12 +18,12 @@ const RAW_PATH =
   process.env.RAW_PATH ??
   "/Users/jozefmatas/conductor/workspaces/meditalk/wellington/.context/attachments/pasted_text_2026-04-21_08-55-39.txt";
 
-function loadEnv() {
+function loadEnv(): Record<string, string> {
   const raw = readFileSync(
     "/Users/jozefmatas/conductor/workspaces/meditalk/wellington/web/.env.local",
     "utf-8",
   );
-  const out = {};
+  const out: Record<string, string> = {};
   for (const line of raw.split("\n")) {
     const l = line.trim();
     if (!l || l.startsWith("#") || !l.includes("=")) continue;
@@ -40,7 +40,7 @@ function loadEnv() {
   return out;
 }
 
-function parseRaw(raw) {
+function parseRaw(raw: string): RawSource {
   const transcriptIdx = raw.indexOf("Transcript:");
   const ocrIdx = raw.indexOf("OCR:");
   const transcript =

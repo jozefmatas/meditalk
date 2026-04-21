@@ -38,7 +38,9 @@ describe("template.systemPrompt wiring", () => {
 
   it("renderSection accepts templateSystemPrompt and passes it to buildSystemPrompt", () => {
     expect(SECTION_AGENT).toMatch(/templateSystemPrompt\?: string/);
-    expect(SECTION_AGENT).toMatch(/buildSystemPrompt\([^)]*templateSystemPrompt/s);
+    // Cross-line match without the `s` flag (ES2018+): replace newlines first.
+    const flat = SECTION_AGENT.replace(/\n/g, " ");
+    expect(flat).toMatch(/buildSystemPrompt\([^)]*templateSystemPrompt/);
   });
 
   it("buildSystemPrompt injects Template-wide guardrails block", () => {

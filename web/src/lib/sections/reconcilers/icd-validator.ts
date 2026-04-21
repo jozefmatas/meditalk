@@ -64,7 +64,7 @@ function splitIntoEntries(text: string): Array<{
 // Matches the "CODE Description" pattern at the START of a single entry
 // (after any leading whitespace or bullet marker).
 const ENTRY_CODE_RE =
-  /^(\s*[-•*]?\s*)([A-Z]\d{2,4}(?:\.\d{1,4})?)(\s+)([^\n]+?)$/s;
+  /^(\s*[-•*]?\s*)([A-Z]\d{2,4}(?:\.\d{1,4})?)(\s+)([^\n]+?)$/;
 
 export const icdValidator: Reconciler = (text, _source, ctx) => {
   if (!text.trim()) return text;
