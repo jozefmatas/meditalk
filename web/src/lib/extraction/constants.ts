@@ -13,8 +13,11 @@ export const EXTRACTION_STUCK_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
  *  Typical generation takes 60-120s; 3 min gives a safe 1.5-3x margin. */
 export const GENERATION_STALE_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
 
-/** Max time to wait for in-progress extractions before generating anyway. */
-export const EXTRACTION_WAIT_TIMEOUT_MS = 60_000; // 60 seconds
+/** Max time to wait for in-progress extractions before falling back to
+ *  inline extraction. Covers the slow tail of OCR (typical: 15-50s; slow
+ *  PDFs can push 90-120s). We'd rather wait than drop discharge-letter
+ *  content from the prompt. */
+export const EXTRACTION_WAIT_TIMEOUT_MS = 180_000; // 3 minutes
 
 /** How often to poll for extraction completion inside the generate route. */
 export const EXTRACTION_POLL_INTERVAL_MS = 500;

@@ -23,7 +23,13 @@ export type { UsageContext } from "../usage";
 export interface RawSource {
   transcript?: string;
   doctorNotes?: string;
-  files?: Array<{ name: string; text: string }>;
+  /**
+   * Files attached to the encounter. `context` is the doctor's optional
+   * per-file instruction captured in the upload dialog ("focus on liver
+   * markers, ignore old diagnosis") — surfaces to the LLM alongside the
+   * file's text.
+   */
+  files?: Array<{ name: string; text: string; context?: string }>;
 }
 
 export interface SectionConfig {
@@ -72,12 +78,14 @@ export async function renderSection(
   language: Language = "sk",
   usage?: UsageContext,
   templateSystemPrompt?: string,
+  sectionExamples?: string[],
 ): Promise<RenderedSection> {
   const systemPrompt = buildSystemPrompt(
     section,
     priorSections,
     language,
     templateSystemPrompt,
+    sectionExamples,
   );
   const userMessage = buildUserMessage(source);
 
@@ -134,6 +142,7 @@ function buildSystemPrompt(
   _priorSections: RenderedSection[],
   language: Language,
   templateSystemPrompt?: string,
+  sectionExamples?: string[],
 ): string {
   const localeLabel = LANGUAGE_LABEL[language];
 
@@ -141,25 +150,33 @@ function buildSystemPrompt(
     ? `\n\n# Template-wide guardrails (apply to every section in this template)\n${templateSystemPrompt.trim()}`
     : "";
 
-  // Three-layer prompt stack, deliberately minimal at the universal level:
+  // Few-shot voice examples drawn from real attending notes attached to
+  // this template. The LLM mimics the tone + structure — never the facts.
+  // The corpus is the style bible; nothing else encodes the doctor's
+  // phrasing preferences.
+  const examplesBlock =
+    sectionExamples && sectionExamples.length > 0
+      ? `\n\n# Voice examples for "${section.title}" (senior-attending notes from this template's corpus)\nMimic the TONE and STRUCTURE of these examples. NEVER copy patient-specific facts, numbers, names, or dates from them — those belong to other patients. Use them only as style references for how this doctor writes this section.\n\n${sectionExamples
+          .map((ex, i) => `Example ${i + 1}:\n${ex}`)
+          .join("\n\n")}`
+      : "";
+
+  // Four-layer prompt stack:
   //
-  //   1. ROLE + 3 universal rules (this block) — truly universal, no
-  //      specialty or section assumptions. Everything else moved out.
-  //   2. Template-wide guardrails (worldview) — HARD EXTRACTION MODE,
-  //      tone, unit conventions. Specialty-specific.
-  //   3. Section contract — OWNS / NEVER OWNS / FORMAT / LIMITS / WHEN
+  //   1. ROLE + 3 universal rules — no specialty or section assumptions.
+  //   2. Template-wide guardrails (worldview) — tone, abbreviations,
+  //      unit conventions. Specialty-specific.
+  //   3. Voice examples — few-shot snippets from real attending notes
+  //      attached to this template. Show, don't tell.
+  //   4. Section contract — OWNS / NEVER OWNS / FORMAT / LIMITS / WHEN
   //      EMPTY. Section-specific.
-  //
-  // Rules that belong in the template or section contract (completeness,
-  // summarization, contradictions, abbreviation lists, caps) were removed
-  // from the universal block to prevent conflicts across layers.
   return `# Role
 You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation.
 
 # Core rules (absolute)
 1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
 2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
-3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.${templateBlock}
+3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.${templateBlock}${examplesBlock}
 
 # Your task
 Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary.
@@ -178,7 +195,11 @@ function buildUserMessage(source: RawSource): string {
   }
   for (const file of source.files ?? []) {
     if (!file.text.trim()) continue;
-    parts.push(`# File: ${file.name}\n${file.text.trim()}`);
+    const ctx = file.context?.trim();
+    const header = ctx
+      ? `# File: ${file.name}\nDoctor's focus for this file: ${ctx}`
+      : `# File: ${file.name}`;
+    parts.push(`${header}\n${file.text.trim()}`);
   }
   return parts.join("\n\n");
 }
@@ -232,6 +253,8 @@ export function isAbsenceDescription(text: string): boolean {
     /^ziadn[eyo]\s+[uú]daj/i,
     /^žiadne?\s+[uú]daj/i,
     /^žiadne?\s+informáci/i,
+    // "Žiadna hmotnosť uvedená…", "Žiadny údaj o výške…", "Žiadna v zdroji…"
+    /^žiadn[aey]\s+\p{L}+\s+(?:\p{L}+\s+)?(uveden|nie|dostup|v\s+zdroj|v\s+surov|explicit)/iu,
     /^nie\s+(je|s[uú])\s+(uved|dostupn|explicitne|k\s+dispoz|možn)/i,
     /^nebola\s+uved/i,
     /^neuvedené/i,

@@ -61,6 +61,42 @@ export function hasUploadingFiles(files: EncounterFile[]): boolean {
   return files.some(isFileUploading);
 }
 
+/**
+ * True when a file's OCR / extraction hasn't landed yet. Uploaded (pending=false)
+ * but `extracted_text` is still missing AND no failure was recorded. This is the
+ * window between upload-success and extract-success where the file metadata
+ * exists but the OCR hasn't run to completion. Generating in this window
+ * silently drops the discharge letter's content from the prompt — exactly
+ * the "first-gen bad / regenerate good" failure we observed in the wild.
+ *
+ * Recording-source files are excluded — their "extraction" is the live
+ * transcript which travels a different path (metadata.transcript).
+ */
+export function isFileExtracting(file: EncounterFile): boolean {
+  if (file.pending) return false; // covered by isFileUploading
+  if (file.source === "recording") return false;
+  if (file.extracted_text) return false;
+  const status = file.extraction_status;
+  if (status !== "pending" && status !== "extracting" && status !== undefined) {
+    return false;
+  }
+  // Safety valve: if extraction has been running longer than the server's
+  // stuck threshold (5 min), treat as unblocked so the user isn't wedged
+  // forever when a worker dies. The server will reset + retry on the next
+  // generate call.
+  if (file.extraction_started_at) {
+    const elapsedMs =
+      Date.now() - new Date(file.extraction_started_at).getTime();
+    if (elapsedMs > 5 * 60 * 1000) return false;
+  }
+  return true;
+}
+
+/** Returns true if any file is still waiting for OCR to land. */
+export function hasExtractingFiles(files: EncounterFile[]): boolean {
+  return files.some(isFileExtracting);
+}
+
 interface FilesContentProps {
   visitId: string;
   files: EncounterFile[];

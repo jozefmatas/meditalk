@@ -41,6 +41,12 @@ function loadEnv(): Record<string, string> {
 }
 
 function parseRaw(raw: string): RawSource {
+  // PASTE_MODE=1 simulates the UI paste flow — everything lands in
+  // doctorNotes, no split into transcript + files. Defaults to the
+  // classic split (transcript: ... / OCR: ...).
+  if (process.env.PASTE_MODE === "1") {
+    return { doctorNotes: raw };
+  }
   const transcriptIdx = raw.indexOf("Transcript:");
   const ocrIdx = raw.indexOf("OCR:");
   const transcript =

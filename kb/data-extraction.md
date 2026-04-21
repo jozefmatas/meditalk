@@ -1,6 +1,6 @@
 # MediTalk Data Extraction
 
-_Last updated: 2026-04-16_
+_Last updated: 2026-04-21_
 
 How raw clinical data (audio, files, doctor notes) gets into the system before the generation pipeline takes over. For the pipeline itself, see [prompt-pipeline.md](prompt-pipeline.md).
 
@@ -181,23 +181,59 @@ Two-second debounce: the text is saved to `visits.metadata.doctor_notes` (JSONB 
 
 ### 3.3 Downstream
 
-In the generate route, `doctorNotes` becomes:
-
-- Part of `FactExtractionInput.doctorNotes` in Pass 1.5 (Haiku tags its facts with `source.type = "doctor_notes"`, `sourceIndex = 0`).
-- A `DOCTOR'S ADDITIONAL NOTES` block appended to the Opus user message in [web/src/lib/anthropic.ts](web/src/lib/anthropic.ts).
+`doctorNotes` is passed as `RawSource.doctorNotes` into the section-agent pipeline. Each section-agent sees it in its user message block (`# Doctor notes\n…`). It's also scanned by the deterministic preprocessor (§4) for natural-language brand mentions and OCR-style headings — so a pasted discharge letter in the doctor-notes field is handled identically to an uploaded file.
 
 Doctor notes are treated as **high-trust source material** — they are never chunked, never embedded, and never truncated.
 
-### 3.4 Doctor notes as directives
+### 3.4 Per-file directives (the "file context" dialog)
 
-Doctor notes can contain not only clinical content but also **processing instructions** — e.g. "only use the blood pressure values from the uploaded file", "ignore the old diagnosis in the referral". When present, these instructions are treated as authoritative directives:
+When the doctor uploads non-audio files, a context dialog appears: "Voliteľne povedzte MediTalk AI, na čo sa má v každom súbore zamerať" — per-file free-text instruction like "Focus on liver markers, ignore the old diagnosis". The input is saved to `file.context` (`visits.metadata.files[].context`).
 
-- **Pass 2 (Opus):** Rule 3a (DOCTOR NOTES AS DIRECTIVES) in [anthropic.ts](web/src/lib/anthropic.ts) explicitly tells the model to follow filtering/processing instructions in doctor notes and omit any information the doctor excluded — even at the cost of completeness.
-- **Pass 1.5 (Haiku):** The fact extraction user message in [fact-extraction.ts](web/src/lib/clinical/fact-extraction.ts) includes an `IMPORTANT` instruction to respect doctor-note filtering directives — only extracting the permitted facts from files when doctor notes say to restrict scope.
+At generation time, the generate route plumbs `file.context` through to `RawSource.files[].context`. The section-agent's `buildUserMessage` prefixes each file block with `Doctor's focus for this file: <text>` — so the agent sees the doctor's intent alongside the file's text.
+
+Doctor notes in the `doctorNotes` field itself ALSO carry filtering directives by convention. There's no special prompt flag — agents respect the natural-language instructions because they read doctor notes verbatim.
 
 ---
 
-## 4. Edge Cases & Recovery
+## 4. Structured-facts preprocessor (pre-LLM)
+
+Before any section-agent fires, the generate pipeline runs a deterministic regex pass over every source carrier (transcript + doctorNotes + files[]) via [`web/src/lib/sections/source-preprocessor.ts`](web/src/lib/sections/source-preprocessor.ts). The preprocessor extracts:
+
+| Category         | Pattern examples                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| OCR medication blocks | Lines following "Medikácia:", "Lieky:", "Odporúčania:", "Farmakoterapia:", "Naša posledná terapia:" — including same-line inline lists. Soft-headings without colon recognised too. |
+| Vital-sign lines | `Hmotnosť: 75 kg`, `Výška: 164 cm`, `BMI: 27,9`, `TK 120/80 mmHg`, etc. Line-anchored and inline multi-label formats. |
+| EKG readings     | Block under "EKG:" heading, plus mid-line "… EKG: ASP, RS, SF 70/min, …" inline occurrences. |
+| Loose HR         | `SF 70/min`, `frekvencia 56/min`, `HR 70/min` anywhere — lifted so Pulz has a clean signal even when only the EKG line mentions it. |
+| Transcript brand mentions | Per-sentence scan over transcript + doctorNotes using `Intl.Segmenter` (Slovak locale). ~60-brand curated allowlist; captures "Rytmonorm 1-0-1" along with the dose+freq in the same sentence. |
+
+Outputs are:
+
+1. **Appended to the transcript as `<STRUCTURED_FACTS>` XML.** Every section-agent reads this alongside the raw source — it's the "you can't miss these facts" backstop.
+2. **Returned as a `StructuredFacts` object** on `annotations` — the pipeline logs the counts (`8 OCR meds, 3 vitals, 1 EKG`) for debugging.
+
+Dedup is by leading-letter prefix: `PRESTARIUM A 5 mg` and `PrestariumA5mg 1/2-0-1/2` collapse to the entry with frequency info. `Atoridor` and `Atoris` stay separate (different drugs with different bases).
+
+---
+
+## 5. PHI scrub (pre-LLM)
+
+[`web/src/lib/phi-scrubber.ts`](web/src/lib/phi-scrubber.ts) runs once on transcript + doctorNotes + files[] before any LLM call. Patterns:
+
+- Patient name (when known from the `visits.patient_name` column) — matched in "First Last" and "Last First" orderings.
+- **Birth number (rodné číslo)** — Slovak/Czech 6+4 digit format with optional slash.
+- **Phone numbers** — +421 / +420 / local 0-prefix.
+- **Email addresses**.
+- **PSČ + city** — `821 03 Bratislava-Ružinov`.
+- **Street addresses with prefix** — `ul. Hlavná 15`, `námestie SNP 10`.
+- **Street + slash-notation house number** — `Exnárova 3121/3`. Guarded against false-positives on clinical values: excluded when the word is all-caps ≤6 chars (GCS, NIHSS, EKG, BMI), when preceded by a BP/measurement keyword, when followed by clinical units (mmHg, mg, ml, …), and when the next token is a dose-schedule suffix (`-0-1/2`). Also now rejects names containing digits (catches `PrestariumA5mg 1/2` concatenated drug strings).
+- **Long numeric IDs** (9-12 digits) — with `isProtectedNumeric` guard for clinical contexts.
+
+Admin has a slim clone at [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.ts) for the reference-notes ingestion path. Same pattern set, minus the clinical-context guards (admin uploads are doctor-chosen, not patient audio).
+
+---
+
+## 6. Edge Cases & Recovery
 
 | Scenario                                                            | Resolution                                                                                                           |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |

@@ -58,4 +58,31 @@ describe("drug-normalizer", () => {
     expect(drugNormalizer("", src, ctx)).toBe("");
     expect(drugNormalizer("   \n  ", src, ctx)).toBe("   \n  ");
   });
+
+  it("short-circuits ANP → ANOPYRIN via the abbreviation alias map (not fuzzy)", () => {
+    // Without the alias, substring-matching hits "Anpharm" → wrong drug.
+    const out = drugNormalizer("ANP 100 mg 0-1-0", src, ctx);
+    expect(out).toBe("ANOPYRIN 100 mg 0-1-0");
+    expect(out).not.toContain("Anpharm");
+  });
+
+  it("normalizes multiple meds on a SINGLE comma-separated line", () => {
+    // New LA format: one line, comma-separated. Each entry must be
+    // normalised independently.
+    const input =
+      "ANOPYRIN 100 mg, Paretic 1-0-0, ANP 100 mg 0-1-0, Rytmonorm 1-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toContain("ANOPYRIN 100 mg");
+    expect(out).toContain("Paretin"); // fuzzy correction
+    expect(out).toContain("ANOPYRIN 100 mg 0-1-0"); // alias
+    expect(out).not.toContain("Anpharm");
+    expect(out).toContain("Rytmonorm 1-0-1");
+  });
+
+  it("does NOT split an internal decimal comma (Arixtra 2,5 mg)", () => {
+    const input = "ANOPYRIN 100 mg, Arixtra 2,5 mg sc à 24h (15:00)";
+    const out = drugNormalizer(input, src, ctx);
+    // Arixtra's "2,5" must survive as a single entry — no phantom split.
+    expect(out).toContain("Arixtra 2,5 mg sc à 24h (15:00)");
+  });
 });

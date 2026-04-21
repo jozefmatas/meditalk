@@ -12,7 +12,9 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { flattenSectionIds, buildTemplateHtml } from "@/lib/templates/html";
 import { scrubPhi } from "@/lib/phi-scrubber";
-import { generateNote } from "@/lib/sections/pipeline";
+import { generateNote, findZaverSection } from "@/lib/sections/pipeline";
+import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
+import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -253,22 +255,22 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Wait for in-progress extractions ─────────────────────
-    // Poll until all pending/extracting files resolve (or timeout).
+    // Poll until every file with a path has `extracted_text`. Include
+    // files with status = undefined in the poll set — the client fires
+    // the extract API as fire-and-forget right after upload, so there's
+    // a brief window where the row exists without a status field while
+    // the extract call is in flight. Dropping these (the old filter
+    // only matched "extracting" / "pending") is exactly the race that
+    // made first-gen worse than regenerate.
     const pendingIds = new Set(
-      uploadedFiles
-        .filter(
-          (f) =>
-            f.extraction_status === "extracting" ||
-            f.extraction_status === "pending",
-        )
-        .map((f) => f.id),
+      uploadedFiles.filter((f) => f.path && !f.extracted_text).map((f) => f.id),
     );
 
     if (pendingIds.size > 0) {
       logger.debug(
         `[generate] Waiting for ${pendingIds.size} extraction(s): ${uploadedFiles
           .filter((f) => pendingIds.has(f.id))
-          .map((f) => f.name)
+          .map((f) => `${f.name} [${f.extraction_status ?? "no-status"}]`)
           .join(", ")}`,
       );
       const pollStart = Date.now();
@@ -290,14 +292,14 @@ export async function POST(request: NextRequest) {
         const stillPending = uploadedFiles.filter(
           (f) =>
             pendingIds.has(f.id) &&
-            (f.extraction_status === "extracting" ||
-              f.extraction_status === "pending"),
+            !f.extracted_text &&
+            f.extraction_status !== "failed",
         );
         if (stillPending.length === 0) break;
       }
 
       const completed = uploadedFiles.filter(
-        (f) => pendingIds.has(f.id) && f.extraction_status === "completed",
+        (f) => pendingIds.has(f.id) && f.extracted_text,
       ).length;
       const failed = uploadedFiles.filter(
         (f) => pendingIds.has(f.id) && f.extraction_status === "failed",
@@ -308,15 +310,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Inline extraction for unprocessed files ────────────────
-    // Files that are "failed" (retrying) or legacy (no status) get extracted
-    // inline in parallel. Files still "extracting" or "pending" are skipped
-    // (they're being handled by background extraction).
+    // Fallback path: any file that still lacks `extracted_text` after
+    // polling (stuck OCR, failed retry, or never-queued legacy upload)
+    // gets extracted inline. Blocking, but guarantees the discharge
+    // letter reaches the pipeline. Duplicate-work risk with the client's
+    // fire-and-forget extract is acceptable — the final text is identical.
     const unprocessed = uploadedFiles.filter(
-      (f) =>
-        !f.extracted_text &&
-        f.path &&
-        f.extraction_status !== "extracting" &&
-        f.extraction_status !== "pending",
+      (f) => !f.extracted_text && f.path,
     );
     const extractionErrors: string[] = [];
 
@@ -324,9 +324,14 @@ export async function POST(request: NextRequest) {
       const retrying = unprocessed.filter(
         (f) => f.extraction_status === "failed",
       );
+      const stuck = unprocessed.filter(
+        (f) =>
+          f.extraction_status === "extracting" ||
+          f.extraction_status === "pending",
+      );
       const legacy = unprocessed.filter((f) => !f.extraction_status);
       logger.debug(
-        `[generate] Extracting ${unprocessed.length} file(s) inline: ${retrying.length} retrying, ${legacy.length} legacy`,
+        `[generate] Extracting ${unprocessed.length} file(s) inline: ${retrying.length} retrying, ${stuck.length} stuck-after-poll, ${legacy.length} legacy`,
       );
       lap("extraction-start");
 
@@ -490,10 +495,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Single raw-source bundle — every section-agent reads from this.
+    // `context` is the doctor's per-file instruction (upload dialog) —
+    // surfaces to the LLM as "Doctor's focus for this file: …" header.
     const source: RawSource = {
       transcript: transcriptText?.trim() || undefined,
       doctorNotes: doctorNotes?.trim() || undefined,
-      files: fileTexts.map((f) => ({ name: f.name, text: f.text })),
+      files: fileTexts.map((f) => ({
+        name: f.name,
+        text: f.text,
+        context: f.context,
+      })),
     };
 
     logger.debug(
@@ -511,7 +522,20 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
-        await generateNote({
+        // Phase 1: ICD suggester runs FIRST (on source alone). Its output
+        // feeds BOTH the right-side panel AND the Záver section —
+        // single source of truth for diagnostic codes. Runs in parallel
+        // with section generation below.
+        const suggesterPromise = suggestIcdCodes(
+          source,
+          [], // no rendered sections yet — source-only mode
+          language,
+          { userId, visitId },
+        );
+
+        // Phase 2: generate every section EXCEPT Záver (pipeline skips
+        // Záver by label match; we inject it from suggester output).
+        const { sections: renderedSections } = await generateNote({
           template,
           source,
           language,
@@ -528,6 +552,30 @@ export async function POST(request: NextRequest) {
         });
 
         lap("generation-done");
+
+        const suggestedIcdCodes = await suggesterPromise;
+        lap("icd-suggestions-done");
+
+        // Phase 3: inject Záver content from the suggester. Emit a
+        // synthetic section event so the streaming UI shows Záver at
+        // completion time.
+        const zaver = findZaverSection(template);
+        if (zaver) {
+          const zaverContent = formatZaverFromSuggestions(suggestedIcdCodes);
+          sectionContentsMap[zaver.id] = zaverContent;
+          sendEvent({
+            type: "section",
+            id: zaver.id,
+            title: zaver.title,
+            content: zaverContent,
+          });
+          // Add to renderedSections so downstream metadata reflects it.
+          renderedSections.push({
+            id: zaver.id,
+            title: zaver.title,
+            content: zaverContent,
+          });
+        }
 
         const generatedNote = buildTemplateHtml(
           template,
@@ -552,12 +600,16 @@ export async function POST(request: NextRequest) {
           { label: "generate-save-columns" },
         );
 
+        const clinicalAnalysis =
+          suggestedIcdCodes.length > 0 ? { suggestedIcdCodes } : undefined;
+
         const metadataPartial: Record<string, unknown> = {
           template_id: template.id,
           generation_pending: null,
           recording_session: null,
           ...(transcriptText ? { transcript: transcriptText } : {}),
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+          ...(clinicalAnalysis ? { clinical_analysis: clinicalAnalysis } : {}),
         };
 
         let metadataError: unknown = null;
@@ -586,6 +638,7 @@ export async function POST(request: NextRequest) {
           generatedNote,
           usedChunks,
           templateId: template.id,
+          ...(clinicalAnalysis ? { clinicalAnalysis } : {}),
         });
 
         if (sendAsEmail) {

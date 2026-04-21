@@ -99,9 +99,19 @@ const STREET_WITH_PREFIX_REGEX =
  * Street name followed by a slash-notation house number (e.g. "Exnárova 3121/3").
  * The slash notation is a strong signal this is an address, not a clinical value.
  * Requires at least 3 characters in the name to avoid matching clinical
- * abbreviations like "TK 150/95".
+ * abbreviations like "TK 150/95". Name portion is letters-only — real
+ * street names don't embed digits, but concatenated medication strings
+ * like "PrestariumA5mg 1/2" do, and used to false-positive here.
  */
-const STREET_SLASH_HOUSE_REGEX = /[A-ZÀ-ž][\wÀ-ž]{2,}\s+\d{1,5}\/\d{1,5}/g;
+const STREET_SLASH_HOUSE_REGEX = /[A-ZÀ-ž][A-Za-zÀ-ž]{2,}\s+\d{1,5}\/\d{1,5}/g;
+
+/**
+ * Slovak dose-schedule suffix like "-0-1/2" after a med dosing line
+ * ("Egilok 25 mg 1/2-0-1/2"). If a slash-house match is immediately
+ * followed by one of these, the "address" is actually the start of a
+ * dose — skip the replacement.
+ */
+const DOSE_SCHEDULE_SUFFIX = /^[-–]\d+(?:[-–]\d+\/\d+)?/;
 
 /**
  * Long numeric IDs (9-12 digits) that aren't already caught by
@@ -273,6 +283,9 @@ export function scrubPhi(
     );
     if (/^\s*(?:mmHg|mm\s*Hg|bpm|mg|ml|µg|mcg|kg|cm|mm)\b/i.test(after))
       return match;
+    // Check if followed by a dose-schedule suffix (e.g. "-0-1/2" after
+    // "PrestariumA5mg 1/2"). That turns the whole thing into a dosage.
+    if (DOSE_SCHEDULE_SUFFIX.test(after)) return match;
     // Check if preceded by blood-pressure or clinical keywords
     const contextBefore = result.slice(Math.max(0, offset - 25), offset);
     if (

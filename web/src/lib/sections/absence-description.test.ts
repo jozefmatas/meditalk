@@ -36,6 +36,13 @@ describe("isAbsenceDescription", () => {
     expect(
       isAbsenceDescription("BMI nie je možné vypočítať bez výšky a hmotnosti."),
     ).toBe(true);
+    expect(isAbsenceDescription("Žiadna hmotnosť uvedená v zdroji.")).toBe(
+      true,
+    );
+    expect(isAbsenceDescription("Žiadna výška uvedená v zdroji.")).toBe(true);
+    expect(
+      isAbsenceDescription("Žiadny údaj o hmotnosti nie je v zdroji."),
+    ).toBe(true);
   });
 
   it("catches bare absence tokens", () => {

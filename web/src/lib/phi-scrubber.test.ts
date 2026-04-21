@@ -199,6 +199,23 @@ describe("scrubPhi", () => {
       expect(scrubbed).toBe(original);
     });
 
+    it("does NOT scrub concatenated medication strings with slash doses", () => {
+      // "PrestariumA5mg 1/2-0-1/2" used to be matched by STREET_SLASH_HOUSE
+      // because `\w` allowed digits inside the "street name". The dose
+      // suffix "-0-1/2" is the giveaway that this is a medication.
+      const original =
+        "Egilok 25mg 1/2-0-1/2, PrestariumA5mg 1/2-0-1/2, ANP 100 mg 0-1-0";
+      const { scrubbed } = scrubPhi(original);
+      expect(scrubbed).toBe(original);
+      expect(scrubbed).not.toContain("[ADDRESS]");
+    });
+
+    it("does NOT scrub medication names containing digits", () => {
+      // Even a short "NameDigit 1/2" doesn't look like an address.
+      const { scrubbed } = scrubPhi("Betaloc ZOK 50mg 1/2");
+      expect(scrubbed).toBe("Betaloc ZOK 50mg 1/2");
+    });
+
     it("does NOT scrub pupil sizes (Zornice 3/3)", () => {
       const original = "Zornice 3/3, reaktívne";
       const { scrubbed } = scrubPhi(original);

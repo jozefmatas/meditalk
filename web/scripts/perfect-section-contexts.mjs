@@ -1,12 +1,12 @@
 /**
- * One-shot: REPLACE a matching section's `context` with a purpose-built
- * "isolated container" template. These templates treat each section as a
- * hard-walled container with explicit OWNS / NEVER OWNS / POSITIVE EXAMPLES /
- * NEGATIVE EXAMPLES / FORMAT / WHEN EMPTY blocks.
+ * One-shot: REPLACE a matching section's `context` with a slim "contract
+ * only" template. OWNS / NEVER OWNS / NO INVENTION / WHEN EMPTY — no
+ * positive/negative examples, no verbose FORMAT prescription. Voice
+ * and format live in the reference-notes corpus (`template.styleExamples`),
+ * which the section-agent injects as few-shot examples at generation time.
  *
- * Unlike `patch-section-contexts.mjs` (which APPENDS rule blocks), this
- * script REPLACES the whole context. Backs up the previous context into
- * `section.previousContext` so we can roll back.
+ * Backs up the previous context into `section.previousContext` so we can
+ * roll back.
  *
  * Usage:  node scripts/perfect-section-contexts.mjs [--dry-run] [--rollback]
  */
@@ -48,7 +48,8 @@ function normalizeLabel(l) {
 }
 
 // ── CANONICAL CONTEXT TEMPLATES ────────────────────────────────────────
-// Each entry: a set of section labels + the full replacement context.
+// Each entry: section labels + a slim contract. Voice/format lives in the
+// reference-notes corpus (few-shot via template.styleExamples), not here.
 
 const CANONICAL = [
   // ── RA ──────────────────────────────────────────────────────────────
@@ -57,40 +58,20 @@ const CANONICAL = [
     labels: new Set(["ra", "rodinna anamneza", "family history", "fhx"]),
     context: `RA — Family history (relatives only).
 
-## OWNS — include ALL of these and ONLY these
-- Diseases / conditions of parents (father, mother).
-- Diseases / conditions of siblings (brothers, sisters).
-- Diseases / conditions of grandparents.
-- Diseases / conditions of children, if mentioned.
-- Causes of death for any of the above.
-- Ages at death or age-at-diagnosis when stated.
+## OWNS
+- Diseases / conditions of parents, siblings, grandparents, children.
+- Causes of death, ages at death or age-at-diagnosis.
 
-## NEVER OWNS — if you see these in source, route elsewhere
-- Patient's own diseases / chronic conditions → OA.
-- Patient's own surgeries / procedures → OA.
-- Patient's spouse's diseases / caregiving context → SA.
-- Patient's own habits (smoking, alcohol) → Ab.
-- Patient's allergies → AA.
-- Family / spouse / children as LIVING ARRANGEMENT (not health) → SA.
+## NEVER OWNS
+- Patient's own chronic conditions or surgeries → OA.
+- Spouse caregiving context → SA.
+- Patient's habits → Ab. Patient's allergies → AA.
 
-## POSITIVE EXAMPLES
-- "Otec zomrel v 68 rokoch na infarkt" → "Otec zomrel v 68 rokoch na infarkt."
-- "Matka mala cukrovku, žila do 84" → "Matka mala cukrovku, žila do 84 rokov."
-- "Brat popíjal alkohol" → "Brat mal problém s alkoholom."
-
-## NEGATIVE EXAMPLES (do NOT include)
-- "Manžel má Alzheimerovu chorobu" → belongs to SA (caregiver context), not RA.
-- "Pacient má hypertenziu" → belongs to OA.
-- "Žije s manželkou" → belongs to SA.
-
-## FORMAT
-- One or two short sentences per relative, Slovak clinical prose.
-- Preserve verbatim: cause of death, age, time markers, condition names.
-- End with a period.
-- Multiple conditions for one relative → comma-separated: "Matka mala cukrovku, hypertenziu."
+## NO INVENTION
+Only relatives explicitly mentioned in the source. Never add "in good health" for a relative the patient didn't mention.
 
 ## WHEN EMPTY
-If the source never mentions parents, siblings, grandparents, or children, output ZERO characters.`,
+No relative mentioned → output ZERO characters.`,
   },
 
   // ── OA ──────────────────────────────────────────────────────────────
@@ -103,47 +84,24 @@ If the source never mentions parents, siblings, grandparents, or children, outpu
       "past medical history",
       "pmhx",
     ]),
-    context: `OA — Patient's personal medical history: chronic conditions, past surgeries, past procedures, long-standing comorbidities coming INTO this encounter.
+    context: `OA — Patient's chronic conditions + past surgeries brought into this encounter.
 
-## OWNS — include ALL of these
-- Chronic diseases (hypertension, diabetes, arrhythmias, COPD, etc.).
-- Past surgeries ("stav po strumektómii", "stav po cholecystektómii").
-- Past procedures, ablations, stentings, kyretáže.
-- Long-standing comorbidities with staging / severity ("hypertenzia III. stupňa", "stredne závažná mitrálna regurgitácia").
+## OWNS
+- Chronic diseases with staging/severity where stated.
+- Past surgeries / procedures ("stav po …").
 - Past injuries with lasting effects.
-- Chronic pain conditions.
-- Known tumours, MGUS, monoclonal gammopathy.
-- Chronic neurological or psychiatric conditions.
+- Known tumours, MGUS, chronic neurological / psychiatric conditions.
 
 ## NEVER OWNS
-- Current encounter's acute complaint / symptoms → TO.
+- Current acute complaint → TO.
 - Current medications → LA.
-- Family's diseases → RA.
-- Allergies → AA.
-- Substance use → Ab.
-- Marital / living / occupational status → SA / PA.
-- Vital signs / exam findings → Objektívne vyšetrenie.
-- Current diagnosis / differential for THIS encounter → Záver.
+- Allergies → AA. Habits → Ab. Family diseases → RA.
 
-## POSITIVE EXAMPLES
-- Source mentions "stav po strumektómii", "fibrilácia predsiení", "hypertenzia III. stupňa" → include ALL three.
-- Source mentions "pálenie žalúdka" (as a chronic complaint, not current acute) → include.
-- "Kŕčové žily" mentioned anywhere as a chronic thing → include.
-
-## NEGATIVE EXAMPLES
-- "Dnes má bolesť na hrudi od 13:00" → goes to TO.
-- "Berie Eliquis 5 mg" → goes to LA.
-- "Otec zomrel na infarkt" → goes to RA.
-
-## FORMAT
-- Comma-separated list in Slovak prose.
-- Preserve clinical abbreviations VERBATIM (st.p., MGUS, ICHS, AV blok, SR, VDF, DK, HKK, Mi regurg.).
-- Preserve disease staging / severity qualifiers exactly (III. stupňa, kompenzovaná, paroxyzmálna, stredne závažná).
-- End with a period.
-- Do NOT assign ICD codes here — Záver owns those.
+## NO INVENTION
+Only conditions explicitly stated as the patient's own.
 
 ## WHEN EMPTY
-If the source has no past diseases, surgeries, or comorbidities, output ZERO characters.`,
+No chronic history in source → output ZERO characters.`,
   },
 
   // ── SA ──────────────────────────────────────────────────────────────
@@ -154,42 +112,20 @@ If the source has no past diseases, surgeries, or comorbidities, output ZERO cha
       "socialna anamneza",
       "socialni anamneza",
       "social history",
+      "shx",
     ]),
-    context: `SA — Patient's social situation (home life, relationships, social support).
+    context: `SA — Social / living situation.
 
-## OWNS — include ALL of these
-- Marital status (married, single, divorced, widowed).
-- Who the patient lives with (spouse, children, alone).
-- Dependents the patient cares for (e.g. spouse with dementia, children).
-- Social support network (family nearby, community support).
-- Living situation (house, apartment, care home) when mentioned.
+## OWNS
+- Who the patient lives with.
+- Caregiver duties or dependents.
+- Living environment when relevant to care.
 
 ## NEVER OWNS
-- Occupation / job title / workplace / years of employment → PA.
-- Retirement / working status → PA (but "na dôchodku" as a standalone living-situation descriptor may appear here too if relevant).
-- Smoking, alcohol, drugs → Ab.
-- Family diseases → RA.
-- Patient's own diseases → OA.
-- Allergies → AA.
-- Current symptoms → TO.
-
-## POSITIVE EXAMPLES
-- "Žije s manželom" → "Žije s manželom."
-- "Manžel má začínajúcu Alzheimerovu chorobu, stará sa oňho" → "Žije s manželom, o ktorého sa stará. Manžel má začínajúcu Alzheimerovu chorobu."
-- "Žije sama, deti v zahraničí" → "Žije sama, deti žijú v zahraničí."
-
-## NEGATIVE EXAMPLES
-- "Pracovala ako účtovníčka" → belongs to PA.
-- "Otec zomrel na infarkt" → belongs to RA.
-- "Nefajčí" → belongs to Ab.
-
-## FORMAT
-- Short Slovak sentences.
-- Preserve wording the patient uses.
-- End with a period.
+- Occupation → PA. Habits → Ab. Family diseases → RA.
 
 ## WHEN EMPTY
-If the source never mentions marital / living / care-arrangement info, output ZERO characters.`,
+Output ZERO characters.`,
   },
 
   // ── PA ──────────────────────────────────────────────────────────────
@@ -200,40 +136,20 @@ If the source never mentions marital / living / care-arrangement info, output ZE
       "pracovna anamneza",
       "pracovni anamneza",
       "occupational history",
-      "work history",
+      "ohx",
     ]),
-    context: `PA — Patient's occupational history.
+    context: `PA — Occupation / professional history.
 
-## OWNS — include ALL of these
-- Current or past occupation / job title.
-- Workplace / employer.
-- Years spent in the role.
-- Type of work (sedavé, fyzicky náročné, vonkajšie prostredie, nočné smeny).
-- Work-related exposures (chemicals, dust, loud noise) — when occupationally relevant.
-- Retirement status (na dôchodku / pracuje).
+## OWNS
+- Current or most recent job.
+- Relevant occupational exposures (dust, chemicals, noise, radiation).
+- Retirement status.
 
 ## NEVER OWNS
-- Marital status / living arrangement → SA.
-- Family diseases → RA.
-- Substance use → Ab.
-- Patient's own diseases / pain → OA (even if work-related).
-
-## POSITIVE EXAMPLES
-- "Pracovala v účtovníctve v obchodnom dome Prior 30 rokov, sedavé zamestnanie" → "Účtovníctvo v obchodnom dome Prior 30 rokov, sedavé zamestnanie."
-- "Pracuje v bezpečnostnej službe" → "Pracuje v bezpečnostnej službe."
-- "Na dôchodku" (when this is the only employment info) → "Na dôchodku."
-
-## NEGATIVE EXAMPLES
-- "Žije s manželkou" → belongs to SA.
-- "Kvôli práci má bolesti chrbta" → the chronic back pain belongs to OA; work context can be mentioned in PA if specifically occupational.
-
-## FORMAT
-- Short, verbatim. Prefer noun phrases over full sentences.
-- Preserve employer names, durations, role types.
-- End with a period.
+- Social / living → SA. Habits → Ab. Diseases → OA.
 
 ## WHEN EMPTY
-If the source never mentions occupation or working status, output ZERO characters.`,
+Output ZERO characters.`,
   },
 
   // ── EA ──────────────────────────────────────────────────────────────
@@ -242,92 +158,52 @@ If the source never mentions occupation or working status, output ZERO character
     labels: new Set([
       "ea",
       "epidemiologicka anamneza",
-      "epidemiologicka anamneza",
       "epidemiological history",
-      "epi history",
+      "ehx",
     ]),
-    context: `EA — Epidemiological history. VERY narrow scope.
+    context: `EA — Epidemiological anamnesis: infectious exposures, vaccination, travel. NOTHING ELSE.
 
-## OWNS — include ONLY these four categories
-1. Recent travel (foreign trips, endemic-area exposure).
-2. Tick / insect bites or exposures.
-3. Infectious contacts (sick contacts, TB exposure, COVID exposure).
-4. Vaccinations (flu, COVID, tetanus, travel vaccines).
+## OWNS
+- Recent infections (active or just recovered), including past rashes like herpes zoster if clinically relevant.
+- Vaccinations relevant to the current concern.
+- Travel or contact with infectious persons in the last 1-6 months.
+- Vector-borne exposure (tick bite, etc.).
 
-## NEVER OWNS — explicit redirects
-- Coughing / chronic cough / seasonal cough → TO (if current) or OA (if chronic). NEVER EA.
-- Pollen allergy, dust mites, dust → AA. Allergens are NOT infectious exposures.
-- Marital / cohabitation / caregiving → SA.
-- Smoking / alcohol / drugs → Ab.
-- Family diseases → RA.
-- Patient's own diseases / past surgeries / injuries → OA.
-- Presenting symptoms of this encounter → TO.
-- Occupation / job → PA.
+## NEVER OWNS (STRICT — never backfill EA with these)
+- Family diseases (otec, matka, súrodenci) → RA.
+- Allergies / "neguje alergie" / "alergia na peľ" → AA.
+- Habits (smoking, alcohol, drugs) / "neguje fajčenie" / "alkohol príležitostne" → Ab.
+- Chronic non-infectious diseases (hypertenzia, CKD, divertikulóza) → OA.
+- Current non-infectious complaint → TO.
 
-## POSITIVE EXAMPLES
-- "V marci bola v Egypte 2 týždne" → "V marci pobyt v Egypte 2 týždne."
-- "Mal kliešťa minulý týždeň" → "Minulý týždeň kliešťové poranenie."
-- "Očkovanie proti chrípke pred mesiacom" → "Očkovanie proti chrípke pred mesiacom."
-- "Syn mal COVID pred dvomi týždňami" → "Kontakt s COVID-19 (syn) pred dvomi týždňami."
+EA is ONLY infectious exposures, vaccinations, travel, vector-borne contact. If the source has no such content, output ZERO characters — do NOT fill the slot with denials or mentions from other sections.
 
-## NEGATIVE EXAMPLES — do NOT include
-- "Pokašlávam hlavne v zime a na jar kvôli peľu" → cough → TO/OA; pollen → AA. EA should be EMPTY on this input.
-- "Žije s manželom, má Alzheimerovu chorobu" → belongs to SA.
-- "Alergia na mukolytiká" → belongs to AA.
-- "Roztoče, peľ" → belongs to AA.
+## NO INVENTION
+Only infectious exposures/events the patient confirmed (or explicitly denied in an infectious context — "infekčné ochorenie neguje").
 
-## FORMAT
-- Short, factual Slovak sentences.
-- Preserve exact wording of the exposure (time, place, agent).
-- End with a period.
-
-## WHEN EMPTY (most common case)
-If the source does not explicitly mention foreign travel, tick/insect exposure, infectious contacts, or vaccinations, output ZERO characters.`,
+## WHEN EMPTY
+No epidemiological content → output ZERO characters.`,
   },
 
   // ── AA ──────────────────────────────────────────────────────────────
   {
     id: "aa",
-    labels: new Set([
-      "aa",
-      "alergicka anamneza",
-      "alergie",
-      "allergies",
-      "allergy history",
-    ]),
-    context: `AA — Allergies and intolerances.
+    labels: new Set(["aa", "alergicka anamneza", "allergies", "ahx", "ada"]),
+    context: `AA — Allergies.
 
-## OWNS — include ALL of these
-- Drug allergies (medications the patient cannot take).
-- Food allergies.
-- Contrast / contrast-agent allergies.
-- Environmental allergies (pollen, dust, dust mites, pet dander, mould).
-- Anaphylactic reactions and their triggers.
-- Specific reactions the patient described (rash, swelling, dyspnoea).
+## OWNS
+- Specific allergens the patient reports (drugs, foods, contrast, environmental) with reaction if stated.
+- Explicit denial of allergies (when the patient said no, use a short attending-standard denial phrase — the corpus shows the preferred wording).
 
 ## NEVER OWNS
-- Current infections / coughs → TO or OA.
-- Substance-use habits (smoking, alcohol, drugs) → Ab.
-- Travel / infectious exposures → EA.
-- Family history of allergies → RA (rare; usually the patient's own allergies belong here).
+- Medications in general → LA.
+- Drug side-effects without an allergic component → LA / OA.
 
-## POSITIVE EXAMPLES
-- "Alergia na penicilín — vyrážka" → "Penicilín — vyrážka."
-- "Peľ, roztoče, mukolytiká — opuch prstov a pier" → "Peľ, roztoče, mukolytiká — opuch prstov a pier."
-- "Kontrastné látky nie" (explicit denial) → include as: "Kontrastné látky — neguje." OR omit (depends on doctor's style).
-
-## NEGATIVE EXAMPLES
-- "Pacientka pokašľáva v zime" → chronic cough belongs to OA, not an allergy.
-- "Fajčiar" → belongs to Ab.
-
-## FORMAT
-- Comma-separated list: "Peľ, roztoče, mukolytiká."
-- Include reaction details when given: "Penicilín — rash; peľ — sezónna rinitída."
-- Preserve exact drug / allergen names the doctor used.
-- End with a period.
+## NO INVENTION
+Only allergens explicitly named or denied by the patient.
 
 ## WHEN EMPTY
-If the source explicitly says the patient has no allergies ("NKDA", "žiadne alergie neguje"), include that short phrase. If the source does not mention allergies at all, output ZERO characters.`,
+Allergies not discussed → output ZERO characters.`,
   },
 
   // ── LA ──────────────────────────────────────────────────────────────
@@ -346,41 +222,33 @@ If the source explicitly says the patient has no allergies ("NKDA", "žiadne ale
       "aktualni medikace",
       "liekova anamneza",
     ]),
-    context: `LA — Medications. Include EVERY medication mentioned ANYWHERE in the source (transcript, doctor notes, AND every attached file: discharge summaries, referrals, OCR PDFs, prior hospital records).
+    context: `LA — Medications. EACH BRAND APPEARS EXACTLY ONCE. Output as ONE LINE, comma-separated (mirrors how attending notes render LA and how Postup a plán renders the continuing-med list).
 
-## CRITICAL: DO NOT DROP MEDICATIONS
-The source for this encounter often includes a discharge summary or referral letter from another doctor. Those documents have a "Liečba", "Medikácia", "Medication", "Odporúčania", "Lieky pri prepustení" block with the full current medication list. You MUST include every medication listed in those blocks, NOT just what the patient named aloud in the conversation.
+## FORMAT (HARD)
+Example:
+"ANOPYRIN 100 mg, Arixtra 2,5 mg sc à 24h (15:00), Egilok 25 mg 1/2-0-1/2, PRESTARIUM A 5 mg 1/2-0-1/2, Trombex 75 mg 1-0-0, Suplasin raz za pol roka."
 
-If the OCR / discharge note lists 7 medications with doses and the transcript adds 1 more, your LA must have all 8.
+- Comma + space between meds. No newlines. End with a period.
 
-## OWNS — include ALL of these
-- Chronic home medications (the patient's regular regimen) — from the discharge letter's medication list, referral letter, or patient-stated during conversation.
-- Medications administered during THIS encounter (Heparin, Aspirin, morphine, Arixtra, etc.) — both those given in the ambulance / ED AND those given on the ward.
-- Over-the-counter or as-needed medications the patient uses (Tunol, nitroglycerín striek, etc.).
-- Dose (number + unit) when stated anywhere in the source.
-- Frequency / Slovak dosing notation verbatim (1-0-1, 1-0-0, 1/2-0-1/2, ráno a večer, podľa potreby).
-- Route (per os, sc, iv, im, inhalačne) when stated.
+## PRIMARY SOURCE: <STRUCTURED_FACTS>
+If <STRUCTURED_FACTS> contains <MED/> entries, the preprocessor has already de-duplicated them (one entry per drug with the most informative dose + route + frequency). Copy each verbatim. Then add any brand from the transcript that isn't already listed.
+
+## OWNS
+- Chronic home medications (discharge / referral letter list).
+- In-encounter administrations (Heparin, Aspirin, Arixtra).
+- OTC / as-needed meds.
+- Dose (number + unit), frequency verbatim (1-0-1, 1/2-0-1/2, ráno a večer, podľa potreby, sc à 24h), route (per os, sc, iv, im) when stated.
 
 ## NEVER OWNS
 - Allergies → AA.
-- Medications the patient EXPLICITLY stopped ("prestala brať", "vysadené") — skip those.
-- Patient's diseases → OA.
-- Plan-level medication recommendations ("odporúčame začať statín") → Postup a plán.
+- Explicitly stopped meds ("prestala brať", "vysadené") → skip.
+- Plan-level "začať statín" → Postup a plán.
 
-## POSITIVE EXAMPLES
-- OCR has "PRESTARIUM A 5 mg 1/2-0-1/2" → line: "PRESTARIUM A 5 mg, 1/2-0-1/2"
-- OCR has "Arixtra 2,5 mg sc a 24h (15:00)" → line: "Arixtra 2,5 mg sc à 24h (15:00)"
-- Transcript adds "Suplasin raz za pol roka" → line: "Suplasin, raz za pol roka (i.a.)"
-
-## FORMAT
-- ONE medication per line.
-- Preserve brand name EXACTLY as written (no generic substitution).
-- Include dose + frequency + route when stated.
-- Preserve Slovak dosing notation verbatim ("1-0-1", "1/2-0-1/2", "ráno a večer", "podľa potreby", "sc à 24h").
-- No bullets, no numbering, no commas between meds — newlines only.
+## NO INVENTION
+Never invent a dose, frequency, or route not stated in the source.
 
 ## WHEN EMPTY
-If the source truly mentions no medications anywhere, output ZERO characters. This is rare — discharge letters almost always include a medication list.`,
+No medications anywhere → output ZERO characters (rare — discharge letters almost always carry a list).`,
   },
 
   // ── Ab ──────────────────────────────────────────────────────────────
@@ -391,32 +259,15 @@ If the source truly mentions no medications anywhere, output ZERO characters. Th
 
 ## OWNS
 - Smoking status + amount + duration.
-- Alcohol use frequency + amount.
-- Illicit-drug use + type + frequency.
-- "Neguje" / "nefajčí" / "alkohol nepije" — explicit denials.
+- Alcohol frequency + type when stated.
+- Illicit drugs + type when stated.
+- Explicit denials ("nefajčí", "drogy neguje", "alkohol nepije").
 
 ## NEVER OWNS
-- Allergies → AA.
-- Occupation → PA.
-- Diseases → OA.
-- Family substance use → RA.
-
-## POSITIVE EXAMPLES
-- "Fajčí 15 cigariet denne, 20 rokov" → "Pacient fajčí 15 cigariet denne, 20 rokov."
-- "Alkohol len príležitostne" → "Alkohol užíva príležitostne."
-- "Nefajčí, alkohol nepije, drogy neguje" → "Pacient nefajčí. Alkohol nepije. Drogy neguje."
-
-## NEGATIVE EXAMPLES
-- "Peľová alergia" → belongs to AA.
-- "Pracuje v bare, občas pije so zákazníkmi" → occupation to PA, alcohol detail stays here.
-
-## FORMAT
-- Full Slovak sentences. Not fragments like "(cigariet denne)" or hanging numerals.
-- One fact per sentence when practical: "Pacient fajčí 15 cigariet denne. Alkohol užíva príležitostne. Drogy neguje."
-- Preserve exact numbers and durations the speaker used.
+- Allergies → AA. Occupation → PA. Diseases → OA. Family → RA.
 
 ## WHEN EMPTY
-If the source says nothing about smoking, alcohol, or drugs, output ZERO characters.`,
+Output ZERO characters.`,
   },
 
   // ── TO ──────────────────────────────────────────────────────────────
@@ -428,50 +279,27 @@ If the source says nothing about smoking, alcohol, or drugs, output ZERO charact
       "history of present illness",
       "anamneza sucasneho ochorenia",
       "anamneza soucasneho onemocneni",
-      "sucasna choroba",
-      "current illness",
+      "subjective",
+      "subjektivne",
     ]),
-    context: `TO / HPI — Present illness narrative. What brought the patient in today and the timeline leading up to it.
+    context: `TO — Current encounter narrative: story of the presenting complaint, admission timeline, findings during THIS hospitalisation.
 
-## OWNS — include ALL of these
-- Chief complaint (first-person or third-person — preserve wording).
-- Onset date / time / trigger if stated.
-- Symptom timeline (day-by-day progression, intermittent vs continuous).
-- Character of symptoms (pálenie, tlaková bolesť, vyžarovanie, dušnosť).
-- Modifying factors (pohyb, jedlo, poloha, lieky).
-- Prior interventions in the days leading up to this encounter (internistka urobila EKG, odoslala na CPO).
-- Pertinent negatives the speaker explicitly mentioned ("neguje nauzeu, vracanie, diplopiu…").
-- Labs / imaging the doctor cited as part of the workup THIS encounter (NT-proBNP, troponin, RTG findings).
+## OWNS
+- Onset + evolution of the presenting complaint.
+- Referring doctor / ambulatory-work-up actions.
+- Labs, imaging, procedures done during THIS admission.
+- Symptom changes during the stay.
+- Transfer / admission reason.
 
 ## NEVER OWNS
-- Chronic conditions from before this illness → OA.
-- Family diseases → RA.
-- Current medications regimen → LA (only mention a drug here if it's part of the acute event, e.g. "striek pod jazyk, ktorý pomohol").
-- Social / marital / work info → SA / PA.
-- Substance use → Ab.
-- Physical examination findings → Objektívne vyšetrenie.
-- Final diagnosis / ICD codes → Záver.
-- Treatment plan / discharge → Postup a plán.
+- Chronic conditions → OA. Family → RA. Occupation → PA. Social → SA. Habits → Ab. Allergies → AA.
+- Medications list → LA. Final diagnoses → Záver. Post-discharge plan → Postup a plán.
 
-## POSITIVE EXAMPLES
-- "Od nedele na pondelok sa prvýkrát zobudila s pálením nad srdcom, opakovalo sa celý deň, v noci zobudila" → include full timeline.
-- "V utorok internistka urobila NT-proBNP 801, troponín 22,5 ng/l, EKG ukazuje AV blok 1. stupňa + SVES" → include all these as part of the workup narrative.
-- "Neguje dušnosť, palpitácie, nauseu, vracanie, diplopiu, tinitus" → include verbatim.
-
-## NEGATIVE EXAMPLES
-- "Má hypertenziu III. stupňa od 2015" → chronic, belongs to OA.
-- "Berie Eliquis 5 mg" → belongs to LA.
-- "Manžel má Alzheimera" → belongs to SA.
-
-## FORMAT
-- Flowing Slovak clinical prose — this is the narrative section.
-- Preserve exact time markers (14:02, "od rana", "včera večer", "od nedele na pondelok").
-- Preserve exact numeric values (troponín 22,5 ng/l, NT-proBNP 801 ng/l, TK 150/80).
-- Preserve the full pertinent-negatives list the speaker gave.
-- End with a period.
+## NO INVENTION
+Only events the source documents for THIS encounter. Do not repeat content that belongs in another section.
 
 ## WHEN EMPTY
-If the source contains no present-illness narrative (unlikely but possible), output ZERO characters.`,
+No current-encounter narrative → output ZERO characters.`,
   },
 
   // ── Záver ───────────────────────────────────────────────────────────
@@ -479,71 +307,44 @@ If the source contains no present-illness narrative (unlikely but possible), out
     id: "zaver",
     labels: new Set([
       "zaver",
-      "zaver",
+      "zavěr",
       "assessment",
       "conclusion",
       "diagnosis",
       "diagnostic assessment",
     ]),
-    context: `Záver — Clinical assessment with ICD-10 codes. Concise, professional, extracted ONLY from what the doctor explicitly stated.
+    context: `Záver — Diagnostic summary with ICD-10 codes. Each entry: "CODE Description". Comma- or newline-separated.
 
-## DIAGNOSIS RULES (STRICT)
+## OWNS — INCLUDE EVERY DIAGNOSIS. A complete Záver lists 5-12 entries for a typical cardiology admission.
+- Primary encounter diagnosis FIRST (what drove this visit).
+- EVERY chronic condition the OA documents — hypertension, arrhythmia, CKD, diabetes, GERD, divertikulóza, operations (st.p.), etc. Each gets its own ICD-10 entry.
+- Diagnoses the discharge letter / referral explicitly wrote in its "Diagnostický záver" / "Dg:" / "Assessment" block — these ARE confirmed clinician-written diagnoses, include them.
+- New diagnoses made during THIS encounter that the clinician explicitly named (e.g. "SZpEF novodiagnostikované" — it's in the source as a diagnosis, include it).
 
-Include ONLY diagnoses that are:
-- explicitly written in the doctor's notes, transcript, or OCR as a diagnosis
-- clearly stated as a diagnosis (not a finding, not a suspicion — unless explicitly marked as "nemožno vylúčiť", "versus", "diferenciálne diagnosticky")
+A short Záver (1-2 codes) is almost always a mistake — re-read OA and the OCR's diagnostic block.
 
-Do NOT include:
-- raw findings (e.g. EF value, MR grade, lab result number)
-- interpretations
-- derived diagnoses inferred from findings
-- differential diagnoses unless the doctor EXPLICITLY labeled them as such
+## ICD-10 FORMAT (HARD)
+- WHO Slovak ICD-10 only. A code looks like \`Letter + 2 digits\` + optional \`.digit\` or \`.digit-digit\`.
+- REJECT ICD-10-CM codes with 3+ digits after the decimal: \`Z87.891\`, \`E66.01\`, \`I71.20\`. (\`I25.10\` with 2 decimal digits IS valid in Slovak CSV.)
+- If you don't know the exact code, use the 3-char root (\`I25\` instead of guessing \`I25.99\`). Better an honest root than an invented subcode.
 
-## LIMITS — DO NOT OVERFLOW
-- 1 primary diagnosis (encounter-driving).
-- 3-6 secondary diagnoses (active chronic comorbidities relevant to this encounter).
+## NO FABRICATION / NO INFERENCE (but also no timidity)
+- Never output a code for a condition the patient DENIED. Transcript "teplotu nemal" → \`R50.9 Horúčka\` is forbidden.
+- Do NOT derive a diagnosis from a raw imaging or lab finding when the clinician did NOT write it as a diagnosis. CT "dilatácia aorty" with no assigned diagnosis ≠ \`I71.2\`. But if the discharge letter's Diagnostický záver block says "SZpEF" — that IS the clinician's diagnosis, include it.
+- Do not derive a diabetes code from a single glucose value.
+- When the patient named specific allergens, do NOT use \`Z88.9\` filler — either use the specific allergen code or omit.
 
-If the OA contains more than 6 conditions, select only the CLINICALLY RELEVANT ones for this encounter's context (e.g. for a cardiology visit: cardiac conditions, hypertension, diabetes, coagulation-related, and other directly-impacting comorbidities come first; purely historical surgeries, dermatologic issues, or unrelated items can be omitted).
-
-## CRITICAL: NO FABRICATION / NO INFERENCE
-- Never assign an ICD code for a condition that does NOT appear anywhere in the source.
-- Never derive a diagnosis from a finding ("EF 45 %" → do NOT invent "systolic HF").
-- Never expand an abbreviation into a new diagnosis.
-- Observed real fabrications to avoid: K80.0 Cholelitiáza, D64.9 Anémia, R01.1 Srdečný šelest, Z95.8 Prítomnosť iného implantátu.
-- If unsure → OMIT.
+## PRIMARY + DIFFERENTIAL
+If the primary is a symptom awaiting work-up (e.g. \`R07.4\`), attach the differential in parentheses:
+\`R07.4 Bolesť v hrudníku (diferenciálna dg.: nemožno vylúčiť NSTEMI)\`.
 
 ## NEVER OWNS
 - Narrative of how the diagnosis unfolded → TO.
-- Treatment steps, procedures, follow-ups → Postup a plán.
-- Family diseases → RA.
-- Allergies → AA.
-
-## FORMAT
-- ALL diagnoses on ONE LINE, comma-separated. No newlines between codes.
-- Each diagnosis written as: "CODE Description" (example: "I21.4 Akútny subendokardiálny infarkt myokardu").
-- Dotted code format (I21.4, not I214) — icd-validator will normalize anyway.
-- Order on the line: (1) primary diagnosis first, (2) differential clause immediately after the primary in parentheses, (3) 3-6 secondary diagnoses after, most clinically relevant first.
-- Differential clause format: "(diferenciálna dg.: <speaker's wording verbatim>)" — keep the doctor's exact phrasing.
-- If there is no differential, skip the parenthetical entirely.
-- End the full line with a period.
-
-## POSITIVE EXAMPLE (cardiology admission with differential + 5 secondaries)
-Source has: "R074 Bolesť v hrudníku, difdg NSTEMI, IAP. OA: hypertenzia III., paroxyzmálna fibrilácia predsiení, stav po strumektómii, MGUS, sleep apnoe, kŕčové žily, pálenie žalúdka, myóm maternice, mikroskopická hematúria, vertigo"
-
-Output (one line, SELECTED to 1 primary + 5 most relevant secondary):
-R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: t.č. nemožno vylúčiť nestabilnú angínu pectoris, diferenciálne diagnosticky NSTEMI), I10 Primárna [esenciálna] artériová hypertenzia, I48.0 Paroxyzmálna fibrilácia predsiení, E03.9 Hypotyreóza, bližšie neurčená, D47.2 Monoklonálna gamapatia nejasného významu, G47.3 Syndróm spánkového apnoe.
-
-Note: the OA had 10+ items but only the 5 most clinically relevant to this cardiology encounter made it to Záver. Uterine myoma, varicose veins, microscopic haematuria, vertigo were omitted — they're documented in OA, they don't need to repeat here.
-
-## NEGATIVE EXAMPLES — do NOT produce these
-- K80.0 Cholelitiáza when no gallstones mentioned.
-- D64.9 Anémia when source has no anaemia diagnosis or lab.
-- R01.1 Srdcový šelest when auscultation was clean ("bez šelestov").
-- Z95.8 Prítomnosť iného implantátu unless an implant was actually stated.
-- Stav po operácii katarakty as a standalone line with no ICD code — assign H25.9 or Z96.1 based on context.
+- Treatment / procedures → Postup a plán.
+- Family diseases → RA. Allergies → AA.
 
 ## WHEN EMPTY
-If the source contains NO diagnostic content at all (extremely rare), output ZERO characters. Do NOT invent one to fill the space.`,
+No diagnostic content in source at all (extremely rare) → output ZERO characters.`,
   },
 
   // ── Postup a plán ───────────────────────────────────────────────────
@@ -559,169 +360,145 @@ If the source contains NO diagnostic content at all (extremely rare), output ZER
       "odporucania",
       "odporucanie",
     ]),
-    context: `Postup a plán — Treatment plan, follow-up, procedures to be done, discharge instructions.
+    context: `Postup a plán — Treatment plan + procedures + follow-up + discharge instructions.
 
-## OWNS — include ALL of these
-- Procedures ordered for this encounter (koronarografia, echo, CT, MRI).
-- Medications to start / adjust / stop as a result of this encounter.
-- Referrals to other specialists.
-- Follow-up appointments (praktický lekár do 3 dní, kontrola o mesiac).
-- Patient instructions (diet, activity, when to return).
-- Informed-consent notes ("pacient/ka poučený/á").
-- Work incapacity (PN — pracovná neschopnosť).
+## OWNS
+- Planned procedures (koronarografia, EKV, intervencie).
+- Transfer destination.
+- Continuing home medications (repeat of LA is OK for transfer summaries).
+- Dietary / lifestyle / režimové opatrenia.
+- Follow-up schedule / dispenzár.
+- Boilerplate discharge statement ("Pacient/ka poučený/á …").
 
 ## NEVER OWNS
-- Current symptoms / complaint → TO.
-- Diagnosis / ICD codes → Záver.
-- Chronic conditions → OA.
+- Diagnoses → Záver. Current-encounter events → TO. Chronic diseases → OA.
 
-## POSITIVE EXAMPLES
-- "Echokardiografia pred výkonom, potom koronarografia cez pravú ruku" → include both.
-- "Do 3 dní hlásiť u praktického lekára, v prípade ťažkostí kontrola ihneď" → include verbatim.
-- "Odporúča sa zanechanie fajčenia" → include.
-
-## NEGATIVE EXAMPLES
-- "Má hypertenziu III. stupňa" → belongs to OA.
-- "Pálenie na hrudi od 13:00" → belongs to TO.
-
-## FORMAT
-- Short Slovak sentences or bullets (doctor preference; prefer sentences for narrative plans).
-- Preserve exact time windows (do 3 dní, o mesiac, 4-6 týždňov).
-- Preserve exact procedures and routes (cez pravú ruku, lokálna anestézia).
-- End with a period.
+## NO INVENTION
+Only procedures/plans stated in the source.
 
 ## WHEN EMPTY
-If the source contains no plan content, output ZERO characters.`,
+Output ZERO characters.`,
   },
 
-  // ── Výška / Hmotnosť / BMI (strict empty-return sections) ───────────
+  // ── Výška ────────────────────────────────────────────────────────────
   {
     id: "vyska",
-    labels: new Set(["vyska", "height"]),
-    context: `Výška — Patient's height in centimetres.
+    labels: new Set(["vyska", "výška", "height"]),
+    context: `Výška — Patient's height in cm.
 
-## OWNS (only)
-- A specific height value stated in the source in cm.
+## OWNS
+- A single height value in cm. If <STRUCTURED_FACTS> has <VITAL key="height" value="…"/>, output that value verbatim — nothing else.
 
-## NEVER OWNS (explicit redirect)
-- Physical examination findings (consciousness, GCS, habitus, skin, posture, orientation) → Celkové vyšetrenie. Even when the source has exam content and no height, DO NOT steal exam content into this section.
-- Weight → Hmotnosť.
-- Vital signs (BP, HR, SpO2, temperature) → Krvný tlak / Pulz.
+## NEVER OWNS
+- Weight → Hmotnosť. BMI → BMI. Vitals → Krvný tlak / Pulz. Exam → Celkové vyšetrenie.
 
-## CRITICAL: NO INVENTION
-NEVER invent, estimate, or fabricate a height. NEVER pick a "plausible" default like 170 / 175 / 180 cm when the source is silent.
+## NO INVENTION
+Never guess. Never pick a "plausible" default.
 
-## WHEN A HEIGHT IS STATED ANYWHERE
-Output exactly the number + "cm". Look at ALL source files — transcript, doctor notes, AND every attached OCR (discharge summary, referral letter, echo report, cardiology note). Referral letters often have a line like "Výška: 164 cm" or "Výška: 164 cm BMI: 27,9" — if you see it, include the value. Do NOT limit yourself to what the patient said aloud in the conversation.
-
-## WHEN THE SOURCE IS SILENT ON HEIGHT (only if no value anywhere)
-Output ZERO characters. Do NOT write "nie je uvedená", "V surových zdrojoch…", "(empty)", or any prose describing absence. Do NOT redirect content from other sections here.`,
+## WHEN EMPTY
+No height anywhere → output ZERO characters.`,
   },
+
+  // ── Hmotnosť ─────────────────────────────────────────────────────────
   {
     id: "hmotnost",
     labels: new Set(["hmotnost", "weight"]),
-    context: `Hmotnosť — Patient's weight in kilograms.
+    context: `Hmotnosť — Patient's weight in kg.
 
-## OWNS (only)
-- A specific weight value stated in the source in kg.
+## OWNS
+- A single weight value in kg. If <STRUCTURED_FACTS> has <VITAL key="weight" value="…"/>, output that value verbatim — nothing else.
 
-## NEVER OWNS (explicit redirect)
-- EKG findings (rhythm, rate, ST, T, PQ, QRS, AV blok) → EKG. Even when the source has EKG content and no weight, DO NOT steal it into this section.
-- Physical examination → Celkové vyšetrenie.
-- Height → Výška.
-- Vital signs → Krvný tlak / Pulz.
+## NEVER OWNS
+- Height → Výška. BMI → BMI. Vitals → Krvný tlak / Pulz. Exam → Celkové vyšetrenie.
 
-## CRITICAL: NO INVENTION
-NEVER invent, estimate, or fabricate a weight. NEVER pick a "plausible" default like 70 / 75 / 80 kg when the source is silent. A fabricated weight impacts dose calculations and BMI.
+## NO INVENTION
+Never guess. Never pick a "plausible" default.
 
-## WHEN A WEIGHT IS STATED ANYWHERE
-Output exactly the number + "kg". Look at ALL source files — transcript, doctor notes, AND every attached OCR (discharge summary, referral letter, echo report). Referral letters often have a line like "Hmotnosť: 75 kg" or "Hmotnosť: 75 kg Výška: 164 cm" — if you see it, include the value. Do NOT limit yourself to what the patient said aloud.
-
-## WHEN THE SOURCE IS SILENT (only if no value anywhere)
-Output ZERO characters. Do NOT write prose describing absence. Do NOT redirect content from other sections here.`,
+## WHEN EMPTY
+No weight anywhere → output ZERO characters.`,
   },
+
+  // ── BMI ──────────────────────────────────────────────────────────────
   {
     id: "bmi",
     labels: new Set(["bmi"]),
     context: `BMI — Body Mass Index.
 
-## OWNS (only)
-- A computed BMI value, ONLY when BOTH height AND weight were EXPLICITLY stated in the source.
+## OWNS
+- BMI value. If <STRUCTURED_FACTS> has <VITAL key="bmi" value="…"/>, output that value verbatim.
+- Otherwise compute BMI = weight(kg) / height(m)² ONLY when both are explicitly stated. Slovak decimal comma (27,9).
 
 ## NEVER OWNS
-- Any other content — do NOT redirect exam findings, EKG, vitals, or anamnestic content here.
+- Any other content.
 
-## CRITICAL: NO INVENTION / NO INFERENCE
-NEVER output a BMI unless BOTH height AND weight are explicitly stated. Do NOT compute from estimated values. Do NOT "use a typical adult BMI".
+## NO INVENTION / NO INFERENCE
+Never output a BMI without both inputs or a stated BMI. Never estimate.
 
-## WHEN BMI IS EXPLICITLY STATED IN THE SOURCE
-If the source already states a BMI (e.g. OCR referral letter says "BMI: 27,9"), output that value verbatim.
-
-## WHEN BOTH HEIGHT AND WEIGHT ARE STATED (and BMI isn't)
-Compute BMI = weight(kg) / height(m)². Output as a number with Slovak decimal comma, one digit after the comma. Nothing else.
-
-## WHEN EITHER VALUE IS MISSING (only if nothing in any source)
-Output ZERO characters. Do NOT explain why it can't be calculated. Do NOT write "nie je možné vypočítať", "chýbajú údaje".`,
+## WHEN EMPTY
+Neither value available → output ZERO characters.`,
   },
 
-  // ── Objective vitals + exam + EKG (strict, replaces short hint contexts)
+  // ── Krvný tlak ───────────────────────────────────────────────────────
   {
     id: "krvny-tlak",
-    labels: new Set(["krvny tlak", "krevni tlak", "tlak", "blood pressure", "bp"]),
-    context: `Krvný tlak — Blood pressure measurement values from this encounter.
+    labels: new Set([
+      "krvny tlak",
+      "krevni tlak",
+      "tlak",
+      "blood pressure",
+      "bp",
+    ]),
+    context: `Krvný tlak — ONLY explicit NUMERIC blood pressure in mmHg.
 
-## OWNS (only)
-- Systolic/diastolic value in mmHg, as stated in the source.
+## OWNS
+- Systolic/diastolic value in mmHg (e.g. "120/80 mmHg").
 - Limb (ĽHK / PHK) when stated.
 - Position (sediac / ležiac / v stoji) when stated.
-- Multiple time-point measurements when the source provides them — keep all, with timestamps.
-- Heart rate (HR) when stated in the same vital-signs block.
-- SpO2, TT (temperature), respiratory rate when stated in the same block.
+- Multi-timepoint BP measurements with timestamps.
 
-## NEVER OWNS
-- Hypertension as a diagnosis → OA (chronic) or Záver (billable dx).
-- Antihypertensive medication → LA.
-- Chronic BP trend / "liečená hypertenzia" as history → OA.
-- Physical exam findings → Celkové vyšetrenie.
+## NEVER OWNS (STRICT REDIRECTS)
+- Heart rate / HR / SF N/min → Pulz. Even when it appears next to BP in the same vitals block, it is NOT yours.
+- SpO2 / SaO2; temperature; respiratory rate → not yours.
+- Hypertension as a diagnosis → OA / Záver. Antihypertensive medication → LA. Exam → Celkové vyšetrenie.
 
-## CRITICAL: NO INVENTION
-Output ONLY explicit numeric values from the source. If the source says "zvýšený tlak" without a number, output only "zvýšený tlak" verbatim — do NOT fabricate a specific value. If the source says nothing about BP, output ZERO characters.
-
-## FORMAT
-- One compact line with comma-separated values.
-- Preserve the speaker's notation: "TK ĽHK 165/75 mmHg, PHK 155/77 mmHg, HR 51/min reg, SatO2 97 %, TT 36,8 °C."
-- Multi-timepoint series on one line: "TK 150/80 mmHg (14:02), 145/80 mmHg (14:31), 143/80 mmHg (15:12)."
-- No prose framing, no "TK pacientky je…".
+## NO INVENTION / NO QUALITATIVE DESCRIPTORS
+- Only output explicit NUMERIC BP values in mmHg.
+- Qualitative descriptors WITHOUT a number ("zvýšený tlak", "vysoký tlak", "normálny tlak", "tlak v norme") → output ZERO characters. The patient's narrative about their pressure belongs in OA / Záver as a hypertension diagnosis, not here.
 
 ## WHEN EMPTY
-If the source contains no BP / vitals measurement, output ZERO characters.`,
+No numeric BP value anywhere → output ZERO characters.`,
   },
+
+  // ── Pulz ─────────────────────────────────────────────────────────────
   {
     id: "pulz",
-    labels: new Set(["pulz", "tep", "srdcova frekvencia", "heart rate", "pulse"]),
-    context: `Pulz — Heart rate from this encounter.
+    labels: new Set([
+      "pulz",
+      "tep",
+      "srdcova frekvencia",
+      "heart rate",
+      "pulse",
+    ]),
+    context: `Pulz — ONLY the heart-rate reading.
 
-## OWNS (only)
-- Rate per minute.
-- Rhythm (pravidelný / nepravidelný).
-- Volume (plný / slabý).
-- Central/peripheral distinction when the source provides it.
+## OWNS
+- Rate per minute, rhythm (pravidelný / nepravidelný), volume (plný / slabý), central/peripheral distinction.
+- HR pulled from an EKG reading ("SF 70/min", "frekvencia 56/min") counts. If <STRUCTURED_FACTS> has <VITAL key="hr" value="…"/>, use that verbatim.
 
-## NEVER OWNS
-- Arrhythmia as a diagnosis (fibrilácia, AV blok) → OA or Záver.
-- EKG interpretation (PQ, QRS, ST-T) → EKG.
+## NEVER OWNS (STRICT REDIRECTS)
+- Height → Výška. Weight → Hmotnosť. BMI → BMI.
+- EKG interpretation (PQ, QRS, ST-T, blocks) → EKG.
 - BP → Krvný tlak.
+- Arrhythmia as a diagnosis → OA / Záver.
 
-## CRITICAL: NO INVENTION
-Output ONLY the explicit heart-rate value stated in the source. Never fabricate a rate.
-
-## FORMAT
-- Compact: "65/min, pravidelný, plný" or "HR 51/min reg".
-- Preserve the speaker's wording.
+## NO INVENTION
+Only an explicit HR.
 
 ## WHEN EMPTY
-If no heart rate is stated, output ZERO characters.`,
+No HR anywhere (including EKG readings) → output ZERO characters.`,
   },
+
+  // ── Celkové vyšetrenie ───────────────────────────────────────────────
   {
     id: "celkove-vysetrenie",
     labels: new Set([
@@ -731,70 +508,46 @@ If no heart rate is stated, output ZERO characters.`,
       "physical examination",
       "objective findings",
     ]),
-    context: `Celkové vyšetrenie — Physical examination findings from this encounter.
+    context: `Celkové vyšetrenie — Physical examination findings.
 
-## OWNS — include ALL of these when mentioned in the source
-- Level of consciousness, orientation, GCS.
-- Cooperativeness, habitus, nutrition, hydration, skin (ikteru, cyanózy), periférne prekrvenie.
-- Head exam: zrenice, fotoreakcia, nystagmus, sliznice, jazyk, šija.
-- Chest exam: dýchanie (vezikulárne, bez VDF), hrudník symmetry.
-- Cor auscultation: akcia, ozvy, šelesty.
-- Abdomen: palpácia, rezistencie, peritoneálne dráždenie, peristaltika, Blumberg, Rovsing, Murphy, Plenci, tapott.
-- Lower extremities: edémy, pulzácie, lýtka, Homans, HŽT / ischémia.
-- Upper + lower limb strength (svalová sila).
+## OWNS
+- Consciousness / orientation / GCS.
+- Habitus, nutrition, hydration, skin (ikteru, cyanózy).
+- Head exam, chest/dýchanie, heart auscultation, abdomen, DKK/HKK.
+- Neurological bedside findings (when part of an internal exam).
 
 ## NEVER OWNS
-- BP / HR / SpO2 / temperature → Krvný tlak / Pulz.
-- EKG reading → EKG.
+- BP → Krvný tlak. HR → Pulz. SpO2 / TT. EKG → EKG.
 - Height / weight / BMI → their own sections.
-- Lab values (troponin, NT-proBNP, CRP) → part of TO narrative for THIS encounter.
-- Diagnoses → OA / Záver.
-- Chronic history → OA.
+- Diagnoses → Záver. Chronic history → OA.
 
-## CRITICAL: NO INVENTION
-Only include findings explicitly documented in the source. Do NOT add "normal" findings the doctor didn't state ("sliznice vlhké" only if the source says so).
-
-## FORMAT
-- One flowing paragraph of Slovak clinical prose, comma-separated compact facts grouped by anatomical system.
-- Preserve abbreviations verbatim (VDF, GCS, HŽT, DK, HKK).
-- No bullets, no subheadings.
+## NO INVENTION
+Only findings explicitly documented.
 
 ## WHEN EMPTY
-If no physical examination findings are in the source, output ZERO characters.`,
+Output ZERO characters.`,
   },
+
+  // ── EKG ──────────────────────────────────────────────────────────────
   {
     id: "ekg",
-    labels: new Set(["ekg", "ecg"]),
-    context: `EKG — Electrocardiogram reading from this encounter.
+    labels: new Set(["ekg", "ecg", "ekg nalez", "ekg reading"]),
+    context: `EKG — EKG reading from this encounter.
 
-## OWNS — include ALL of these when in the source
-- Rhythm (sinusový, fibrilácia, flutter).
-- Rate (frequency, f:).
-- Axis (os elektrická) when stated.
-- P-wave, PR / PQ interval.
-- QRS width and morphology.
-- ST segment (v izočiare, elevácia, depresia).
-- T-wave changes (negatívne, invertované, vo zvodoch …).
-- Conduction blocks (AV blok I./II./III. stupňa, LBBB, RBBB).
-- SVES, VES when stated.
-- The doctor's interpretive conclusion ("bez akútnych ischemických zmien", "AV blok 1. stupňa").
+## OWNS
+- Rhythm, rate, axis, P-wave, PR / PQ, QRS width + morphology, ST segment, T-wave, conduction blocks, extrasystoles (SVES, KES).
+- Interpretive conclusion from the report.
+- If <STRUCTURED_FACTS> has <EKG><READING>…</READING></EKG>, use that content verbatim.
 
 ## NEVER OWNS
-- BP / HR as a vital sign → Krvný tlak / Pulz. (Heart rate as part of the EKG reading stays here.)
-- Physical exam → Celkové vyšetrenie.
-- Diagnoses → Záver.
-- Treatment → Postup a plán.
+- HR as a vital sign → Pulz (the EKG line's own rate stays here).
+- Exam → Celkové vyšetrenie. Diagnoses → Záver. Treatment → Postup a plán.
 
-## CRITICAL: NO INVENTION
-Only include EKG findings explicitly documented. Do NOT add "normal intervals" the doctor didn't read.
-
-## FORMAT
-- Compact one-line or short-sentence sequence, preserving the doctor's exact interval and wave wording.
-- Example: "Sínusový rytmus, f 56/min, PQ 0,28 s, QRS do 0,08 s, ST v izočiare, T negat. V1–V3, AV blok 1. stupňa. Bez známok akútnych ischemických zmien."
-- Preserve Slovak decimal comma (0,28 not 0.28).
+## NO INVENTION
+Only findings explicitly in the EKG report. Slovak decimal comma (0,28).
 
 ## WHEN EMPTY
-If no EKG reading is in the source, output ZERO characters.`,
+Output ZERO characters.`,
   },
 ];
 

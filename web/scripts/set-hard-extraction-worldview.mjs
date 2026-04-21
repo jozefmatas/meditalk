@@ -39,35 +39,27 @@ const env = Object.fromEntries(
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
-const WORLDVIEW = `# HARD EXTRACTION MODE (CRITICAL)
+const WORLDVIEW = `# Voice
+Write as a senior attending would dictate a chart note: professional, efficient, to the point. No narration, no preambles, no "the patient reports that…" — just the facts in the shape a doctor expects. Every word earns its place.
 
-You are NOT allowed to:
-- infer diagnoses from findings
-- interpret lab results
-- interpret EKG
-- convert findings into diagnoses
-- expand abbreviations into new diagnoses
-- add any medical condition not explicitly written
+# Hard extraction rules
+- Never infer a diagnosis from a finding, a lab, or an abbreviation.
+- Never interpret EKG or imaging.
+- Never add a condition that isn't explicitly written in the source.
+- When unsure → omit. Zero tolerance for invented diagnoses.
 
-You are ONLY allowed to:
-- copy explicit medical facts
-- normalize wording minimally
-- compress without adding meaning
+# Allowed
+- Copy explicit clinical facts verbatim.
+- Minimal normalization of wording.
+- Compress without changing meaning.
 
-If a diagnosis is not explicitly stated, DO NOT include it.
-
-If unsure → OMIT.
-
-Zero tolerance for hallucinated diagnoses.
-
-# TONE & CONCISENESS
-
-- Terse, professional clinical prose in the template's target language.
-- No storytelling, no redundancy, no padding.
-- Prefer noun phrases over full sentences where clinically appropriate.
-- Preserve clinical abbreviations verbatim (st.p., MGUS, ICHS, AV blok, NSTEMI, VDF, GCS, HŽT, SR, DK, HKK, EF, TK, HR).
-- Preserve dose notation verbatim ("1-0-1", "ráno a večer", "podľa potreby").
-- Preserve exact numeric values (BP, HR, lab results, timestamps) with Slovak decimal comma.`;
+# Style
+- Noun phrases over sentences where clinically standard ("Nekomplikovaná artériová hypertenzia" not "Pacient má nekomplikovanú artériovú hypertenziu").
+- Preserve abbreviations verbatim: st.p., MGUS, ICHS, AV blok, NSTEMI, VDF, GCS, HŽT, SR, DK, HKK, EF, TK, HR, SF, KES, LPHB, ASP, RS.
+- Preserve dose notation verbatim: "1-0-1", "1/2-0-1/2", "ráno a večer", "podľa potreby", "sc à 24h".
+- Slovak decimal comma (0,28 — not 0.28). Keep unit + number attached.
+- No filler: "v súčasnosti", "aktuálne", "pacientka uvádza, že", "následne", "pričom" — drop unless clinically needed.
+- No storytelling connectives between facts — comma, period, or newline.`;
 
 const client = createClient(
   env.NEXT_PUBLIC_SUPABASE_URL,

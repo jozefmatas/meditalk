@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-21 (section-agent architecture: deleted `clinical/` folder, `anthropic.ts`, fact-extraction/validation/resolution/ICD-certainty pipeline. One generic agent per section now, with the admin-editable `section.context` as the clinical contract.)_
+_Last updated: 2026-04-21 (corpus-driven style, deterministic preprocessor, ICD suggester drives Záver. Older milestones in commit history.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -10,43 +10,61 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](../web
 
 ## 0. Pipeline Overview
 
-The entire pipeline is a tight loop. The template's sections are the spine; each section has an admin-editable `context` string that IS the clinical contract for the agent rendering it.
+Four layers sit between the raw source and the rendered note: PHI scrub (deterministic regex), the structured-facts preprocessor (deterministic regex over transcript/doctorNotes/files), per-section LLM calls (Haiku, each with a strict contract + corpus-derived few-shot), and post-render reconcilers. Záver is special — it's populated from the ICD suggester's output, not an LLM section agent.
 
 ```
               INPUTS
                |
-  transcript + files + doctor notes
+  transcript + files[{text, context?}] + doctorNotes
                |
-  Stage 1      scrubPhi                          pure TS
-               -> remove patient name, birth number, phone, email, addresses
+  Stage 1      scrubPhi                              pure TS (regex)
+               -> patient name (when known), rodné číslo, phone, email,
+                  PSČ+city, slash-notation addresses
                |
-  Stage 2      generateNote(template, source)    sections/pipeline.ts
+  Stage 2      preprocessSource                      sections/source-preprocessor.ts
+               -> scans EVERY carrier (transcript/doctorNotes/files[])
+               -> extracts OCR med blocks, vital lines, EKG readings,
+                  transcript brand mentions
+               -> dedupes meds by leading-letter prefix
+               -> pulls loose HR from "SF 70/min" inside EKG text
+               -> appends <STRUCTURED_FACTS> block to transcript
                |
-               for each LEAF section in template (depth-first, template order):
-                 |
-                 Stage 2a  renderSection          sections/section-agent.ts
-                           -> one Anthropic call, Haiku by default
-                           -> system prompt = section.context + prior-section outputs
-                           -> user message  = { transcript, doctorNotes, files[] }
-                 |
-                 Stage 2b  reconcilers[]          sections/reconcilers/
-                           -> optional per-section post-render helpers
-                           -> registered by string key, referenced from template
-                 |
-                 Stream:    onSection callback fires -> SSE `section` event -> UI
+  Stage 3      parallel:
+               |      suggestIcdCodes (source-only mode)         sections/suggest-icd.ts
+               |      -> Haiku, 10–15 CSV-validated ICD candidates
+               |      -> ranked by relevance, primary first
+               |      -> optional `differential` on symptom-code primary
                |
-               done
+               |      generateNote(template, source)              sections/pipeline.ts
+               |      -> walks template leaves in order
+               |      -> SKIPS Záver leaf (fed by suggester)
+               |      -> per leaf:
+               |           renderSection                          sections/section-agent.ts
+               |           -> Haiku call
+               |           -> system prompt: role + worldview + corpus examples + contract
+               |           -> user message: source (transcript + <STRUCTURED_FACTS>,
+               |              doctorNotes, files with "Doctor's focus: …" when context set)
+               |           reconcilers[]                          sections/reconcilers/
+               |           -> post-render transforms
+               |           -> SSE onSection fires → UI stream
                |
-  Stage 3      buildTemplateHtml                  templates/html.ts
+  Stage 4      inject Záver from suggester           sections/format-zaver.ts
+               -> formatZaverFromSuggestions(codes)
+               -> "primary [optional (diferenciálna dg.: …)], secondaries, …"
+               -> written to sectionContentsMap[zaverId]
+               -> synthetic SSE section event fires
+               |
+  Stage 5      buildTemplateHtml                     templates/html.ts
                -> concat sections in template hierarchy -> final HTML
+               -> skipEmpty drops blank subsections
 ```
 
-No fact extraction. No EncounterModel. No deterministic section renderers. No specialty pack. No Sonnet Pass 1, no Haiku Pass 1.5, no ICD certainty filter. The only things standing between the raw source and the rendered note are (a) PHI scrub, (b) one Claude call per leaf section, (c) optional reconcilers.
+Clinical knowledge lives in four places:
 
-Clinical knowledge lives in exactly two places:
-
-1. **`section.context`** — free-text clinical contract, per section, per template, edited in the admin UI. This is the alpha and omega of per-section behavior.
-2. **`sections/reconcilers/`** — small, pure TypeScript helpers for quality checks that can't be expressed in a prompt (drug-name canonicalization, ICD code validation, BP range sanity, etc.). Referenced by `section.reconcilers: string[]` in the template and registered in `reconcilers/index.ts`.
+1. **`template.styleExamples`** (jsonb) — real attending reference notes. The corpus. [`lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts) parses them per-section at generation time and injects up to 3 per-section snippets as few-shot voice examples. Style, tone, phrasing emerge from the corpus, not from prompt rules.
+2. **`template.systemPrompt`** — template-wide guardrails (specialty worldview, abbreviation conventions). Injected once per section-agent call.
+3. **`section.context`** — per-section contract (OWNS / NEVER OWNS / NO INVENTION / WHEN EMPTY). Short; format/voice prescriptions live in the corpus instead.
+4. **`sections/reconcilers/`** — post-render helpers. Registered by string key in [`reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts); referenced from `section.reconcilers: string[]`.
 
 ---
 
@@ -54,11 +72,15 @@ Clinical knowledge lives in exactly two places:
 
 ### Pipeline
 
-| File                                                                                        | Role                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)                   | Orchestrator. Walks the template tree, renders leaves in order, fires `onSection` per completed section.                                                                          |
-| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)         | The generic section-agent function — one Anthropic call per section, builds system prompt from `section.context` + prior-section outputs, pipes output through named reconcilers. |
-| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts) | Registry of named post-render helpers. Start empty; add as needed.                                                                                                                |
+| File                                                                                              | Role                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)                         | Orchestrator. Runs the preprocessor once, builds the per-section corpus map, walks template leaves in order, **skips the Záver leaf** (label-matched — it's fed by the suggester). `findZaverSection` helper exported.    |
+| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)               | Generic section-agent — one Anthropic call per section. System prompt layers: role + worldview + `# Voice examples` (corpus) + section contract. User message: source with `# File: … (Doctor's focus: …)` when set.      |
+| [`web/src/lib/sections/source-preprocessor.ts`](../web/src/lib/sections/source-preprocessor.ts)   | Deterministic regex pass over every source carrier. Extracts OCR med blocks, vital lines, EKG readings, transcript brand mentions. Dedupes meds by prefix. Emits `<STRUCTURED_FACTS>` XML the agents see alongside source. |
+| [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)                   | One-shot Haiku call: source → 10–15 CSV-validated ICD-10 candidates (ranked). Output powers BOTH the right-side "Navrhované kódy" panel AND the Záver section.                                                           |
+| [`web/src/lib/sections/format-zaver.ts`](../web/src/lib/sections/format-zaver.ts)                 | Deterministic formatter: `SuggestedIcdCode[]` → Záver line ("primary [differential], secondaries, …").                                                                                                                   |
+| [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)         | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                            |
+| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts)       | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                     |
 
 ### Routes
 
@@ -122,21 +144,47 @@ Model IDs live in [`section-agent.ts`](../web/src/lib/sections/section-agent.ts)
 
 ## 4. Reconcilers
 
-A reconciler is a small, pure TS function with the signature:
+Reconcilers are pure TS post-render transforms:
 
 ```ts
-type Reconciler = (text: string, source: RawSource) => string;
+type Reconciler = (
+  text: string,
+  source: RawSource,
+  ctx: { language: Language },
+) => string;
 ```
 
-Reconcilers post-process a section's rendered text. Registered by string key in [`sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts). Referenced from the template as `section.reconcilers: ["drug-normalizer", …]`.
+Registered in [`sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts). Attached to sections via `section.reconcilers: string[]` — set by [`web/scripts/enable-reconcilers.mjs`](../web/scripts/enable-reconcilers.mjs) (idempotent, label-matched).
 
-None are registered yet. First candidates (when quality demands it):
+| Name               | Runs on                 | Behaviour                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `drug-normalizer`  | LA / medication sections | Extracts the leading drug-name prefix from each comma-separated entry, short-circuits through `ABBREVIATION_ALIASES` (e.g. `ANP → ANOPYRIN`), then fuzzy-corrects against the medication CSV if no alias hit. Preserves dose/frequency verbatim.                                                       |
+| `icd-validator`    | Záver (legacy path)    | Code-boundary splitter (not comma-based — a canonical description with internal commas no longer doubles). Per code: CSV hit → canonical description; 1-2 decimal digit miss with valid root → downgrade; ICD-10-CM shape (≥3 decimal digits) + no CSV → drop. **Note:** Záver is now fed by the suggester directly; this reconciler is a safety net if a template still routes output through it. |
 
-- **`drug-normalizer`** — canonicalize drug brand names against the medication CSV, fold "Paretin"/"Paretic" style variants.
-- **`icd-validator`** — validate ICD codes emitted in Záver against the localized ICD-10 CSV; replace hallucinated descriptions with canonical ones.
-- **`bp-sanity`** — check that blood pressure values are physiologic (50–250 systolic, etc.).
+**Absence stripper** is built into `renderSection` itself, not a registered reconciler. Catches "V surových zdrojoch…", "(empty)", "Žiadne údaje…" patterns and replaces with `""`. See `isAbsenceDescription` in `section-agent.ts`.
 
-Keep them tiny and orthogonal.
+---
+
+## 4.5 Reference-notes corpus + ICD suggester
+
+### Corpus (`template.styleExamples`)
+
+Admins attach real attending notes to a template via the template editor's "Reference Notes Corpus" panel (admin). Upload hits [`admin/app/api/templates/analyze-note/route.ts`](../admin/app/api/templates/analyze-note/route.ts) which extracts text (PDF/image/plain), PHI-scrubs via [`admin/lib/phi-scrubber.ts`](../admin/lib/phi-scrubber.ts), and returns a `proposedExample` plus the analyzer's detected sections. Preview shows per-section capture (done client-side via [`admin/lib/reference-notes-parser.ts`](../admin/lib/reference-notes-parser.ts)) before save.
+
+At generation time, `buildSectionExamplesMap` parses every attached note into per-section snippets using the template's own labels (flat label index, diacritic-stripped, case-insensitive). Each section-agent receives up to 3 snippets as the `# Voice examples` block in its system prompt — explicit instruction: "mimic the TONE and STRUCTURE, never copy patient-specific facts".
+
+Future: same ingestion path will power doctor-facing "upload your own notes → personal template" flow. No code change needed, just a new UI.
+
+### ICD suggester
+
+[`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) runs ONCE per generation, in parallel with section rendering. Source-only mode (sections array empty) is used today; `sections` parameter is still plumbed through for a future "re-suggest from final note" flow.
+
+Output feeds two places:
+
+1. **Right-side panel** — persisted to `visit.metadata.clinical_analysis.suggestedIcdCodes`. [`IcdPanelContent`](../web/src/components/encounters/icd-panel.tsx) reads it and renders the ranked list with per-code confidence.
+2. **Záver section** — [`formatZaverFromSuggestions`](../web/src/lib/sections/format-zaver.ts) joins the codes into a comma-separated line. Primary first; if the primary is a symptom code (R07.4, R06.0, etc.) the suggester provides a `differential` field which gets rendered as `(diferenciálna dg.: …)`. Injected into `sectionContentsMap[zaverId]` before HTML build; a synthetic SSE `section` event fires so the streaming UI shows it.
+
+Every code is CSV-validated inside the suggester. CM-shaped codes (≥3 decimal digits) not in the Slovak CSV are dropped. Codes with unknown roots are dropped. "Low" confidence codes are excluded from Záver but still surface in the right-panel for the doctor.
 
 ---
 
@@ -187,8 +235,10 @@ See the commit history if you need to understand why a specific piece was remove
 
 ## 9. Debugging
 
-- **Section rendered empty** — check the `context`: did the rule "return empty string when nothing in source fits" fire unexpectedly? Did the prior-sections context claim all the candidate content?
-- **Section content leaking between sections** — tighten the `NEVER include X here` wording in both sections' contexts.
-- **Wrong dose/drug name in LA** — add `drug-normalizer` reconciler (not yet registered).
-- **Hallucinated ICD in Záver** — add `icd-validator` reconciler. Or tighten the Záver context to require verbatim code+description from the source.
-- **Slow generation** — most sections should be on Haiku. Check that `section.model` isn't accidentally set to `opus` template-wide.
+- **Section rendered empty** — check the `context`: did the "output ZERO characters" rule fire? Check the preprocessor log `[pipeline] preprocessor extracted N meds, …` — if the facts aren't there, the section has nothing to render.
+- **Section content leaking between sections** — tighten the `NEVER OWNS` list in both sections' contexts. The preprocessor's `<STRUCTURED_FACTS>` block often resolves this better than prose rules.
+- **Wrong dose/drug name in LA** — the `drug-normalizer` alias map in [`reconcilers/drug-normalizer.ts`](../web/src/lib/sections/reconcilers/drug-normalizer.ts) catches known Slovak shortforms (ANP, ASA, NTG). Add to `ABBREVIATION_ALIASES` when a new one surfaces.
+- **Hallucinated / wrong ICD in Záver** — Záver is fed by the suggester, not a section agent. Tighten the suggester's prompt in [`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) or confirm the ICD CSV has the right subcode.
+- **Cascade-shift in rendered note** — section content appears under the wrong heading: the culprit is [`parseNoteToSectionMap`](../web/src/lib/parse-note-sections.ts). It must match by label, not by index. Tested in `parse-note-sections.test.ts`.
+- **Agent output doesn't sound like an attending** — the template needs a corpus. Upload 2–5 real notes via the admin template editor's Reference Notes Corpus panel.
+- **Slow generation** — most sections run on Haiku. Check `section.model`; worldview + per-section context + corpus snippets bloat the input tokens — aim for ≤3 corpus snippets per section (hard-capped in `buildSectionExamplesMap`).

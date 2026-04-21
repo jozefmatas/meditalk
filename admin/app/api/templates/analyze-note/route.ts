@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import sharp from "sharp";
 import { extractTextFromUpload } from "@/lib/file-extraction";
 import { supabaseAdmin } from "@/lib/supabase";
+import { scrubPhi } from "@/lib/phi-scrubber";
 import { logger } from "@/lib/logger";
 
 let _anthropic: Anthropic | null = null;
@@ -21,6 +22,15 @@ export interface AnalysisResult {
   extractedText: string;
   sections: AnalyzedSection[];
   styleGuide: string;
+  /**
+   * Candidate `styleExamples` entry — PHI-scrubbed full extracted text,
+   * ready for persistence on `templates.style_examples`. The caller
+   * matches `sections[].label` against its target template's labels
+   * (client-side) to show which sections will have examples captured.
+   */
+  proposedExample: { name: string; text: string };
+  /** Count of PHI redactions applied during the scrub pass. */
+  phiRedactions: number;
 }
 
 const ANALYSIS_PROMPT = `You are analyzing a medical document/note to extract two things:
@@ -177,10 +187,17 @@ export async function POST(request: NextRequest) {
       styleGuide: string;
     };
 
+    const { scrubbed, redactions } = scrubPhi(extractedText);
+
     const result: AnalysisResult = {
       extractedText,
       sections: analysis.sections,
       styleGuide: analysis.styleGuide,
+      proposedExample: {
+        name: file.name,
+        text: scrubbed,
+      },
+      phiRedactions: redactions,
     };
 
     return NextResponse.json(result);

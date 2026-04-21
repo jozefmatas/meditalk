@@ -14,10 +14,10 @@ const simpleTemplate: Template = {
   name: { sk: "Simple" },
   description: { sk: "Simple" },
   sections: [
-    { id: "subjective", labels: { sk: "Subjektívne" } },
-    { id: "objective", labels: { sk: "Objektívne" } },
-    { id: "assessment", labels: { sk: "Záver" } },
-    { id: "plan", labels: { sk: "Plán" } },
+    { id: "subjective", labels: { sk: "Subjektívne", en: "Subjective" } },
+    { id: "objective", labels: { sk: "Objektívne", en: "Objective" } },
+    { id: "assessment", labels: { sk: "Záver", en: "Assessment" } },
+    { id: "plan", labels: { sk: "Plán", en: "Plan" } },
   ],
 };
 
@@ -26,16 +26,16 @@ const templateWithSubs: Template = {
   name: { sk: "With Subs" },
   description: { sk: "With Subs" },
   sections: [
-    { id: "reason", labels: { sk: "Dôvod" } },
+    { id: "reason", labels: { sk: "Dôvod", en: "Reason" } },
     {
       id: "exam",
-      labels: { sk: "Vyšetrenie" },
+      labels: { sk: "Vyšetrenie", en: "Exam" },
       subsections: [
-        { id: "vitals", labels: { sk: "Vitálne funkcie" } },
-        { id: "skin", labels: { sk: "Koža" } },
+        { id: "vitals", labels: { sk: "Vitálne funkcie", en: "Vitals" } },
+        { id: "skin", labels: { sk: "Koža", en: "Skin" } },
       ],
     },
-    { id: "plan", labels: { sk: "Plán" } },
+    { id: "plan", labels: { sk: "Plán", en: "Plan" } },
   ],
 };
 
@@ -273,6 +273,51 @@ describe("parseNoteToSectionMap", () => {
     const map = parseNoteToSectionMap(html, simpleTemplate);
 
     expect(map.subjective).toBe("- Item A\n- Item B");
+  });
+
+  /* ── Regression: no cascade shift when skipEmpty omits middle sections ── */
+
+  it("does NOT cascade-shift when a middle subsection is missing (skipEmpty case)", () => {
+    const cardioTemplate: Template = {
+      id: "cardio",
+      name: { sk: "Cardio" },
+      description: {},
+      sections: [
+        {
+          id: "obj",
+          labels: { sk: "Objektívne vyšetrenie", en: "Objective" },
+          subsections: [
+            { id: "tk", labels: { sk: "Krvný tlak", en: "BP" } },
+            { id: "puls", labels: { sk: "Pulz", en: "Pulse" } },
+            { id: "vyska", labels: { sk: "Výška", en: "Height" } },
+            { id: "hmot", labels: { sk: "Hmotnosť", en: "Weight" } },
+            { id: "bmi", labels: { sk: "BMI", en: "BMI" } },
+          ],
+        },
+      ],
+    };
+    // Krvný tlak dropped from HTML by skipEmpty=true in buildTemplateHtml.
+    const html =
+      "<h2>Objektívne vyšetrenie</h2>" +
+      "<h3>Pulz</h3><p>70/min</p>" +
+      "<h3>Výška</h3><p>164 cm</p>" +
+      "<h3>Hmotnosť</h3><p>75 kg</p>" +
+      "<h3>BMI</h3><p>27,9</p>";
+    const map = parseNoteToSectionMap(html, cardioTemplate);
+
+    // The dropped section is absent — NOT filled with the wrong content.
+    expect(map.tk).toBeUndefined();
+    // Remaining subsections map to their OWN ids (no cascade shift).
+    expect(map.puls).toBe("70/min");
+    expect(map.vyska).toBe("164 cm");
+    expect(map.hmot).toBe("75 kg");
+    expect(map.bmi).toBe("27,9");
+  });
+
+  it("tolerates case + diacritic differences between HTML and label", () => {
+    const html = "<h2>SUBJECTIVE</h2><p>hi</p>";
+    const map = parseNoteToSectionMap(html, simpleTemplate);
+    expect(map.subjective).toBe("hi");
   });
 
   it("preserves bold inside list items", () => {

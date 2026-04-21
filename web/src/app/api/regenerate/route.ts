@@ -9,7 +9,9 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logAudit, createAuditContext } from "@/lib/audit";
-import { generateNote } from "@/lib/sections/pipeline";
+import { generateNote, findZaverSection } from "@/lib/sections/pipeline";
+import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
+import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
 import type { SupportedLanguage } from "@/lib/types";
@@ -97,6 +99,7 @@ export async function POST(request: NextRequest) {
       .map((f) => ({
         name: f.name,
         text: f.extracted_text!,
+        context: f.context || undefined,
       }));
 
     // Transcript: prefer metadata.transcript, fall back to legacy
@@ -157,6 +160,13 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
+        // ICD suggester runs in parallel with section generation; its
+        // output feeds BOTH the right-side panel AND the Záver slot.
+        const suggesterPromise = suggestIcdCodes(source, [], language, {
+          userId,
+          visitId,
+        });
+
         await generateNote({
           template,
           source,
@@ -172,6 +182,21 @@ export async function POST(request: NextRequest) {
             });
           },
         });
+
+        const suggestedIcdCodes = await suggesterPromise;
+
+        // Inject Záver content from the suggester + emit synthetic event.
+        const zaver = findZaverSection(template);
+        if (zaver) {
+          const zaverContent = formatZaverFromSuggestions(suggestedIcdCodes);
+          sectionContentsMap[zaver.id] = zaverContent;
+          sendEvent({
+            type: "section",
+            id: zaver.id,
+            title: zaver.title,
+            content: zaverContent,
+          });
+        }
 
         const generatedNote = buildTemplateHtml(
           template,
@@ -192,6 +217,9 @@ export async function POST(request: NextRequest) {
           { label: "regenerate-save-columns" },
         );
 
+        const clinicalAnalysis =
+          suggestedIcdCodes.length > 0 ? { suggestedIcdCodes } : undefined;
+
         let metadataError: unknown = null;
         try {
           await mergeVisitMetadata(supabase, visitId, {
@@ -199,6 +227,9 @@ export async function POST(request: NextRequest) {
             generation_pending: null,
             recording_session: null,
             ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
+            ...(clinicalAnalysis
+              ? { clinical_analysis: clinicalAnalysis }
+              : {}),
           });
         } catch (err) {
           metadataError = err;
@@ -223,6 +254,7 @@ export async function POST(request: NextRequest) {
           generatedNote,
           usedChunks: usedChunkIds,
           templateId: template.id,
+          ...(clinicalAnalysis ? { clinicalAnalysis } : {}),
         });
 
         safeClose();

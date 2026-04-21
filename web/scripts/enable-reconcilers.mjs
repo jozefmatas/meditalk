@@ -111,11 +111,12 @@ const ENABLEMENTS = [
       labels.some((l) => ZAVER_LABELS.has(normalizeLabel(l))),
     reconcilers: ["icd-validator"],
   },
+  // Experiment: revert every section to Haiku. Reconcilers (drug-normalizer,
+  // icd-validator) stay — they constrain output regardless of model tier.
   {
-    label: "Sonnet model on RA/OA/TO/Záver",
-    matches: (labels) =>
-      labels.some((l) => SONNET_LABELS.has(normalizeLabel(l))),
-    model: "sonnet",
+    label: "Haiku model on every section",
+    matches: () => true,
+    model: "haiku",
   },
 ];
 
