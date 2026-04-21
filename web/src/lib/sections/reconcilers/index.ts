@@ -11,6 +11,7 @@
  */
 import type { Language, RawSource } from "../section-agent";
 import { drugNormalizer } from "./drug-normalizer";
+import { icdValidator } from "./icd-validator";
 
 export interface ReconcilerContext {
   language: Language;
@@ -25,7 +26,8 @@ export type Reconciler = (
 
 export const RECONCILERS: Record<string, Reconciler> = {
   "drug-normalizer": drugNormalizer,
-  // Next candidates: icd-validator, bp-sanity, sat-sanity.
+  "icd-validator": icdValidator,
+  // Next candidates: bp-sanity, sat-sanity.
 };
 
 export type ReconcilerName = keyof typeof RECONCILERS;

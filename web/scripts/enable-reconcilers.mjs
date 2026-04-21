@@ -1,7 +1,9 @@
 /**
- * One-shot: enable specific reconcilers on matching sections across all
- * templates in Supabase. Idempotent — a reconciler is added to a section's
- * `reconcilers` array only if it isn't already present.
+ * One-shot: configure section-level fields (reconcilers, model tier) on
+ * matching sections across all templates in Supabase.
+ *
+ * Idempotent — a reconciler is added only if it's not already present;
+ * a model is updated only if it differs from the desired value.
  *
  * Usage:  node scripts/enable-reconcilers.mjs [--dry-run]
  */
@@ -46,7 +48,7 @@ function normalizeLabel(l) {
     .replace(/[:\s]+$/g, "");
 }
 
-/** Known medication-section labels across the templates in use. */
+/** Known section-label sets we target. */
 const MEDICATION_LABELS = new Set([
   "la",
   "lieky",
@@ -61,11 +63,59 @@ const MEDICATION_LABELS = new Set([
   "liekova anamneza",
 ]);
 
+const ZAVER_LABELS = new Set([
+  "zaver",
+  "zavěr",
+  "assessment",
+  "conclusion",
+  "diagnosis",
+  "diagnostic assessment",
+  "conclusion and recommendation",
+  "zaver a odporucanie",
+  "zaver a doporuceni",
+  "zaver a odporucenie",
+]);
+
+/** Labels that should be rendered by Sonnet instead of Haiku. */
+const SONNET_LABELS = new Set([
+  // RA
+  "ra",
+  "fhx",
+  "family history",
+  "rodinna anamneza",
+  // OA
+  "oa",
+  "pmhx",
+  "past medical history",
+  "osobna anamneza",
+  "osobni anamneza",
+  // TO / HPI
+  "to",
+  "hpi",
+  "history of present illness",
+  "anamneza sucasneho ochorenia",
+  "anamneza soucasneho onemocneni",
+  ...ZAVER_LABELS,
+]);
+
 const ENABLEMENTS = [
   {
+    label: "drug-normalizer on medication sections",
     matches: (labels) =>
       labels.some((l) => MEDICATION_LABELS.has(normalizeLabel(l))),
     reconcilers: ["drug-normalizer"],
+  },
+  {
+    label: "icd-validator on Záver sections",
+    matches: (labels) =>
+      labels.some((l) => ZAVER_LABELS.has(normalizeLabel(l))),
+    reconcilers: ["icd-validator"],
+  },
+  {
+    label: "Sonnet model on RA/OA/TO/Záver",
+    matches: (labels) =>
+      labels.some((l) => SONNET_LABELS.has(normalizeLabel(l))),
+    model: "sonnet",
   },
 ];
 
@@ -75,19 +125,31 @@ function patchSection(section, report) {
   );
   for (const rule of ENABLEMENTS) {
     if (!rule.matches(labels)) continue;
-    const existing = Array.isArray(section.reconcilers)
-      ? [...section.reconcilers]
-      : [];
-    const added = [];
-    for (const r of rule.reconcilers) {
-      if (!existing.includes(r)) {
-        existing.push(r);
-        added.push(r);
+
+    const changes = [];
+
+    // reconcilers[]
+    if (rule.reconcilers?.length) {
+      const existing = Array.isArray(section.reconcilers)
+        ? [...section.reconcilers]
+        : [];
+      for (const r of rule.reconcilers) {
+        if (!existing.includes(r)) {
+          existing.push(r);
+          changes.push(`+reconciler:${r}`);
+        }
       }
-    }
-    if (added.length > 0) {
       section.reconcilers = existing;
-      report.push({ id: section.id, labels: section.labels, added });
+    }
+
+    // model
+    if (rule.model && section.model !== rule.model) {
+      changes.push(`model:${section.model ?? "haiku"}→${rule.model}`);
+      section.model = rule.model;
+    }
+
+    if (changes.length > 0) {
+      report.push({ id: section.id, labels: section.labels, changes });
     }
   }
   for (const sub of section.subsections ?? []) patchSection(sub, report);
@@ -123,7 +185,7 @@ for (const template of templates ?? []) {
   for (const r of report) {
     const label =
       r.labels.sk ?? r.labels.en ?? r.labels[Object.keys(r.labels)[0]];
-    console.log(`  ✓ ${label}  (+reconcilers: ${r.added.join(", ")})`);
+    console.log(`  ✓ ${label}  (${r.changes.join(", ")})`);
   }
 
   if (!DRY_RUN) {
