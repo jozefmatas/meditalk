@@ -63,6 +63,26 @@ const PATCHES = [
     block: `If the source is ambiguous between two conditions (e.g. "heart attack" vs "stroke"), preserve the original wording verbatim — NEVER combine them into a compound term like "infarkt mozgovej mŕtvice", which is a clinical contradiction. When unsure which condition was meant, quote the speaker's exact words.`,
   },
   {
+    tag: "ra-no-compound-fusion-v2",
+    labelMatch: /^(ra|rodinn[áa]\s+anamn[éze]|family\s+history)$/i,
+    block: `HARD RULE — no compound fusion diagnoses.
+
+If the source mentions two conditions near each other (e.g. "infarkt" and "mŕtvica" in the same sentence), output them as SEPARATE items OR quote the speaker's exact phrasing verbatim. NEVER fuse them.
+
+FORBIDDEN OUTPUTS — these fused terms do NOT exist in medicine. You MUST NOT write any of them:
+- "infarkt mozgovej mŕtvice"
+- "infarkt mozgovú mŕtvicu"
+- "mozgový infarkt mŕtvica"
+- "stroke heart attack"
+- "cerebral infarct stroke"
+- any other concatenation of two distinct cardiovascular / neurovascular diagnoses
+
+Correct alternatives when source is ambiguous:
+- Write separate facts: "Otec zomrel na infarkt. Otec mal aj mozgovú mŕtvicu."
+- Or quote literally: "Otec zomrel, v transcriptoch sa uvádza 'infarkt' aj 'mozgová mŕtvica'."
+- Or pick the most likely single diagnosis based on the surrounding context and write ONLY that one.`,
+  },
+  {
     tag: "ab-sentence-quality-v1",
     labelMatch: /^(ab|ab[úu]zy|habits|substance\s+use)$/i,
     block: `Write full natural Slovak/Czech/English sentences. No parenthetical fragments like "(cigáret denne)", no truncated clauses like "Fajčí dlho.", no hanging numerals. Each fact must be a complete grammatical sentence — "Pacient fajčí 15 cigariet denne." not "Pacient fajčí pätnásť (cigáret denne)."`,
@@ -77,6 +97,38 @@ const PATCHES = [
     labelMatch:
       /^(ea|epidem|epidemiologick[áa]\s+anamn[éze]|epidemiological\s+history)$/i,
     block: `Preserve the speaker's exact wording for epidemiological exposures (travel, tick exposure, infectious contacts, vaccinations). If the source contains an ambiguous or unclear term, quote it verbatim rather than substituting a similar-sounding word. If nothing about travel / tick bites / infectious contacts / vaccinations is mentioned, return an empty string.`,
+  },
+  {
+    tag: "ea-strict-scope-v2",
+    labelMatch:
+      /^(ea|epidem|epidemiologick[áa]\s+anamn[éze]|epidemiological\s+history)$/i,
+    block: `EA — EPIDEMIOLOGICAL HISTORY ONLY. Zero tolerance for overflow.
+
+ALLOWED content (include ONLY these four categories):
+1. Travel — recent trips, exposure to endemic areas.
+2. Tick / insect bites or exposures.
+3. Infectious contacts — sick contacts, COVID / TB / other infectious exposures.
+4. Vaccinations — flu, COVID, tetanus, travel vaccines.
+
+FORBIDDEN — if the source contains any of the following, SKIP it. Do NOT include it here. Another section owns each of these:
+- Present illness / current symptoms / today's complaint → goes to TO (HPI).
+- Past surgeries, chronic conditions, prior injuries → goes to OA.
+- Family diseases (parents / siblings / grandparents) → goes to RA.
+- Smoking / alcohol / drugs → goes to Ab.
+- Marital status / living situation / caregivers → goes to SA.
+- Job / workplace / employment history → goes to PA.
+- Allergies → goes to AA.
+- Medications → goes to LA.
+- Vital signs / physical exam findings → goes to Objektívne vyšetrenie.
+- Diagnoses / differentials → goes to Záver.
+- Treatment / procedures / follow-up → goes to Postup a plán.
+
+SELF-CHECK before writing anything:
+  Did the source explicitly mention travel, tick/insect exposure, infectious contacts, or vaccinations?
+  - NO  → output ZERO characters. Empty response. Nothing.
+  - YES → include ONLY that content, verbatim from the source.
+
+Never improvise to "fill" this section when no epidemiological content exists.`,
   },
   {
     tag: "vyska-empty-return-v1",

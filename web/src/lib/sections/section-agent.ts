@@ -134,9 +134,13 @@ ${prior}
 Rules:
 - Include only content that fits THIS section's contract above.
 - Do not duplicate anything already present in the already-rendered sections.
+- NEVER OVERFLOW: if the source contains content that belongs to a DIFFERENT section of the template (present illness, family history, allergies, medications, examination findings, diagnoses, plan, etc.), SKIP it entirely — that other section will claim it. Never dump miscellaneous facts into this section just because it has no content otherwise.
 - Use ONLY facts present in the raw source below. No invention, no inference beyond what's written.
 - Preserve the doctor's wording, dose/frequency notation, abbreviations, and numeric values verbatim.
-- If nothing in the raw source fits this section, return an empty string.`;
+- EMPTY-RETURN RULE — read carefully:
+    If nothing in the raw source fits this section's contract, your ENTIRE response MUST be zero characters.
+    Do NOT write "(empty)", "(empty string)", "N/A", "—", "neuvedené", "nie je uvedené", "no data", "žiadne údaje", "V surových zdrojoch...", any parenthetical, any explanation, any description of the absence.
+    An empty response (no tokens at all) is the correct and expected output in this case.`;
 }
 
 function buildUserMessage(source: RawSource): string {
