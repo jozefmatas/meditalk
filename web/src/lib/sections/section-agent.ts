@@ -15,7 +15,10 @@
  * renderers, no specialty pack. Each section reads raw source itself.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { logUsage, type UsageContext } from "../usage";
 import { RECONCILERS, type ReconcilerName } from "./reconcilers";
+
+export type { UsageContext } from "../usage";
 
 export interface RawSource {
   transcript?: string;
@@ -67,16 +70,30 @@ export async function renderSection(
   section: SectionConfig,
   priorSections: RenderedSection[],
   language: Language = "sk",
+  usage?: UsageContext,
 ): Promise<RenderedSection> {
   const systemPrompt = buildSystemPrompt(section, priorSections, language);
   const userMessage = buildUserMessage(source);
 
+  const modelId = MODEL_IDS[section.model];
   const response = await client().messages.create({
-    model: MODEL_IDS[section.model],
+    model: modelId,
     max_tokens: 2000,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
   });
+
+  if (usage) {
+    logUsage({
+      userId: usage.userId,
+      visitId: usage.visitId,
+      provider: "anthropic",
+      model: modelId,
+      operation: "generate_section",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+  }
 
   let content = response.content
     .map((block) => (block.type === "text" ? block.text : ""))

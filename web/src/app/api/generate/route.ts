@@ -515,6 +515,7 @@ export async function POST(request: NextRequest) {
           template,
           source,
           language,
+          usage: { userId, visitId },
           onSection: (section) => {
             sectionContentsMap[section.id] = section.content;
             sendEvent({

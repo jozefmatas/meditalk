@@ -18,6 +18,7 @@ import {
   type RawSource,
   type RenderedSection,
   type SectionConfig,
+  type UsageContext,
 } from "./section-agent";
 import { logger } from "@/lib/logger";
 
@@ -31,6 +32,8 @@ export interface GenerateNoteInput {
   language: SupportedLanguage;
   /** Fired each time a section finishes rendering. */
   onSection?: OnSectionCallback;
+  /** Propagates `userId` / `visitId` so each section's Claude call is logged. */
+  usage?: UsageContext;
 }
 
 export interface GenerateNoteResult {
@@ -46,7 +49,7 @@ export interface GenerateNoteResult {
 export async function generateNote(
   input: GenerateNoteInput,
 ): Promise<GenerateNoteResult> {
-  const { template, source, language, onSection } = input;
+  const { template, source, language, onSection, usage } = input;
   const language4 = normalizeLanguage(language);
   const leaves = collectLeafSections(template.sections);
 
@@ -69,7 +72,13 @@ export async function generateNote(
     };
 
     try {
-      const result = await renderSection(source, config, rendered, language4);
+      const result = await renderSection(
+        source,
+        config,
+        rendered,
+        language4,
+        usage,
+      );
       rendered.push(result);
       if (onSection) await onSection(result);
     } catch (err) {

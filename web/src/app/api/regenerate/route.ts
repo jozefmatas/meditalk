@@ -22,11 +22,13 @@ import { logger } from "@/lib/logger";
  * file texts) using a possibly-new template. Streams sections via SSE.
  */
 export async function POST(request: NextRequest) {
+  let userId: string;
   let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
   let authResult: Awaited<ReturnType<typeof requireAuth>>;
 
   try {
     authResult = await requireAuth();
+    userId = authResult.userId;
     supabase = authResult.supabase;
   } catch (err) {
     if (err instanceof Response) return err;
@@ -159,6 +161,7 @@ export async function POST(request: NextRequest) {
           template,
           source,
           language,
+          usage: { userId, visitId },
           onSection: (section) => {
             sectionContentsMap[section.id] = section.content;
             sendEvent({
