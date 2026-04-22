@@ -181,7 +181,7 @@ Two-second debounce: the text is saved to `visits.metadata.doctor_notes` (JSONB 
 
 ### 3.3 Downstream
 
-`doctorNotes` is passed as `RawSource.doctorNotes` into the section-agent pipeline. Each section-agent sees it in its user message block (`# Doctor notes\n…`). It's also scanned by the deterministic preprocessor (§4) for natural-language brand mentions and OCR-style headings — so a pasted discharge letter in the doctor-notes field is handled identically to an uploaded file.
+`doctorNotes` is passed as `RawSource.doctorNotes` into the section-agent pipeline. Each section-agent sees it in its user message block (`# Doctor notes\n…`). A pasted discharge letter in the doctor-notes field is handled identically to an uploaded file.
 
 Doctor notes are treated as **high-trust source material** — they are never chunked, never embedded, and never truncated.
 
@@ -195,28 +195,7 @@ Doctor notes in the `doctorNotes` field itself ALSO carry filtering directives b
 
 ---
 
-## 4. Structured-facts preprocessor (pre-LLM)
-
-Before any section-agent fires, the generate pipeline runs a deterministic regex pass over every source carrier (transcript + doctorNotes + files[]) via [`web/src/lib/sections/source-preprocessor.ts`](web/src/lib/sections/source-preprocessor.ts). The preprocessor extracts:
-
-| Category         | Pattern examples                                                                       |
-| ---------------- | -------------------------------------------------------------------------------------- |
-| OCR medication blocks | Lines following "Medikácia:", "Lieky:", "Odporúčania:", "Farmakoterapia:", "Naša posledná terapia:" — including same-line inline lists. Soft-headings without colon recognised too. |
-| Vital-sign lines | `Hmotnosť: 75 kg`, `Výška: 164 cm`, `BMI: 27,9`, `TK 120/80 mmHg`, etc. Line-anchored and inline multi-label formats. |
-| EKG readings     | Block under "EKG:" heading, plus mid-line "… EKG: ASP, RS, SF 70/min, …" inline occurrences. |
-| Loose HR         | `SF 70/min`, `frekvencia 56/min`, `HR 70/min` anywhere — lifted so Pulz has a clean signal even when only the EKG line mentions it. |
-| Transcript brand mentions | Per-sentence scan over transcript + doctorNotes using `Intl.Segmenter` (Slovak locale). ~60-brand curated allowlist; captures "Rytmonorm 1-0-1" along with the dose+freq in the same sentence. |
-
-Outputs are:
-
-1. **Appended to the transcript as `<STRUCTURED_FACTS>` XML.** Every section-agent reads this alongside the raw source — it's the "you can't miss these facts" backstop.
-2. **Returned as a `StructuredFacts` object** on `annotations` — the pipeline logs the counts (`8 OCR meds, 3 vitals, 1 EKG`) for debugging.
-
-Dedup is by leading-letter prefix: `PRESTARIUM A 5 mg` and `PrestariumA5mg 1/2-0-1/2` collapse to the entry with frequency info. `Atoridor` and `Atoris` stay separate (different drugs with different bases).
-
----
-
-## 5. PHI scrub (pre-LLM)
+## 4. PHI scrub (pre-LLM)
 
 [`web/src/lib/phi-scrubber.ts`](web/src/lib/phi-scrubber.ts) runs once on transcript + doctorNotes + files[] before any LLM call. Patterns:
 
@@ -233,7 +212,7 @@ Admin has a slim clone at [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.t
 
 ---
 
-## 6. Edge Cases & Recovery
+## 5. Edge Cases & Recovery
 
 | Scenario                                                            | Resolution                                                                                                           |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -251,7 +230,7 @@ Admin has a slim clone at [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.t
 | Client-side transcription failing on network hiccup                 | Both `transcribeBlob` and `transcribeFromPath` retry twice (3 attempts) with exponential backoff (3s, 6s)            |
 | Supabase storage download failing in batch-transcribe               | 3-attempt retry with exponential backoff (3s, 6s) on storage `.download()` call                                      |
 | Multiple files finishing extraction at once (redundant refreshes)   | 500ms debounce on `extraction-complete` event handler batches into single `refreshEncounter()`                       |
-| Transcription misspelling medication names                          | Fuzzy matching via `correctMedicationName` auto-corrects in Pass 1.6a using Levenshtein distance                     |
+| Transcription misspelling medication names                          | `drug-normalizer` reconciler auto-corrects via `correctMedicationBaseName` (Levenshtein fuzzy match against medication CSV) after the critic pass, on LA sections |
 
 ---
 

@@ -120,6 +120,26 @@ describe("isAbsenceDescription", () => {
     expect(isAbsenceDescription("<!-- comment -->")).toBe(true);
   });
 
+  it("catches cleanup-pass meta-commentary essays (EA)", () => {
+    // Observed in production: the cleanup Haiku wrote an explanation of
+    // why the section should be empty instead of returning empty.
+    const essay = `(empty — zero characters)
+The current output contains no valid epidemiological content. The verified facts list contains no infectious exposures, vaccinations, travel, or vector-borne contacts. The phrase "akútne negat." does not belong in EA (it is a clinical negation unrelated to infectious epidemiology) and should be removed. Per the section contract, EA owns ONLY infectious exposures, vaccinations, and travel — none of which are present in this case.`;
+    expect(isAbsenceDescription(essay)).toBe(true);
+  });
+
+  it("catches the literal 'ZERO CHARACTERS' cleanup leak", () => {
+    // Observed in production: cleanup emitted the literal placeholder.
+    expect(isAbsenceDescription("ZERO CHARACTERS")).toBe(true);
+    expect(isAbsenceDescription("zero characters")).toBe(true);
+    expect(isAbsenceDescription("(zero characters)")).toBe(true);
+  });
+
+  it("catches '(empty — zero characters)' parenthetical alone", () => {
+    expect(isAbsenceDescription("(empty — zero characters)")).toBe(true);
+    expect(isAbsenceDescription("(empty, zero chars)")).toBe(true);
+  });
+
   it("catches the EA reasoning-essay failure mode", () => {
     // Observed: Haiku wrote a numbered essay explaining why EA is empty,
     // including the sentence "vrátim prázdny reťazec" at the bottom.

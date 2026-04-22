@@ -12,7 +12,11 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { flattenSectionIds, buildTemplateHtml } from "@/lib/templates/html";
 import { scrubPhi } from "@/lib/phi-scrubber";
-import { generateNote, findZaverSection } from "@/lib/sections/pipeline";
+import {
+  generateNote,
+  findZaverSection,
+  runCriticAndReconcilers,
+} from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import type { RawSource } from "@/lib/sections/section-agent";
@@ -441,10 +445,10 @@ export async function POST(request: NextRequest) {
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
-    // Legacy chunk-based encounters: when transcriptText is empty we fall
-    // back to semantic retrieval over transcript_chunks. New encounters
-    // skip this entirely — transcriptText is already the full source.
-    let usedChunks: string[] = [];
+    // Legacy chunk-based encounters: when transcriptText is empty we
+    // fall back to semantic retrieval over transcript_chunks. Keeps
+    // regeneration working for encounters predating the batch-
+    // transcript flow. New encounters skip this entirely.
     if (!transcriptText) {
       const { count: chunkCount } = await supabase
         .from("transcript_chunks")
@@ -469,11 +473,9 @@ export async function POST(request: NextRequest) {
           if (rpcError) {
             logger.error("match_chunks RPC error:", rpcError);
           } else if (matches && matches.length > 0) {
-            const joined = matches
+            transcriptText = matches
               .map((m: { content: string }) => m.content)
               .join("\n\n");
-            transcriptText = joined;
-            usedChunks = matches.map((m: { id: string }) => m.id as string);
           }
         } catch (err) {
           logger.warn("[generate] Legacy chunk retrieval failed:", err);
@@ -522,20 +524,16 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
-        // Phase 1: ICD suggester runs FIRST (on source alone). Its output
-        // feeds BOTH the right-side panel AND the Záver section —
-        // single source of truth for diagnostic codes. Runs in parallel
-        // with section generation below.
-        const suggesterPromise = suggestIcdCodes(
-          source,
-          [], // no rendered sections yet — source-only mode
-          language,
-          { userId, visitId },
-        );
+        // ICD suggester + section generation run in parallel. The
+        // pipeline emits raw drafts via onSection as each section
+        // finishes, then — for critic-enabled sections — emits the
+        // corrected content a moment later (UI replaces by id).
+        const suggesterPromise = suggestIcdCodes(source, language, {
+          userId,
+          visitId,
+        });
 
-        // Phase 2: generate every section EXCEPT Záver (pipeline skips
-        // Záver by label match; we inject it from suggester output).
-        const { sections: renderedSections } = await generateNote({
+        const sectionsPromise = generateNote({
           template,
           source,
           language,
@@ -551,29 +549,43 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        lap("generation-done");
+        const [, suggestedIcdCodes] = await Promise.all([
+          sectionsPromise,
+          suggesterPromise,
+        ]);
 
-        const suggestedIcdCodes = await suggesterPromise;
+        lap("generation-done");
         lap("icd-suggestions-done");
 
-        // Phase 3: inject Záver content from the suggester. Emit a
-        // synthetic section event so the streaming UI shows Záver at
-        // completion time.
+        // Záver: suggester → deterministic format → critic (if enabled
+        // on the Záver section) → icd-validator reconciler. Same flow
+        // every other section gets.
         const zaver = findZaverSection(template);
         if (zaver) {
-          const zaverContent = formatZaverFromSuggestions(suggestedIcdCodes);
-          sectionContentsMap[zaver.id] = zaverContent;
+          const draftZaver = formatZaverFromSuggestions(suggestedIcdCodes);
+          const finalZaver = draftZaver
+            ? await runCriticAndReconcilers({
+                draftContent: draftZaver,
+                source,
+                config: {
+                  id: zaver.id,
+                  title: zaver.title,
+                  context: zaver.context,
+                  model: "haiku",
+                  reconcilers: zaver.reconcilers,
+                  critic: zaver.critic,
+                },
+                language,
+                usage: { userId, visitId },
+              })
+            : draftZaver;
+
+          sectionContentsMap[zaver.id] = finalZaver;
           sendEvent({
             type: "section",
             id: zaver.id,
             title: zaver.title,
-            content: zaverContent,
-          });
-          // Add to renderedSections so downstream metadata reflects it.
-          renderedSections.push({
-            id: zaver.id,
-            title: zaver.title,
-            content: zaverContent,
+            content: finalZaver,
           });
         }
 
@@ -636,7 +648,6 @@ export async function POST(request: NextRequest) {
         sendEvent({
           type: "complete",
           generatedNote,
-          usedChunks,
           templateId: template.id,
           ...(clinicalAnalysis ? { clinicalAnalysis } : {}),
         });

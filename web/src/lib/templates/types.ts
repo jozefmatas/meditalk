@@ -15,11 +15,20 @@ export interface TemplateSection {
    */
   model?: "haiku" | "sonnet" | "opus";
   /**
-   * Named post-render helpers applied in order after the LLM produces
-   * text. Each name must be registered in sections/reconcilers/index.ts.
+   * Named post-render helpers applied after the optional critic pass.
+   * Each name must be registered in sections/reconcilers/index.ts.
    * Examples: ["drug-normalizer"], ["icd-validator"], ["bp-sanity"].
    */
   reconcilers?: string[];
+  /**
+   * Enable the critic pass for this section. When true, a second Haiku
+   * call audits the draft against the raw source (invention removal +
+   * omission addition). Useful for narrative / clinical-judgment
+   * sections (HPI/TO, Záver, OA). Skip on structural single-value
+   * sections (Vitals, BMI, Výška) where a second pass just adds noise.
+   * Defaults to false.
+   */
+  critic?: boolean;
 }
 
 export interface Template {
@@ -29,7 +38,6 @@ export interface Template {
   sections: TemplateSection[];
   systemPrompt?: string;
   styleExamples?: { name: string; text: string }[];
-  styleGuide?: string;
   specialties?: string[];
   locales?: string[];
   isSystem?: boolean;

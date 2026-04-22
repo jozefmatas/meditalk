@@ -9,7 +9,11 @@ import {
 import { resolveTemplate } from "@/lib/templates/server";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import { logAudit, createAuditContext } from "@/lib/audit";
-import { generateNote, findZaverSection } from "@/lib/sections/pipeline";
+import {
+  generateNote,
+  findZaverSection,
+  runCriticAndReconcilers,
+} from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import type { RawSource } from "@/lib/sections/section-agent";
@@ -106,7 +110,6 @@ export async function POST(request: NextRequest) {
     // transcript_chunks for old encounters created before batch-only.
     const cachedTranscript = getTranscript(visitMeta);
     let transcriptText: string | undefined;
-    let usedChunkIds: string[] = [];
 
     if (cachedTranscript) {
       transcriptText = cachedTranscript;
@@ -126,7 +129,6 @@ export async function POST(request: NextRequest) {
         .join("\n\n")
         .trim();
       if (joined) transcriptText = joined;
-      usedChunkIds = (chunks ?? []).map((c) => c.id as string);
     }
 
     if (
@@ -160,14 +162,12 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
-        // ICD suggester runs in parallel with section generation; its
-        // output feeds BOTH the right-side panel AND the Záver slot.
-        const suggesterPromise = suggestIcdCodes(source, [], language, {
+        const suggesterPromise = suggestIcdCodes(source, language, {
           userId,
           visitId,
         });
 
-        await generateNote({
+        const sectionsPromise = generateNote({
           template,
           source,
           language,
@@ -183,18 +183,38 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        const suggestedIcdCodes = await suggesterPromise;
+        const [, suggestedIcdCodes] = await Promise.all([
+          sectionsPromise,
+          suggesterPromise,
+        ]);
 
-        // Inject Záver content from the suggester + emit synthetic event.
+        // Záver: suggester → format → critic (if enabled) → reconciler.
         const zaver = findZaverSection(template);
         if (zaver) {
-          const zaverContent = formatZaverFromSuggestions(suggestedIcdCodes);
-          sectionContentsMap[zaver.id] = zaverContent;
+          const draftZaver = formatZaverFromSuggestions(suggestedIcdCodes);
+          const finalZaver = draftZaver
+            ? await runCriticAndReconcilers({
+                draftContent: draftZaver,
+                source,
+                config: {
+                  id: zaver.id,
+                  title: zaver.title,
+                  context: zaver.context,
+                  model: "haiku",
+                  reconcilers: zaver.reconcilers,
+                  critic: zaver.critic,
+                },
+                language,
+                usage: { userId, visitId },
+              })
+            : draftZaver;
+
+          sectionContentsMap[zaver.id] = finalZaver;
           sendEvent({
             type: "section",
             id: zaver.id,
             title: zaver.title,
-            content: zaverContent,
+            content: finalZaver,
           });
         }
 
@@ -252,7 +272,6 @@ export async function POST(request: NextRequest) {
         sendEvent({
           type: "complete",
           generatedNote,
-          usedChunks: usedChunkIds,
           templateId: template.id,
           ...(clinicalAnalysis ? { clinicalAnalysis } : {}),
         });

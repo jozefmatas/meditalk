@@ -74,12 +74,12 @@ describe.skipIf(process.env.LIVE_LLM !== "1")(
         context: OA_CONTRACT,
       };
 
-      const laResult = await renderSection(source, la, [], "sk");
+      const laResult = await renderSection(source, la, "sk");
       console.log("\n================= LA section =================\n");
       console.log(laResult.content);
       console.log("\n==============================================\n");
 
-      const oaResult = await renderSection(source, oa, [laResult], "sk");
+      const oaResult = await renderSection(source, oa, "sk");
       console.log("\n================= OA section =================\n");
       console.log(oaResult.content);
       console.log("\n==============================================\n");

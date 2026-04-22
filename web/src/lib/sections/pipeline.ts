@@ -1,36 +1,40 @@
 /**
  * Section pipeline — the ONLY orchestrator for note generation.
  *
- * Walks the template tree in order. For each leaf section that has a
- * `context` contract, calls the generic section-agent with the raw source
- * and all previously-rendered sections as context. Streams each completed
- * section through `onSection` so the UI can display them as they finish.
+ * Per-section flow:
+ *   1. RENDER — section-agent (Haiku) reads raw source, uses
+ *      `section.context` as its prose contract. Draft streams to the
+ *      UI as soon as it finishes.
+ *   2. CRITIC (opt-in) — when `section.critic` is true, a second Haiku
+ *      call audits the draft against the raw source: removes invention,
+ *      adds missed facts, preserves the draft's voice. Runs in parallel
+ *      with the next section's render. Emits the corrected content via
+ *      `onSection` again — the UI replaces by id.
+ *   3. RECONCILERS — deterministic post-render helpers (drug-normalizer,
+ *      icd-validator) run after the critic (or after the draft, when
+ *      the critic is disabled).
  *
- * No fact extraction, no EncounterModel, no clinical-specific magic.
- * Clinical knowledge lives in each section's admin-editable `context`
- * string + the reconcilers the section opts into.
+ * Záver is NOT rendered in this loop — the generate/regenerate route
+ * pipes Záver from the ICD suggester through `runCriticAndReconcilers`
+ * below so it gets the same treatment.
  */
 import type { Template, TemplateSection } from "../templates/types";
 import type { SupportedLanguage } from "../types";
 import {
   renderSection,
+  isAbsenceDescription,
   type Language,
   type RawSource,
   type RenderedSection,
   type SectionConfig,
   type UsageContext,
 } from "./section-agent";
-import { preprocessSource } from "./source-preprocessor";
 import { buildSectionExamplesMap } from "../templates/reference-notes";
+import { normalizeLabel } from "../parse-note-sections";
+import { criticPass } from "./critic";
+import { RECONCILERS } from "./reconcilers";
 import { logger } from "@/lib/logger";
 
-/**
- * Záver is generated OUTSIDE the section-agent loop — fed directly from
- * the ICD suggester's output (see `format-zaver.ts` + generate route).
- * Any leaf whose labels match this set is skipped by the pipeline;
- * the route writes the formatted Záver content into `sectionContentsMap`
- * before rendering the HTML.
- */
 const ZAVER_LABELS = new Set([
   "zaver",
   "assessment",
@@ -39,30 +43,22 @@ const ZAVER_LABELS = new Set([
   "diagnostic assessment",
 ]);
 
-function normalizeLabel(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
 function isZaverSection(section: TemplateSection): boolean {
   return Object.values(section.labels ?? {}).some(
     (l) => typeof l === "string" && ZAVER_LABELS.has(normalizeLabel(l)),
   );
 }
 
-/**
- * Locate the Záver leaf on a template (if any). Returns `{ id, title }`
- * so the generate route can inject the formatted suggester output into
- * the right slot. Returns `null` when the template has no Záver-labelled
- * section (shouldn't happen for clinical templates, but tolerated).
- */
 export function findZaverSection(
   template: Template,
   language: Language = "sk",
-): { id: string; title: string } | null {
+): {
+  id: string;
+  title: string;
+  context: string;
+  reconcilers?: string[];
+  critic?: boolean;
+} | null {
   const walk = (sections: TemplateSection[]): TemplateSection | null => {
     for (const s of sections) {
       if (s.subsections?.length) {
@@ -76,7 +72,13 @@ export function findZaverSection(
   };
   const section = walk(template.sections);
   if (!section) return null;
-  return { id: section.id, title: resolveLabel(section, language) };
+  return {
+    id: section.id,
+    title: resolveLabel(section, language),
+    context: section.context ?? "",
+    reconcilers: section.reconcilers,
+    critic: section.critic,
+  };
 }
 
 export type OnSectionCallback = (
@@ -87,22 +89,24 @@ export interface GenerateNoteInput {
   template: Template;
   source: RawSource;
   language: SupportedLanguage;
-  /** Fired each time a section finishes rendering. */
+  /**
+   * Fired each time a section's state changes:
+   *   - FIRST call per section id: the raw draft (streaming).
+   *   - SECOND call per section id (optional): corrected critic output
+   *     + reconcilers. UI replaces by id. Fires only on
+   *     critic-enabled sections AND when the critic actually changed
+   *     the content.
+   */
   onSection?: OnSectionCallback;
-  /** Propagates `userId` / `visitId` so each section's Claude call is logged. */
+  /** Propagates `userId` / `visitId` so each Claude call is logged. */
   usage?: UsageContext;
 }
 
 export interface GenerateNoteResult {
-  /** Sections in render order (flattened; leaves only). */
+  /** Sections in render order (flattened; leaves only) — FINAL. */
   sections: RenderedSection[];
 }
 
-/**
- * Run the template end-to-end. Leaf sections with a non-empty `context`
- * are rendered in depth-first template order. Earlier sections are
- * passed to later ones as prior context for consistency / dedup.
- */
 export async function generateNote(
   input: GenerateNoteInput,
 ): Promise<GenerateNoteResult> {
@@ -111,18 +115,6 @@ export async function generateNote(
   const leaves = collectLeafSections(template.sections);
   const templateSystemPrompt = template.systemPrompt?.trim() || undefined;
 
-  // Pre-process once up-front. The result augments `.transcript` with a
-  // <STRUCTURED_FACTS> XML block so every section sees the same
-  // deterministically-extracted meds / vitals / EKG alongside the raw
-  // source. Fails safe on error — original source comes back.
-  const { source: annotatedSource, annotations } = preprocessSource(source);
-  logger.debug(
-    `[pipeline] preprocessor extracted ${annotations.medicationsFromOCR.length} OCR meds, ${annotations.medicationsFromTranscript.length} transcript meds, ${annotations.vitals.length} vitals, ${annotations.ekgReadings.length} EKG`,
-  );
-
-  // Build the per-section voice-examples map from the template's
-  // attached reference-note corpus. Empty map when no notes are attached
-  // — section-agent simply skips the block.
   const sectionExamplesMap = buildSectionExamplesMap(
     template.styleExamples,
     template,
@@ -133,14 +125,13 @@ export async function generateNote(
     );
   }
 
-  const rendered: RenderedSection[] = [];
+  const final = new Map<string, RenderedSection>();
+  const order: string[] = [];
+  const criticPromises: Array<Promise<void>> = [];
 
   for (const leaf of leaves) {
     const title = resolveLabel(leaf, language4);
 
-    // Záver is not rendered by the section-agent — the generate route
-    // writes the formatted suggester output into this slot after the
-    // loop finishes. Skip here to avoid double work + drift.
     if (isZaverSection(leaf)) {
       logger.debug(
         `[pipeline] skipping Záver section (${leaf.id}) — populated from ICD suggester`,
@@ -160,38 +151,186 @@ export async function generateNote(
       context,
       model: leaf.model ?? "haiku",
       reconcilers: leaf.reconcilers,
+      critic: leaf.critic,
     };
 
+    let draft: RenderedSection;
     try {
-      const result = await renderSection(
-        annotatedSource,
+      draft = await renderSection(
+        source,
         config,
-        rendered,
         language4,
         usage,
         templateSystemPrompt,
         sectionExamplesMap.get(leaf.id),
       );
-      rendered.push(result);
-      if (onSection) await onSection(result);
     } catch (err) {
       logger.error(`[pipeline] section ${leaf.id} failed:`, err);
-      const empty: RenderedSection = { id: leaf.id, title, content: "" };
-      rendered.push(empty);
-      if (onSection) await onSection(empty);
+      draft = { id: leaf.id, title, content: "" };
     }
+
+    // If no critic: run reconcilers immediately, then emit final.
+    if (!config.critic) {
+      const finalContent = applyReconcilers(
+        draft.content,
+        config.reconcilers,
+        source,
+        language4,
+      );
+      const result: RenderedSection = { ...draft, content: finalContent };
+      order.push(result.id);
+      final.set(result.id, result);
+      if (onSection) await onSection(result);
+      continue;
+    }
+
+    // Critic enabled: emit the draft right away so the UI streams,
+    // then run the critic in the background. When it finishes, run
+    // reconcilers on the critic output and emit the updated section.
+    order.push(draft.id);
+    final.set(draft.id, draft);
+    if (onSection) await onSection(draft);
+
+    const criticPromise = (async () => {
+      try {
+        const corrected = await runCriticAndReconcilers({
+          draftContent: draft.content,
+          source,
+          config,
+          language: language4,
+          usage,
+        });
+        if (corrected !== draft.content) {
+          const updated: RenderedSection = {
+            ...draft,
+            content: corrected,
+            draft: draft.content,
+          };
+          final.set(updated.id, updated);
+          if (onSection) await onSection(updated);
+        } else {
+          // No change — still apply reconcilers (critic doesn't, it's a
+          // different responsibility). But in the common case (critic
+          // returned unchanged AND reconcilers don't change either), the
+          // draft is the final. Apply reconcilers anyway for safety.
+          const finalContent = applyReconcilers(
+            draft.content,
+            config.reconcilers,
+            source,
+            language4,
+          );
+          if (finalContent !== draft.content) {
+            const updated: RenderedSection = {
+              ...draft,
+              content: finalContent,
+            };
+            final.set(updated.id, updated);
+            if (onSection) await onSection(updated);
+          }
+        }
+      } catch (err) {
+        logger.error(`[pipeline] critic (bg) failed for ${leaf.id}:`, err);
+        // On critic failure, still run reconcilers and emit so the UI
+        // isn't left with the raw draft when a deterministic fix could
+        // have applied.
+        try {
+          const finalContent = applyReconcilers(
+            draft.content,
+            config.reconcilers,
+            source,
+            language4,
+          );
+          if (finalContent !== draft.content) {
+            const updated: RenderedSection = {
+              ...draft,
+              content: finalContent,
+            };
+            final.set(updated.id, updated);
+            if (onSection) await onSection(updated);
+          }
+        } catch (err2) {
+          logger.error(
+            `[pipeline] reconciler fallback failed for ${leaf.id}:`,
+            err2,
+          );
+        }
+      }
+    })();
+    criticPromises.push(criticPromise);
   }
 
-  return { sections: rendered };
+  await Promise.all(criticPromises);
+
+  const sections = order
+    .map((id) => final.get(id))
+    .filter((s): s is RenderedSection => !!s);
+  return { sections };
 }
 
 /**
- * Depth-first flatten: pick sections with no children OR with children
- * but no further nested children (i.e. render only leaf-level content).
- * A section whose only role is to group children (no context AND has
- * subsections) emits nothing itself — the client renders the parent
- * heading using the template, and the children's text fills the rest.
+ * Run critic (if applicable) + reconcilers on a piece of section
+ * content. Exported for the route to use on the Záver slot (fed by the
+ * ICD suggester). Returns the final corrected content. Never throws —
+ * falls back to draft-plus-reconcilers on critic failure.
  */
+export async function runCriticAndReconcilers(args: {
+  draftContent: string;
+  source: RawSource;
+  config: SectionConfig;
+  language: Language;
+  usage?: UsageContext;
+}): Promise<string> {
+  const { draftContent, source, config, language, usage } = args;
+  if (!draftContent.trim()) return draftContent;
+
+  let content = draftContent;
+
+  if (config.critic) {
+    try {
+      const result = await criticPass({
+        draft: draftContent,
+        source,
+        sectionId: config.id,
+        sectionTitle: config.title,
+        sectionContext: config.context,
+        language,
+        usage,
+      });
+      if (result.changed) {
+        logger.debug(
+          `[pipeline] critic modified "${config.title}" — ${result.diffSummary}`,
+        );
+      }
+      content = result.content;
+    } catch (err) {
+      logger.error(`[pipeline] critic failed for "${config.title}":`, err);
+    }
+  }
+
+  // Safety net — strip absence-description leaks from the critic output
+  // (same guard the section-agent applies to its own draft).
+  if (isAbsenceDescription(content)) {
+    content = "";
+  }
+
+  return applyReconcilers(content, config.reconcilers, source, language);
+}
+
+function applyReconcilers(
+  content: string,
+  names: string[] | undefined,
+  source: RawSource,
+  language: Language,
+): string {
+  let out = content;
+  for (const name of names ?? []) {
+    const reconciler = RECONCILERS[name];
+    if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
+    out = reconciler(out, source, { language });
+  }
+  return out;
+}
+
 function collectLeafSections(sections: TemplateSection[]): TemplateSection[] {
   const out: TemplateSection[] = [];
   for (const s of sections) {
@@ -213,7 +352,6 @@ function resolveLabel(section: TemplateSection, language: Language): string {
   );
 }
 
-/** Supported languages in the new pipeline mirror the legacy list. */
 function normalizeLanguage(language: SupportedLanguage): Language {
   if (language === "sk" || language === "cs" || language === "en") {
     return language;

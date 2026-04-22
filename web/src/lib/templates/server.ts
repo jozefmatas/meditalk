@@ -13,7 +13,6 @@ function dbRowToTemplate(row: Record<string, unknown>): Template {
     systemPrompt: (row.system_prompt as string) ?? undefined,
     styleExamples:
       (row.style_examples as { name: string; text: string }[]) ?? undefined,
-    styleGuide: (row.style_guide as string) ?? undefined,
     specialties: (row.specialties as string[]) ?? undefined,
     locales: (row.locales as string[]) ?? undefined,
     isSystem: row.is_system as boolean,
