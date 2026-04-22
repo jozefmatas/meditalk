@@ -106,30 +106,10 @@ export async function POST(request: NextRequest) {
         context: f.context || undefined,
       }));
 
-    // Transcript: prefer metadata.transcript, fall back to legacy
-    // transcript_chunks for old encounters created before batch-only.
-    const cachedTranscript = getTranscript(visitMeta);
-    let transcriptText: string | undefined;
-
-    if (cachedTranscript) {
-      transcriptText = cachedTranscript;
-    } else {
-      const { data: chunks, error: chunksError } = await supabase
-        .from("transcript_chunks")
-        .select("id, content")
-        .eq("visit_id", visitId)
-        .order("chunk_index", { ascending: true });
-
-      if (chunksError) {
-        logger.error("Chunk fetch error:", chunksError);
-      }
-
-      const joined = (chunks ?? [])
-        .map((c) => c.content as string)
-        .join("\n\n")
-        .trim();
-      if (joined) transcriptText = joined;
-    }
+    // Transcript comes from the cached `metadata.transcript` column.
+    // (Legacy chunk-table fallback removed — nothing has written chunk
+    // rows since the batch-transcription flow landed.)
+    const transcriptText = getTranscript(visitMeta) ?? undefined;
 
     if (
       !transcriptText?.trim() &&

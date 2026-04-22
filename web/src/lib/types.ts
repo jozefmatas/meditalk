@@ -42,15 +42,6 @@ export interface EncounterChunk {
   created_at: string;
 }
 
-// Semantic search result (from match_chunks() RPC)
-export interface ChunkMatch {
-  id: string;
-  visit_id: string;
-  chunk_index: number;
-  content: string;
-  similarity: number;
-}
-
 // API request types
 export interface CreateEncounterRequest {
   title?: string;
@@ -75,10 +66,6 @@ export interface UpdateEncounterRequest {
 }
 
 // API response types
-export interface SearchResponse {
-  matches: ChunkMatch[];
-}
-
 export interface EncounterListResponse {
   encounters: Encounter[];
   total: number;

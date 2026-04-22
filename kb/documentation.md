@@ -335,7 +335,7 @@ All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` mer
 | `templates`         | User-defined templates with i18n, style guide, usage tracking                                                                                                                                                                               |
 | `api_usage`         | Per-call token/cost log; aggregated via SQL RPCs (`aggregate_usage_by_user`, `aggregate_usage_by_visit`, `get_dashboard_usage_totals`, `aggregate_usage_by_model`, `aggregate_usage_by_operation`) to avoid Supabase 1000-row default limit |
 | `audit_logs`        | User-action audit trail                                                                                                                                                                                                                     |
-| `transcript_chunks` | Legacy chunk + embedding store (deprecated)                                                                                                                                                                                                 |
+| `transcript_chunks` | Inert legacy chunk + embedding store. No application code reads or writes it; pgvector extension + table + `match_chunks` RPC remain available as primitives for future retrieval work                                                      |
 
 ### Storage:
 
@@ -416,9 +416,8 @@ Separate Next.js app at `admin/`:
 - `POST /api/regenerate` — regenerate with same or different template
 - `POST /api/batch-transcribe` — batch audio transcription
 
-### Search
+### Lookup
 
-- `GET /api/search` — encounter search (Cmd+K)
 - `GET /api/icd-search` — ICD-10 code search
 - `GET /api/icd-resolve` — resolve ICD codes
 - `GET /api/medication-search` — medication autocomplete

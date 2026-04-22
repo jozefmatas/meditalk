@@ -8,7 +8,6 @@ function openai() {
 }
 
 export const EMBEDDING_MODEL = "text-embedding-3-small";
-export const LEGACY_EMBEDDING_MODEL = "text-embedding-ada-002";
 
 /**
  * Generate a 1536-dim embedding for a single text.

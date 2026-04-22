@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
 import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
-import { embedText, LEGACY_EMBEDDING_MODEL } from "@/lib/openai";
 import { extractFileText } from "@/lib/extraction/extract-file";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import {
@@ -33,12 +32,6 @@ import {
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 800;
-
-const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
-  en: "Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up",
-  sk: "Symptómy pacienta, diagnóza, vyšetrenie, plán liečby, lieky, kontrola",
-  cs: "Symptomy pacienta, diagnóza, vyšetření, plán léčby, léky, kontrola",
-};
 
 export async function POST(request: NextRequest) {
   const t0 = Date.now();
@@ -444,44 +437,6 @@ export async function POST(request: NextRequest) {
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
-
-    // Legacy chunk-based encounters: when transcriptText is empty we
-    // fall back to semantic retrieval over transcript_chunks. Keeps
-    // regeneration working for encounters predating the batch-
-    // transcript flow. New encounters skip this entirely.
-    if (!transcriptText) {
-      const { count: chunkCount } = await supabase
-        .from("transcript_chunks")
-        .select("id", { count: "exact", head: true })
-        .eq("visit_id", visitId);
-
-      if (chunkCount && chunkCount > 0) {
-        try {
-          const queryEmbedding = await embedText(
-            RETRIEVAL_QUERY[language],
-            { userId, visitId },
-            LEGACY_EMBEDDING_MODEL,
-          );
-          const { data: matches, error: rpcError } = await supabase.rpc(
-            "match_chunks",
-            {
-              query_embedding: JSON.stringify(queryEmbedding),
-              match_count: 16,
-              p_visit_id: visitId,
-            },
-          );
-          if (rpcError) {
-            logger.error("match_chunks RPC error:", rpcError);
-          } else if (matches && matches.length > 0) {
-            transcriptText = matches
-              .map((m: { content: string }) => m.content)
-              .join("\n\n");
-          }
-        } catch (err) {
-          logger.warn("[generate] Legacy chunk retrieval failed:", err);
-        }
-      }
-    }
 
     const hasFileContent = fileTexts.length > 0;
     if (!transcriptText?.trim() && !doctorNotes?.trim() && !hasFileContent) {
