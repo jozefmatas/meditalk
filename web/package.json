@@ -16,6 +16,7 @@
     "lint": "eslint",
     "test": "vitest",
     "test:unit": "vitest --project unit",
+    "eval": "tsx scripts/run-evals.ts",
     "storybook": "storybook dev -p 8001",
     "build-storybook": "storybook build",
     "db:push": "supabase db push",
@@ -106,6 +107,7 @@
     "storybook": "^10.2.15",
     "supabase": "^2.78.0",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vite": "^7.3.2",
     "vitest": "^4.0.18"
