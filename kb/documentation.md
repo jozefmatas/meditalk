@@ -154,7 +154,7 @@ This is the core engine. For the full canonical reference, see [prompt-pipeline.
 ### Inputs gathered:
 
 - Transcript text (from recording)
-- Doctor notes (from `metadata.doctor_notes`, also scanned by the preprocessor)
+- Doctor notes (from `metadata.doctor_notes`)
 - Extracted file texts (from uploaded images/PDFs/audio) with optional per-file `context` (the upload dialog's "focus on …" input)
 
 ### Pipeline stages:
@@ -162,23 +162,23 @@ This is the core engine. For the full canonical reference, see [prompt-pipeline.
 | Stage                                         | Engine                     | Purpose                                                                                                                                                                                                               |
 | --------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Stage 1** — PHI Scrub                       | Pure TypeScript            | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                      |
-| **Stage 2** — Structured-facts preprocessor   | Pure TypeScript            | Regex scan of every source carrier (transcript + doctorNotes + files[]) — extracts OCR med blocks, vital lines, EKG readings, loose HR, transcript brand mentions. Emits `<STRUCTURED_FACTS>` XML the agents see.     |
-| **Stage 3a** — ICD suggester                  | Claude Haiku               | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §3b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                              |
-| **Stage 3b** — Section-agent loop             | Claude (Haiku by default)  | Walks template leaves in order, skipping the Záver leaf (fed by 3a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.          |
-| **Stage 3c** — Reconcilers                    | Pure TypeScript            | Post-render transforms per section: `drug-normalizer` (alias map + fuzzy), `icd-validator` (canonical swap + CM rejection).                                                                                            |
-| **Stage 4** — Format Záver from suggester    | Pure TypeScript            | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Injected into the Záver slot before HTML build.                          |
-| **Stage 5** — HTML assembly                   | Pure TypeScript            | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                            |
+| **Stage 2a** — ICD suggester                  | Claude Haiku               | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §2b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                              |
+| **Stage 2b** — Section-agent loop             | Claude (Haiku by default)  | Walks template leaves in order, skipping the Záver leaf (fed by 2a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.          |
+| **Stage 2c** — Critic pass (opt-in)           | Claude Haiku               | For sections with `critic: true` (HPI/TO, OA, Záver), a second Haiku call audits the draft against the source: removes invention, adds missed facts, preserves voice. Runs in parallel in the background; emits an update via `onSection`. |
+| **Stage 2d** — Reconcilers                    | Pure TypeScript            | Post-critic transforms per section: `drug-normalizer` (alias map + fuzzy match against medication CSV), `icd-validator` (canonical swap + CM rejection + duplicate-parenthetical guard).                               |
+| **Stage 3** — Záver injection                 | Pure TS + Haiku            | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Passed through the critic (if enabled on Záver) + `icd-validator` reconciler. |
+| **Stage 4** — HTML assembly                   | Pure TypeScript            | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                            |
 
-Clinical knowledge lives in four places: `template.styleExamples` (reference-notes corpus, few-shot), `template.systemPrompt` (template-wide worldview), `section.context` (per-section contract), and the named reconcilers.
+Clinical knowledge lives in three places: `template.styleExamples` (reference-notes corpus, few-shot), `template.systemPrompt` (template-wide worldview), and `section.context` (per-section contract — also fed verbatim to the critic pass). Per-section flags on the template: `model`, `critic`, `reconcilers`.
 
 ### Streaming Protocol (SSE events):
 
-| Event             | When                                                                           |
-| ----------------- | ------------------------------------------------------------------------------ |
-| `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                   |
-| `section`         | Each time a section completes. Synthetic Záver event fires after suggester.    |
-| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes` |
-| `error`           | On failure                                                                     |
+| Event             | When                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                                                                   |
+| `section`         | Each time a section's state changes. First emit = raw draft; second emit (for critic-enabled sections) = corrected text. UI replaces by id. |
+| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes`                                             |
+| `error`           | On failure                                                                                                                     |
 
 ### Persistence:
 
@@ -190,11 +190,11 @@ Clinical knowledge lives in four places: `template.styleExamples` (reference-not
 - [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — main generation endpoint (orchestrates all stages above)
 - [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts) — regeneration endpoint (same pipeline from cached source)
 - [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
-- [web/src/lib/sections/source-preprocessor.ts](../web/src/lib/sections/source-preprocessor.ts) — structured-facts extraction
 - [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
 - [web/src/lib/sections/format-zaver.ts](../web/src/lib/sections/format-zaver.ts) — suggester → Záver formatter
-- [web/src/lib/sections/pipeline.ts](../web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection`)
-- [web/src/lib/sections/section-agent.ts](../web/src/lib/sections/section-agent.ts) — generic section-agent (injects `# Voice examples` block)
+- [web/src/lib/sections/pipeline.ts](../web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection` + `runCriticAndReconcilers`)
+- [web/src/lib/sections/section-agent.ts](../web/src/lib/sections/section-agent.ts) — `renderSection` (injects `# Voice examples` block, includes `isAbsenceDescription` safety net)
+- [web/src/lib/sections/critic.ts](../web/src/lib/sections/critic.ts) — `criticPass` (opt-in per section, audits draft against source)
 - [web/src/lib/sections/reconcilers/index.ts](../web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
 - [web/src/lib/templates/reference-notes.ts](../web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
 - [web/src/lib/templates/html.ts](../web/src/lib/templates/html.ts) — `buildTemplateHtml`

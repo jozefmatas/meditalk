@@ -1,13 +1,11 @@
 /**
- * ICD-10 suggestion pass — runs ONCE after the note is fully generated.
+ * ICD-10 suggestion pass — runs ONCE per generation.
  *
- * Separate from the `icd-validator` reconciler (which hard-filters the
- * Záver section inline). This pass widens the net: ask Haiku for 10–15
- * candidate codes for the whole encounter, including ones that didn't
- * make the primary Záver but are plausibly in scope (e.g. every chronic
- * condition in OA, every surgery as a `Z87.x`, every imaging finding
- * that warrants a code). The doctor picks which ones to include from
- * the right-side ICD panel.
+ * Produces 10–15 candidate codes for the encounter based on the raw
+ * source. Output feeds BOTH the right-side "Navrhované kódy" panel
+ * AND the Záver section (via `formatZaverFromSuggestions`), which
+ * then goes through the per-section critic + icd-validator reconciler
+ * for correction.
  *
  * Returns codes in WHO Slovak format. Validates every code against the
  * Slovak CSV before shipping — unknown codes are dropped.
@@ -16,7 +14,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
 import { getIcdDescription } from "../lookup/icd";
 import { logger } from "../logger";
-import type { Language, RawSource, RenderedSection } from "./section-agent";
+import type { Language, RawSource } from "./section-agent";
 
 export interface SuggestedIcdCode {
   code: string;
@@ -54,18 +52,9 @@ const LANGUAGE_LABEL: Record<Language, string> = {
  */
 export async function suggestIcdCodes(
   source: RawSource,
-  sections: RenderedSection[],
   language: Language = "sk",
   usage?: UsageContext,
 ): Promise<SuggestedIcdCode[]> {
-  const hasSections = sections.some((s) => s.content.trim());
-  const noteDump = hasSections
-    ? sections
-        .filter((s) => s.content.trim())
-        .map((s) => `## ${s.title}\n${s.content.trim()}`)
-        .join("\n\n")
-    : "";
-
   const sourceDump = [
     source.transcript ? `# Transcript\n${source.transcript.trim()}` : "",
     source.doctorNotes ? `# Doctor notes\n${source.doctorNotes.trim()}` : "",
@@ -74,7 +63,16 @@ export async function suggestIcdCodes(
     .filter(Boolean)
     .join("\n\n");
 
-  const systemPrompt = `You are an ICD-10 coding assistant for a ${LANGUAGE_LABEL[language]}-language clinical note. Propose 10–15 candidate ICD-10 codes the physician may want to attach to this encounter. Your output ALSO feeds the Záver section — so the primary and its differential (if any) need to be correct.
+  const systemPrompt = `You are an ICD-10 coding assistant for a ${LANGUAGE_LABEL[language]}-language clinical note. Propose 10–15 candidate ICD-10 codes the physician may want to attach to this encounter. Your output ALSO feeds the Záver section — the primary and any differential need to be correct.
+
+# Anatomy, severity, subtype, etiology — specificity matters
+The source's exact wording drives the code. Common traps to avoid:
+- "mitrálna regurgitácia" → I34.x (mitral). NEVER I35.x (aortic).
+- "paroxyzmálna fibrilácia predsiení" → I48.0 (paroxysmal). NEVER I48.1 (persistent).
+- "AV blok 1. stupňa" → I44.0 (first degree). NEVER I44.1 (second degree).
+- "st.p. strumektómii, na terapii Euthyroxom" → E89.0 (post-surgical hypothyroidism). NEVER E03.2 (drug-induced).
+- "st.p. operácii katarakty" → Z96.1 or omit. NEVER H26.9 (active cataract).
+If the source denies or negates a finding, do NOT emit a code for it.
 
 # Scope
 Include candidates for:
@@ -82,7 +80,7 @@ Include candidates for:
 - Every chronic comorbidity documented in OA / the patient's history.
 - Every surgery / procedure in the patient's history ("stav po …") with its Z87.x code.
 - Explicit new diagnoses made in THIS encounter (e.g. novodiagnostikované SZpEF).
-- Notable imaging or lab findings ONLY when the clinician wrote them as a diagnosis in the source.
+- Notable imaging or lab findings ONLY when the clinician wrote them as a diagnosis.
 
 # Primary + differential
 - The FIRST code is the primary diagnosis driving this encounter. Order matters.
@@ -110,13 +108,11 @@ Return ONLY valid JSON, no prose. Shape:
 }
 \`\`\`
 - Order by clinical relevance: primary first, chronic comorbidities next, states-post last.
-- Confidence: "high" = explicitly diagnosed in source; "medium" = strongly implied; "low" = plausible but less certain.
+- Confidence: "high" = explicitly diagnosed; "medium" = strongly implied; "low" = plausible but less certain.
 - 10–15 codes total. If the encounter is genuinely simple, fewer is fine.
 - Omit \`differential\` unless the primary is a symptom code.`;
 
-  const userMessage = hasSections
-    ? `# Generated note\n${noteDump}\n\n# Raw source\n${sourceDump}`
-    : `# Raw source\n${sourceDump}`;
+  const userMessage = `# Raw source\n${sourceDump}`;
 
   try {
     const response = await client().messages.create({

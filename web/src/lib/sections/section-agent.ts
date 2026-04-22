@@ -1,22 +1,15 @@
 /**
- * Generic section agent — the ONLY code path for note generation in the
- * new architecture.
+ * Generic section agent — renders ONE section of a clinical note.
  *
- * Renders ONE section of a clinical note. Takes raw source (transcript +
- * doctor notes + OCR files) + section config + already-rendered sections,
- * calls the configured Claude model with the section's `context` as the
- * clinical contract, then pipes the output through any named reconcilers.
- *
- * Clinical knowledge lives in two places only:
- *   1. The section's `context` string (editable per template / per admin).
- *   2. The named reconcilers in `./reconcilers` (small pure-TS helpers).
- *
- * No fact extraction, no EncounterModel, no deterministic section
- * renderers, no specialty pack. Each section reads raw source itself.
+ * Reads the raw source (transcript + doctor notes + OCR files) and
+ * produces the section text per the admin-editable `section.context`
+ * contract. A separate cleanup pass (see `cleanup.ts`) runs after this
+ * generation, grounded on the verified fact list, to remove invented
+ * content and add missed facts. Reconcilers (drug-normalizer,
+ * icd-validator) run after cleanup, not here.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
-import { RECONCILERS, type ReconcilerName } from "./reconcilers";
 
 export type { UsageContext } from "../usage";
 
@@ -41,14 +34,30 @@ export interface SectionConfig {
   context: string;
   /** Model tier for this section. */
   model: "haiku" | "sonnet" | "opus";
-  /** Ordered names of reconcilers to apply after the LLM render. */
-  reconcilers?: ReconcilerName[];
+  /**
+   * Ordered names of reconcilers to apply after the optional critic pass.
+   * See `./reconcilers/index.ts`. Examples: `["drug-normalizer"]`,
+   * `["icd-validator"]`.
+   */
+  reconcilers?: string[];
+  /**
+   * When true, a second Haiku call audits this section's draft against
+   * the source before reconcilers run. Enable on narrative / clinical-
+   * judgment sections only (HPI/TO, Záver, OA). Defaults to false.
+   */
+  critic?: boolean;
 }
 
 export interface RenderedSection {
   id: string;
   title: string;
   content: string;
+  /**
+   * The author's pre-critic draft. Populated only when the critic pass
+   * actually modified the content — gives us a diff record for
+   * debugging and eval-set construction.
+   */
+  draft?: string;
 }
 
 export type Language = "sk" | "cs" | "en";
@@ -74,7 +83,6 @@ const LANGUAGE_LABEL: Record<Language, string> = {
 export async function renderSection(
   source: RawSource,
   section: SectionConfig,
-  priorSections: RenderedSection[],
   language: Language = "sk",
   usage?: UsageContext,
   templateSystemPrompt?: string,
@@ -82,7 +90,6 @@ export async function renderSection(
 ): Promise<RenderedSection> {
   const systemPrompt = buildSystemPrompt(
     section,
-    priorSections,
     language,
     templateSystemPrompt,
     sectionExamples,
@@ -128,18 +135,11 @@ export async function renderSection(
     content = "";
   }
 
-  for (const name of section.reconcilers ?? []) {
-    const reconciler = RECONCILERS[name];
-    if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
-    content = reconciler(content, source, { language });
-  }
-
   return { id: section.id, title: section.title, content };
 }
 
 function buildSystemPrompt(
   section: SectionConfig,
-  _priorSections: RenderedSection[],
   language: Language,
   templateSystemPrompt?: string,
   sectionExamples?: string[],
@@ -171,7 +171,7 @@ function buildSystemPrompt(
   //   4. Section contract — OWNS / NEVER OWNS / FORMAT / LIMITS / WHEN
   //      EMPTY. Section-specific.
   return `# Role
-You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation.
+You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation. A separate verification pass will double-check your output against a verified fact list; focus on faithful transformation, not defensive omission.
 
 # Core rules (absolute)
 1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
@@ -219,6 +219,31 @@ export function isAbsenceDescription(text: string): boolean {
   // response with "<!-- BMI Section -->" or similar before the absence prose.
   const t = text.replace(/<!--[\s\S]*?-->/g, "").trim();
   if (t.length === 0) return true;
+
+  // Cleanup-pass specific leaks: the model writes an explanation of
+  // why the section should be empty instead of returning literal empty.
+  // Match early before the length check — these essays can exceed 600
+  // chars. We inspect the FIRST LINE and first 200 characters, because
+  // the failure mode is "a placeholder line ('(empty — zero chars)' /
+  // 'ZERO CHARACTERS') followed by prose explanation" OR "prose
+  // starting with 'The current output…'".
+  const firstLine = (t.split("\n")[0] ?? "").trim();
+  const head = t.slice(0, 200);
+
+  if (/^\(?\s*(empty|zero\s+characters?)\b/i.test(firstLine)) return true;
+  if (/^zero\s+characters?$/i.test(firstLine)) return true;
+  if (/^\([^()]*\bempty\b[^()]*\bzero\b[^()]*\)/i.test(firstLine)) return true;
+
+  // Meta-commentary essays — the model prefaces or replaces output
+  // with an explanation of what belongs in the section.
+  if (
+    /^(the\s+current\s+output|per\s+the\s+section\s+contract|the\s+phrase\s+["']|after\s+review,?\s+the)/i.test(
+      head,
+    )
+  ) {
+    return true;
+  }
+
   // Raised cap: EA leaks have produced 400+ char "reasoning essays" about
   // why the section is empty — we still want those caught.
   if (t.length > 600) return false;

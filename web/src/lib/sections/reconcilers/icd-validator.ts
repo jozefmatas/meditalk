@@ -89,6 +89,20 @@ function splitTrailingParen(tail: string): { body: string; paren: string } {
   };
 }
 
+/**
+ * Some CSV descriptions already end with the same parenthetical the
+ * caller is preserving — e.g. `D47.2` canonical is "Monoklonová
+ * gamapatia nejasného významu (MGUS)", and the section text also ends
+ * with "(MGUS)". Concatenating both yields "… (MGUS) (MGUS)". Drop the
+ * author-preserved paren when the canonical already carries the same
+ * text (case-insensitive, whitespace-collapsed comparison).
+ */
+function parenIsRedundant(canonical: string, paren: string): boolean {
+  if (!paren) return false;
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  return norm(canonical).endsWith(norm(paren));
+}
+
 /** Strip leading bullet / punctuation so we emit clean entries. */
 function stripLeadingPunct(s: string): string {
   return s.replace(/^[\s,;.•*\-]+/, "");
@@ -115,7 +129,8 @@ export const icdValidator: Reconciler = (text, _source, ctx) => {
     const canonical = getIcdDescription(normalized, locale);
 
     if (canonical) {
-      rebuilt.push(`${normalized} ${canonical}${paren}`);
+      const safeParen = parenIsRedundant(canonical, paren) ? "" : paren;
+      rebuilt.push(`${normalized} ${canonical}${safeParen}`);
       continue;
     }
 
@@ -142,7 +157,8 @@ export const icdValidator: Reconciler = (text, _source, ctx) => {
       logger.info(
         `[icd-validator] downgrade ${normalized} → ${rootCode} (${locale})`,
       );
-      rebuilt.push(`${rootCode} ${rootCanonical}${paren}`);
+      const safeParen = parenIsRedundant(rootCanonical, paren) ? "" : paren;
+      rebuilt.push(`${rootCode} ${rootCanonical}${safeParen}`);
       continue;
     }
 

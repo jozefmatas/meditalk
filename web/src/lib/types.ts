@@ -79,34 +79,6 @@ export interface SearchResponse {
   matches: ChunkMatch[];
 }
 
-export interface GenerateResponse {
-  generatedNote: string;
-  suggestedTitle?: string;
-  usedChunks: string[];
-  templateId: string;
-  /** Clinical analysis results from Pass 1 */
-  clinicalAnalysis?: {
-    inferredSpecialty: string;
-    secondarySpecialty?: string;
-    candidateIcdCodes: Array<{
-      code: string;
-      description: string;
-      confidence: string;
-    }>;
-    matchedConcepts: Array<{
-      conceptId: string;
-      canonicalName: string;
-      confidence: string;
-    }>;
-    problemClusters: Array<{
-      label: string;
-      conceptIds: string[];
-    }>;
-  };
-  /** @deprecated Use generatedNote instead */
-  soap?: string;
-}
-
 export interface EncounterListResponse {
   encounters: Encounter[];
   total: number;

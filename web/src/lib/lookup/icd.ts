@@ -7,42 +7,9 @@ export interface IcdEntry {
   code: string;
 }
 
-/** Minimal shape returned by ICD search / resolve helpers. */
-export interface CandidateIcdCode {
-  code: string;
-  description: string;
-  confidence: "high" | "medium" | "low";
-  sourceConceptIds: string[];
-}
-
 interface IcdIndex {
   byCode: Map<string, string>;
   byCategory: Map<string, IcdEntry[]>;
-  /**
-   * Reverse lookup: normalized description → ICD entry. Lets the
-   * diagnosis resolver translate a Slovak/Czech fact value like
-   * "Esenciálna artériová hypertenzia" directly to its code (I10)
-   * without going through Sonnet.
-   */
-  byDescriptionNorm: Map<string, IcdEntry>;
-}
-
-/**
- * Normalize an ICD description or diagnosis value for reverse lookup:
- *  - Unicode NFKD + strip combining marks (so "á" == "a")
- *  - Lowercase
- *  - Collapse non-alphanumerics to a single space
- *  - Trim
- * Same shape as `normalizeForMatch` in fact-validator but intentionally
- * duplicated here to keep icd-index dependency-free.
- */
-export function normalizeIcdDescription(input: string): string {
-  return input
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
 }
 
 /** Per-locale cache */
@@ -135,7 +102,6 @@ function loadIndex(locale = "en"): IcdIndex {
   const raw = readFileSync(csvPath, "utf-8");
   const byCode = new Map<string, string>();
   const byCategory = new Map<string, IcdEntry[]>();
-  const byDescriptionNorm = new Map<string, IcdEntry>();
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -160,80 +126,13 @@ function loadIndex(locale = "en"): IcdIndex {
     // Index by 3-character category prefix (strip dot for consistency)
     const category = code.replace(".", "").substring(0, 3);
     const arr = byCategory.get(category) || [];
-    const entry: IcdEntry = { code, description: descRaw };
-    arr.push(entry);
+    arr.push({ code, description: descRaw });
     byCategory.set(category, arr);
-
-    // Reverse description lookup — first code with a given normalized
-    // description wins. Shorter descriptions are usually more canonical,
-    // so if a later row repeats the key, we keep the earlier (usually
-    // the category-level) entry.
-    const descKey = normalizeIcdDescription(descRaw);
-    if (descKey && !byDescriptionNorm.has(descKey)) {
-      byDescriptionNorm.set(descKey, entry);
-    }
   }
 
-  const index = { byCode, byCategory, byDescriptionNorm };
+  const index = { byCode, byCategory };
   _cache.set(locale, index);
   return index;
-}
-
-/**
- * Look up an ICD entry by its exact (normalized) description.
- * Returns `null` when no exact match exists.
- */
-export function lookupIcdByDescription(
-  description: string,
-  locale = "en",
-): IcdEntry | null {
-  if (!description) return null;
-  const { byDescriptionNorm } = loadIndex(locale);
-  const key = normalizeIcdDescription(description);
-  return byDescriptionNorm.get(key) ?? null;
-}
-
-/**
- * Diacritic-insensitive ICD search. Iterates every indexed entry and
- * returns those whose normalized description contains the given
- * normalized substring. Used by the deterministic diagnosis resolver
- * because the default `searchIcd` preserves diacritics and would miss
- * "transmuralny" against a CSV entry of "transmurálny".
- *
- * Limit defaults to 10 — the caller applies token-overlap scoring to
- * pick the best hit.
- */
-export function searchIcdNormalized(
-  normalizedQuery: string,
-  locale = "en",
-  limit = 10,
-): IcdEntry[] {
-  if (!normalizedQuery) return [];
-  const { byDescriptionNorm } = loadIndex(locale);
-  const hits: IcdEntry[] = [];
-  for (const [normDesc, entry] of byDescriptionNorm) {
-    if (normDesc.includes(normalizedQuery)) {
-      hits.push(entry);
-      if (hits.length >= limit) break;
-    }
-  }
-  return hits;
-}
-
-/** Get all ICD entries under a 3-char category (e.g. "I10" → all I10.x codes) */
-export function getEntriesByCategory(
-  category: string,
-  locale = "en",
-): IcdEntry[] {
-  const { byCategory } = loadIndex(locale);
-  const key = category.replace(".", "").substring(0, 3);
-  return byCategory.get(key) || [];
-}
-
-/** Validate a specific ICD code exists */
-export function isValidIcdCode(code: string, locale = "en"): boolean {
-  const { byCode } = loadIndex(locale);
-  return byCode.has(code);
 }
 
 /** Get the description for a specific code */
@@ -375,103 +274,4 @@ export function resolveIcdCodes(
       found: result.found,
     };
   });
-}
-
-/**
- * Post-process generated text to replace LLM-written ICD descriptions
- * with canonical descriptions from the ICD-10 CSV.
- *
- * Only replaces descriptions when:
- * 1. The code appears at the start of a line or bullet point (standard output format)
- * 2. The code exists in our ICD-10 database
- *
- * This prevents hallucinated, paraphrased, or combined ICD descriptions.
- */
-export function validateIcdDescriptions(text: string, locale = "en"): string {
-  if (!text) return text;
-
-  // Match ICD codes in bullet/list format as instructed by our prompt:
-  //   "- I21.0 Description text"
-  //   "I10 Description text" (at start of line)
-  // The code must be followed by at least one space and description text.
-  return text.replace(
-    /^(\s*[-•*]?\s*)([A-Z]\d{2}(?:\.\d{1,4})?)\s+([^\n]+)/gm,
-    (match, bullet: string, code: string) => {
-      const results = resolveIcdCodes([code], locale);
-      if (results.length > 0 && results[0].found) {
-        return `${bullet}${results[0].code} ${results[0].description}`;
-      }
-      return match;
-    },
-  );
-}
-
-/**
- * Extract ICD-10 codes that actually appear in the generated report sections.
- *
- * Reuses the same line-anchored regex as `validateIcdDescriptions()` — codes must
- * appear at the start of a line (optionally after a bullet marker) followed by a
- * description, matching the format our generation prompt enforces.
- *
- * Resolves every matched code through the CSV for the given locale, drops codes
- * that don't exist, and deduplicates by canonical code (first appearance wins)
- * so `I210` and `I21.0` collapse into a single entry.
- *
- * IMPORTANT: must be called AFTER `validateIcdDescriptions()` so the descriptions
- * passed on to the sidebar are canonical CSV text.
- */
-export function extractIcdCodesFromSections(
-  sectionContents: Record<string, string>,
-  locale = "en",
-): CandidateIcdCode[] {
-  const seen = new Set<string>();
-  const extracted: CandidateIcdCode[] = [];
-  const regex = /^(\s*[-•*]?\s*)([A-Z]\d{2}(?:\.\d{1,4})?)\s+([^\n]+)/gm;
-
-  for (const text of Object.values(sectionContents)) {
-    if (!text) continue;
-    // `matchAll` on a /g regex yields every match without manual exec loops
-    for (const match of text.matchAll(regex)) {
-      const rawCode = match[2];
-      const [resolved] = resolveIcdCodes([rawCode], locale);
-      if (!resolved || !resolved.found) continue;
-      if (seen.has(resolved.code)) continue;
-      seen.add(resolved.code);
-      extracted.push({
-        code: resolved.code,
-        description: resolved.description,
-        confidence: "high",
-        sourceConceptIds: [],
-      });
-    }
-  }
-
-  return extracted;
-}
-
-/**
- * Build a compact ICD reference string for the LLM prompt.
- * Only includes categories from the given hints, limited per category.
- */
-export function buildIcdReferenceForConcepts(
-  categoryHints: string[],
-  maxPerCategory = 10,
-  locale = "en",
-): string {
-  const lines: string[] = [];
-  const seen = new Set<string>();
-
-  for (const hint of categoryHints) {
-    const entries = getEntriesByCategory(hint, locale);
-    let count = 0;
-    for (const entry of entries) {
-      if (seen.has(entry.code)) continue;
-      seen.add(entry.code);
-      lines.push(`${entry.code}: ${entry.description}`);
-      count++;
-      if (count >= maxPerCategory) break;
-    }
-  }
-
-  return lines.join("\n");
 }

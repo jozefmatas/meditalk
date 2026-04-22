@@ -36,14 +36,13 @@ describe.skipIf(process.env.LIVE_LLM !== "1")(
     };
 
     it("baseline (no worldview) vs with-worldview produce different outputs", async () => {
-      const baseline = await renderSection(source, config, [], "sk");
+      const baseline = await renderSection(source, config, "sk");
 
       const worldview = `CRITICAL FORMATTING RULE: Prefix every diagnosis with "DX:" (e.g. "DX: Hypertenzia, DX: Fibrilácia…"). This must appear on every item.`;
 
       const withWorldview = await renderSection(
         source,
         config,
-        [],
         "sk",
         undefined,
         worldview,

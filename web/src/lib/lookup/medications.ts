@@ -99,30 +99,10 @@ function loadIndex(locale = "en"): MedicationIndex {
   return index;
 }
 
-/** Get all medications with a specific active ingredient */
-export function getMedicationsByActiveIngredient(
-  activeIngredient: string,
-  locale = "en",
-): MedicationEntry[] {
-  const { byActiveIngredient } = loadIndex(locale);
-  const key = activeIngredient.toLowerCase();
-  return byActiveIngredient.get(key) || [];
-}
-
 /** Validate a specific medication name exists */
 export function isValidMedication(name: string, locale = "en"): boolean {
   const { byName } = loadIndex(locale);
   return byName.has(name.toLowerCase());
-}
-
-/** Get the active ingredient for a specific medication */
-export function getMedicationActiveIngredient(
-  name: string,
-  locale = "en",
-): string | undefined {
-  const { byName } = loadIndex(locale);
-  const entry = byName.get(name.toLowerCase());
-  return entry?.activeIngredient;
 }
 
 /**
@@ -248,7 +228,7 @@ function levenshtein(a: string, b: string): number {
  * Returns matches sorted by similarity (highest first), only above the
  * threshold (default 0.65 — allows ~35% of the name to differ).
  */
-export function fuzzySearchMedications(
+function fuzzySearchMedications(
   query: string,
   limit = 3,
   locale = "en",
@@ -286,57 +266,17 @@ export function fuzzySearchMedications(
 }
 
 /**
- * Attempt to correct a misspelled medication name using fuzzy matching.
- * Returns the best match if similarity >= 0.7, otherwise null.
- *
- * Used by fact validation to auto-correct transcription errors like
- * "Koprenesa 5 mg/25 mg" → "Co-Prenessa 4 mg /1,25 mg".
- */
-export function correctMedicationName(
-  name: string,
-  locale = "en",
-): { correctedName: string; entry: MedicationEntry } | null {
-  // First try exact match — no correction needed
-  if (isValidMedication(name, locale)) return null;
-
-  // Try substring match first (cheaper)
-  const substringMatches = searchMedications(name, 1, locale);
-  if (substringMatches.length > 0) {
-    return {
-      correctedName: substringMatches[0].name,
-      entry: substringMatches[0],
-    };
-  }
-
-  // Fuzzy match with higher threshold (0.7) for auto-correction
-  const fuzzyMatches = fuzzySearchMedications(name, 1, locale, 0.7);
-  if (fuzzyMatches.length > 0) {
-    return {
-      correctedName: fuzzyMatches[0].name,
-      entry: fuzzyMatches[0],
-    };
-  }
-
-  return null;
-}
-
-/**
  * Correct a misspelled medication BASE name only — never returns the full
- * CSV product name with dosage. This is the safe alternative to
- * `correctMedicationName()` that prevents dosage fabrication.
+ * CSV product name with dosage. The caller preserves the original
+ * dosage/frequency from the agent output.
  *
  * "Koprenesa" → { correctedBaseName: "Co-Prenessa", entry: ... }
  * "Rytmonorm" → null (already valid)
- *
- * Unlike `correctMedicationName()` which returns "Co-Prenessa 4 mg /1,25 mg",
- * this returns only "Co-Prenessa" — the caller preserves the original
- * dosage/frequency from the fact value.
  */
 export function correctMedicationBaseName(
   name: string,
   locale = "en",
 ): { correctedBaseName: string; entry: MedicationEntry } | null {
-  // Check if the base name itself is already a valid medication base name
   const normalizedName = name.trim();
   if (!normalizedName) return null;
 
@@ -366,49 +306,4 @@ export function correctMedicationBaseName(
   }
 
   return null;
-}
-
-/**
- * Resolve multiple medication names to their active ingredients in bulk.
- * Returns found status for each medication.
- */
-export function resolveMedications(
-  names: string[],
-  locale = "en",
-): Array<MedicationEntry & { found: boolean }> {
-  const { byName } = loadIndex(locale);
-  return names.map((inputName) => {
-    const entry = byName.get(inputName.toLowerCase());
-    if (entry) {
-      return { ...entry, found: true };
-    }
-    return { name: inputName, activeIngredient: "", found: false };
-  });
-}
-
-/**
- * Build a compact medication reference string for the LLM prompt.
- * Returns a sample of medications for common conditions/active ingredients.
- */
-export function buildMedicationReferenceForConcepts(
-  activeIngredientHints: string[],
-  maxPerIngredient = 5,
-  locale = "en",
-): string {
-  const lines: string[] = [];
-  const seen = new Set<string>();
-
-  for (const hint of activeIngredientHints) {
-    const medications = getMedicationsByActiveIngredient(hint, locale);
-    let count = 0;
-    for (const med of medications) {
-      if (seen.has(med.name.toLowerCase())) continue;
-      seen.add(med.name.toLowerCase());
-      lines.push(`${med.name} (${med.activeIngredient})`);
-      count++;
-      if (count >= maxPerIngredient) break;
-    }
-  }
-
-  return lines.join("\n");
 }

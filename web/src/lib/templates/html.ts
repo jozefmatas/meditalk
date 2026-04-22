@@ -1,7 +1,5 @@
 import type { Template, TemplateSection } from "./types";
-
-/** Values the AI uses for sections with no relevant information. */
-const NOT_STATED = new Set(["Not stated", "Neuvedené", "Neuvedeno"]);
+import { NOT_STATED_VALUES as NOT_STATED } from "../parse-note-sections";
 
 interface BuildOptions {
   /** When true, sections with empty or "Not stated" content are omitted. */

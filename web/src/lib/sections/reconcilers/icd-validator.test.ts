@@ -27,6 +27,17 @@ describe("icd-validator", () => {
     expect(count).toBe(1);
   });
 
+  it("does NOT duplicate a parenthetical the CSV canonical already carries (MGUS)", () => {
+    // D47.2 canonical is "Monoklonová gamapatia nejasného významu (MGUS)".
+    // The input also ends with "(MGUS)" because the suggester included it.
+    // Without the parenIsRedundant guard we'd emit "… (MGUS) (MGUS)".
+    const input = "D47.2 Monoklonová gamapatia nejasného významu (MGUS)";
+    const out = icdValidator(input, src, ctx);
+    const count = (out.match(/\(MGUS\)/g) ?? []).length;
+    expect(count).toBe(1);
+    expect(out).toContain("D47.2");
+  });
+
   it("replaces an agent-paraphrased description with the CSV canonical", () => {
     const input = "I10 Esenciálna hypertenzia stupňa 3";
     const out = icdValidator(input, src, ctx);
