@@ -369,6 +369,8 @@ started → recording → processing → to_review → completed/archived
 - [web/src/i18n/request.ts](web/src/i18n/request.ts) — message loading
 - `web/messages/{sk,cs,en}.json` — UI translations
 
+**Adding a new locale (de/fr/pl/…) or specialty (neurology/psychiatry/internal)** — see the dedicated [**"Adding a new locale or specialty"**](prompt-pipeline.md#adding-a-new-locale-or-specialty--what-to-touch) section in `prompt-pipeline.md`. It maps every locale- or specialty-coupled surface in the codebase (auto-portable / admin-editable / hand-maintained) and gives two checklists: one for locales, one for specialties. Use it as the single source of truth for expansion work.
+
 ---
 
 ## 13. Native App (Capacitor 8)

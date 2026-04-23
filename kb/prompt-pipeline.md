@@ -42,6 +42,85 @@ Four of the five Haiku calls in the pipeline now use `tool_choice: { type: "tool
 
 ---
 
+## Adding a new locale or specialty — what to touch
+
+This section answers the question: _"We ship sk + cardiology today. What do I update to ship cs / de / fr, or neurology / psychiatry / internal?"_ The table below maps every locale- or specialty-coupled surface in the codebase. Rule of thumb: the bulk of the system's intelligence is in **per-template data** (section contracts + voice corpus + template system prompt), which is admin-editable and needs no code change. Everything else is either structurally portable or hand-maintained in a small number of files.
+
+### Auto-portable (no code change, no prompt tweak)
+
+| Surface | Why it's portable |
+|---|---|
+| Source-substring grounding (critic + suggester evidence validation) | Works on any UTF-8 text; diacritic-folded |
+| Tool-use schemas (`submit_corrected_section`, `submit_icd_candidates`, `select_affected_sections`, `submit_extracted_passages`) | Schema only, no locale in field shape |
+| `stripUngroundedVitalValue` (Pulz / TK / Výška / Hmotnosť / BMI / EKG guard) | Arabic digits only — language-agnostic |
+| `/api/adjust` router + file-focus filter | Model-level classification; no hardcoded language strings |
+| PHI scrub (patient name, phone, email) | Regex patterns are structurally locale-neutral (SK-specific rodné číslo is an edge addition) |
+
+### Admin-editable per-template (no code change, but content work)
+
+| Surface | What to update |
+|---|---|
+| `section.context` — per-section clinical contract | Translate the contract; keep the OWNS / NEVER OWNS / FORMAT / LIMITS structure |
+| `template.systemPrompt` — template-wide guardrails | Translate worldview, abbreviation conventions, locale grammar rules |
+| `template.styleExamples` — voice corpus | Replace with locale's attending-note excerpts (style bible) |
+| `section.labels` — per-locale headings | Add the new locale key (sk / cs / en / …) to every section's `labels` map |
+| `section.model` — Haiku / Sonnet / Opus tier | Usually unchanged; bump to Sonnet if locale struggles on Haiku |
+
+All four live in `templates` table rows. Use `web/scripts/*.mjs` migration patterns to ship template changes.
+
+### Hand-maintained (code change required)
+
+| Surface | File | What changes for a new locale | What changes for a new specialty |
+|---|---|---|---|
+| `isAbsenceDescription` regex patterns | [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts) | Add locale-specific "no data" phrasings (e.g. German "keine Angabe", French "non renseigné") | Usually none |
+| Critic prompt — paraphrase examples ("cukrovka → DM") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Add locale paraphrase pairs (German "Zucker → DM", French "sucre → DT") | Specialty-specific paraphrases if any |
+| Critic prompt — unfounded-denial examples ("Alkohol neguje", "Infekčné ochorenie neguje") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Translate denial patterns to target locale | Typically none — denials are cross-specialty |
+| Critic prompt — boilerplate traps ("Pacient pri vedomí", "Habitus štíhly") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Locale's common boilerplate phrases | Specialty-specific exam boilerplate (e.g. neurology "reflexy sym. prítomné") |
+| Suggester prompt — ICD code knowledge (MI anatomy, F17.2, I48.0 specifics) | [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) | ICD codes are WHO-global; locale only affects description text | **Big specialty work**: add neurology / psychiatry / internal ICD traps and primary-code rules |
+| `LANGUAGE_LABEL` maps (`{ sk: "Slovak", ... }`) | `section-agent.ts`, `critic.ts`, `suggest-icd.ts`, `file-focus.ts`, `adjust-router.ts` | Add the new locale entry to all five maps | None |
+| `SupportedLanguage` type + `normalizeLanguage` | [`web/src/lib/types.ts`](../web/src/lib/types.ts), `pipeline.ts` | Add the new ISO code to the union | None |
+| `STRUCTURAL_VITAL_LABELS` + `EXAM_NARRATIVE_LABELS` (normalised label sets) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's label spellings (e.g. German "Größe", "Gewicht"; French "Taille", "Poids") | Add specialty-specific sections if they need the same voice-example skip treatment |
+| `ZAVER_LABELS` (recognised conclusion labels) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's "Assessment" / "Závěr" / "Fazit" / "Conclusion" variants | None |
+| ICD CSV lookup data | `web/src/lib/lookup/icd/*.csv` | Ship the locale's WHO ICD-10 CSV (SK, CS, EN already shipped) | None — codes are specialty-agnostic at the catalog level |
+| i18n message bundles | `web/messages/{sk,cs,en}.json` | Add new locale JSON | None |
+| Next-intl routing config | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Add new locale to `locales` list | None |
+| `next-intl` `localePrefix` strategy | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Usually unchanged (`as-needed` works for any set) | None |
+| PHI scrub — locale-specific IDs (SK/CZ rodné číslo, German Versicherungsnummer, etc.) | [`web/src/lib/phi-scrub.ts`](../web/src/lib/phi-scrub.ts) | Add the locale's national ID regex + guards | None |
+| ElevenLabs Scribe transcription prompt hints | [`web/src/lib/elevenlabs.ts`](../web/src/lib/elevenlabs.ts) | The `language_code` param already accepts any locale Scribe supports — verify ISO-639 code | None |
+
+### Checklist — adding a new locale (e.g. `de`)
+
+1. **Types + routing**: extend `SupportedLanguage`, `normalizeLanguage`, `LANGUAGE_LABEL` (5 files), add `de` to `next-intl` routing, ship `web/messages/de.json`.
+2. **ICD CSV**: drop the German WHO ICD-10 CSV into `web/src/lib/lookup/icd/`.
+3. **PHI scrub**: add the locale's national-ID pattern with guards.
+4. **Critic / suggester prompts**: add paraphrase pairs + denial patterns + boilerplate traps + ICD specifics (a few hours of clinician review).
+5. **`isAbsenceDescription`**: add 3-5 locale-specific absence phrasings.
+6. **Label sets**: extend `STRUCTURAL_VITAL_LABELS`, `EXAM_NARRATIVE_LABELS`, `ZAVER_LABELS`.
+7. **Templates**: clone existing templates; translate `section.context`, `template.systemPrompt`, `section.labels`; curate new `template.styleExamples` from locale corpus.
+8. **Evals**: add 1-2 doctor-corrected fixtures in the new locale to `web/src/lib/evals/fixtures/` and register in `scripts/run-evals.ts`.
+
+### Checklist — adding a new specialty (e.g. neurology)
+
+1. **ICD suggester prompt**: add specialty-specific code traps (e.g. G35 MS, G20 Parkinson, F32 depression), primary-code rules, and anatomy cross-checks to [`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts).
+2. **Critic prompt**: add specialty's common boilerplate traps (e.g. "reflexy sym. prítomné", "MMSE v norme") to the boilerplate list in [`critic.ts`](../web/src/lib/sections/critic.ts).
+3. **Templates**: create specialty templates with section hierarchy, `section.context` contracts tuned to the specialty, `template.systemPrompt` with specialty worldview, `template.styleExamples` from specialty corpus.
+4. **Evals**: add fixtures exercising specialty-specific risks (e.g. for neurology: stroke type discrimination, MS vs ALS, migraine subtype).
+5. **No code-level specialty flag** — all specialty logic lives in templates + prompt examples. The pipeline is specialty-neutral.
+
+### Scoping the work
+
+| Task | Locale lift | Specialty lift |
+|---|---|---|
+| Code changes | ~8 files, ~200 lines | ~2 files, ~50 lines |
+| Clinician content | ~1-2 days prompt review + translation | ~1 day for ICD traps + boilerplate |
+| Template authoring | 1 template cloned + translated per specialty | 3-5 new templates per specialty |
+| Voice corpus curation | 10-20 attending notes per template | Same, per template |
+| Eval fixtures | 2-3 per locale | 2-3 per specialty |
+
+The heaviest work is clinician review of prompt examples + template curation, not engineering. The code-side work is a half-day of plumbing.
+
+---
+
 ## 0. Pipeline Overview
 
 Per section, three Haiku-era stages: RENDER → CRITIC (opt-in) → RECONCILERS. Záver is produced by the ICD suggester (source-grounded Haiku call) and then pushed through the same CRITIC + RECONCILERS.
