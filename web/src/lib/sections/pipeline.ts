@@ -104,13 +104,47 @@ function isExamNarrativeLabel(title: string): boolean {
 }
 
 /**
- * True when the section title matches a Záver / Assessment heading.
- * Mirrors `isZaverSection` (which works on TemplateSection.labels) for
- * use in `runCriticAndReconcilers`, which only has the resolved title
- * string.
+ * Sections whose critic pass is routed to Sonnet 4.6 instead of Haiku.
+ * These are the sections where chained clinical inference, dense list
+ * preservation, or proper-noun fidelity matters most:
+ *
+ * - **Záver / Assessment** — ICD anatomy (I21.0/1/2), comorbidity
+ *   coding (E89.0 post-surgical hypothyroidism vs E03.2 drug-induced),
+ *   specific-over-unspecified (D47.2 MGUS, I34.0 mitral vs I35.x aortic).
+ * - **OA / Past medical history** — dense Slovak shorthand lists
+ *   (ICHS, DM 2, DLP, st.p. CHE, BPH, VAS, coxartroza). Haiku drops
+ *   items or normalizes abbreviations unnecessarily.
+ * - **LA / Medications** — drug-name fidelity (no "Minivi Meld"
+ *   hallucinations), dose-schedule preservation, chronic vs acute
+ *   split per contract.
+ *
+ * Every other section stays on Haiku (default in critic.ts). Latency
+ * is unaffected because critic calls run in parallel.
  */
-function isZaverTitle(title: string): boolean {
-  return ZAVER_LABELS.has(normalizeLabel(title));
+const SONNET_CRITIC_LABELS = new Set<string>([
+  // Záver / Assessment / Conclusion
+  ...ZAVER_LABELS,
+  // OA — Past medical history (sk/cs/en forms)
+  "oa",
+  "osobna anamneza",
+  "osobni anamneza",
+  "pmh",
+  "past medical history",
+  "medical history",
+  "prior medical history",
+  // LA — Medications (sk/cs/en forms)
+  "la",
+  "liekova anamneza",
+  "lekova anamneza",
+  "medications",
+  "current medications",
+  "medication list",
+  "home medications",
+  "meds",
+]);
+
+function shouldUseSonnetCritic(title: string): boolean {
+  return SONNET_CRITIC_LABELS.has(normalizeLabel(title));
 }
 
 /**
@@ -429,12 +463,12 @@ export async function runCriticAndReconcilers(args: {
 
   if (config.critic) {
     try {
-      // Route Záver's critic to Sonnet — ICD anatomy and comorbidity
-      // inference benefit from the stronger reasoning tier (e.g. picking
-      // I21.2 lateral over I21.9 unspecified when aVL/I elevation is
-      // documented, or E89.0 from "st.p. strumektómii + Euthyrox").
-      // Every other section stays on Haiku.
-      const criticModel = isZaverTitle(config.title) ? "sonnet" : "haiku";
+      // Route the hardest sections (Záver / OA / LA) to Sonnet — chained
+      // ICD inference, dense shorthand preservation, and drug-name
+      // fidelity benefit from the stronger reasoning tier. See
+      // `SONNET_CRITIC_LABELS` for the full list and rationale. Every
+      // other section stays on Haiku.
+      const criticModel = shouldUseSonnetCritic(config.title) ? "sonnet" : "haiku";
       const result = await criticPass({
         draft: draftContent,
         source,
