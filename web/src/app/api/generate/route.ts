@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { retrySupabaseCall } from "@/lib/supabase/retry";
 import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
-import { embedText, LEGACY_EMBEDDING_MODEL } from "@/lib/openai";
 import { extractFileText } from "@/lib/extraction/extract-file";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import {
@@ -19,6 +18,7 @@ import {
 } from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
+import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -33,12 +33,6 @@ import {
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 800;
-
-const RETRIEVAL_QUERY: Record<SupportedLanguage, string> = {
-  en: "Patient symptoms, diagnosis, examination findings, treatment plan, medications, follow-up",
-  sk: "Symptómy pacienta, diagnóza, vyšetrenie, plán liečby, lieky, kontrola",
-  cs: "Symptomy pacienta, diagnóza, vyšetření, plán léčby, léky, kontrola",
-};
 
 export async function POST(request: NextRequest) {
   const t0 = Date.now();
@@ -390,6 +384,7 @@ export async function POST(request: NextRequest) {
           f.extracted_text && !(transcriptText && f.source === "recording"),
       )
       .map((f) => ({
+        id: f.id,
         name: f.name,
         type: f.type,
         text: f.extracted_text!,
@@ -445,44 +440,6 @@ export async function POST(request: NextRequest) {
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
-    // Legacy chunk-based encounters: when transcriptText is empty we
-    // fall back to semantic retrieval over transcript_chunks. Keeps
-    // regeneration working for encounters predating the batch-
-    // transcript flow. New encounters skip this entirely.
-    if (!transcriptText) {
-      const { count: chunkCount } = await supabase
-        .from("transcript_chunks")
-        .select("id", { count: "exact", head: true })
-        .eq("visit_id", visitId);
-
-      if (chunkCount && chunkCount > 0) {
-        try {
-          const queryEmbedding = await embedText(
-            RETRIEVAL_QUERY[language],
-            { userId, visitId },
-            LEGACY_EMBEDDING_MODEL,
-          );
-          const { data: matches, error: rpcError } = await supabase.rpc(
-            "match_chunks",
-            {
-              query_embedding: JSON.stringify(queryEmbedding),
-              match_count: 16,
-              p_visit_id: visitId,
-            },
-          );
-          if (rpcError) {
-            logger.error("match_chunks RPC error:", rpcError);
-          } else if (matches && matches.length > 0) {
-            transcriptText = matches
-              .map((m: { content: string }) => m.content)
-              .join("\n\n");
-          }
-        } catch (err) {
-          logger.warn("[generate] Legacy chunk retrieval failed:", err);
-        }
-      }
-    }
-
     const hasFileContent = fileTexts.length > 0;
     if (!transcriptText?.trim() && !doctorNotes?.trim() && !hasFileContent) {
       if (extractionErrors.length > 0) {
@@ -498,8 +455,10 @@ export async function POST(request: NextRequest) {
 
     // Single raw-source bundle — every section-agent reads from this.
     // `context` is the doctor's per-file instruction (upload dialog) —
-    // surfaces to the LLM as "Doctor's focus for this file: …" header.
-    const source: RawSource = {
+    // restrictive phrasing ("iba X", "only Y") is honoured via a
+    // pre-filter pass below that extracts matching passages only;
+    // permissive phrasing surfaces to the LLM as a focus hint header.
+    const rawSource: RawSource = {
       transcript: transcriptText?.trim() || undefined,
       doctorNotes: doctorNotes?.trim() || undefined,
       files: fileTexts.map((f) => ({
@@ -508,6 +467,26 @@ export async function POST(request: NextRequest) {
         context: f.context,
       })),
     };
+
+    // Run file-focus filter ONCE before the suggester + pipeline fan out.
+    // Seed the cache from visit metadata so unchanged (file.text,
+    // directive) tuples short-circuit — saves a Haiku call per regen.
+    const fileFocusCache = (((visit.metadata ?? {}) as Record<string, unknown>)
+      .file_focus_cache ??
+      {}) as import("@/lib/sections/file-focus").FileFocusCache;
+    let updatedFileFocusCache: typeof fileFocusCache | null = null;
+    const source = await applyFileFocusDirectives(
+      rawSource,
+      language,
+      { userId, visitId },
+      {
+        fileIds: fileTexts.map((f) => f.id),
+        cache: fileFocusCache,
+        onCacheUpdate: (next) => {
+          updatedFileFocusCache = next;
+        },
+      },
+    );
 
     logger.debug(
       `[generate] Starting section-agent pipeline (transcript: ${transcriptText?.length ?? 0} chars, files: ${fileTexts.length}, doctorNotes: ${doctorNotes?.length ?? 0} chars)`,
@@ -619,6 +598,12 @@ export async function POST(request: NextRequest) {
           template_id: template.id,
           generation_pending: null,
           recording_session: null,
+          // Per-section content map — the /api/adjust route reuses this
+          // as the baseline so unchanged sections don't re-render.
+          section_contents: sectionContentsMap,
+          ...(updatedFileFocusCache
+            ? { file_focus_cache: updatedFileFocusCache }
+            : {}),
           ...(transcriptText ? { transcript: transcriptText } : {}),
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
           ...(clinicalAnalysis ? { clinical_analysis: clinicalAnalysis } : {}),

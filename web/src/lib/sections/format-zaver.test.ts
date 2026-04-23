@@ -17,21 +17,25 @@ describe("formatZaverFromSuggestions", () => {
     expect(formatZaverFromSuggestions([])).toBe("");
   });
 
-  it("renders a single primary code with trailing period", () => {
+  it("renders a single primary code without trailing period", () => {
     const out = formatZaverFromSuggestions([
       code("I21.4", "Akútny subendokardiálny infarkt myokardu"),
     ]);
-    expect(out).toBe("I21.4 Akútny subendokardiálny infarkt myokardu.");
+    expect(out).toBe("I21.4 Akútny subendokardiálny infarkt myokardu");
   });
 
-  it("comma-joins primary + secondaries", () => {
+  it("separates primary + secondaries with newlines (one code per line)", () => {
     const out = formatZaverFromSuggestions([
       code("I21.4", "Akútny subendokardiálny infarkt myokardu"),
       code("I10", "Primárna [esenciálna] artériová hypertenzia"),
       code("K57.3", "Divertikulóza sigmy"),
     ]);
     expect(out).toBe(
-      "I21.4 Akútny subendokardiálny infarkt myokardu, I10 Primárna [esenciálna] artériová hypertenzia, K57.3 Divertikulóza sigmy.",
+      [
+        "I21.4 Akútny subendokardiálny infarkt myokardu",
+        "I10 Primárna [esenciálna] artériová hypertenzia",
+        "K57.3 Divertikulóza sigmy",
+      ].join("\n"),
     );
   });
 
@@ -46,7 +50,10 @@ describe("formatZaverFromSuggestions", () => {
       code("I10", "Primárna [esenciálna] artériová hypertenzia"),
     ]);
     expect(out).toBe(
-      "R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: nemožno vylúčiť NSTEMI, nestabilnú angínu pectoris), I10 Primárna [esenciálna] artériová hypertenzia.",
+      [
+        "R07.4 Bolesť v hrudníku, bližšie neurčená (diferenciálna dg.: nemožno vylúčiť NSTEMI, nestabilnú angínu pectoris)",
+        "I10 Primárna [esenciálna] artériová hypertenzia",
+      ].join("\n"),
     );
   });
 
@@ -88,10 +95,14 @@ describe("formatZaverFromSuggestions", () => {
     expect(out).toBe("");
   });
 
-  it("does NOT double the trailing period", () => {
-    // Agent might pass a description already ending in "."
-    const out = formatZaverFromSuggestions([code("I10", "Hypertenzia.")]);
-    expect(out).toBe("I10 Hypertenzia.");
-    expect(out.match(/\.$/g)?.length).toBe(1);
+  it("preserves a trailing period from the description verbatim, adds none", () => {
+    // Agent might pass a description already ending in ".". The new
+    // formatter no longer appends a period of its own.
+    expect(formatZaverFromSuggestions([code("I10", "Hypertenzia.")])).toBe(
+      "I10 Hypertenzia.",
+    );
+    expect(formatZaverFromSuggestions([code("I10", "Hypertenzia")])).toBe(
+      "I10 Hypertenzia",
+    );
   });
 });

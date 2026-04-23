@@ -1,8 +1,15 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-23_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
+
+## What's new (2026-04-23)
+
+- **`POST /api/adjust`** — new endpoint for mid-visit incremental updates. Accepts only the delta (`{visitId, templateId, adjustmentTranscript, newFileIds?}`). A router Haiku decides which sections to re-render; unchanged sections keep their content from `visit.metadata.section_contents`. See [prompt-pipeline.md](prompt-pipeline.md) for details.
+- **File context dialog** — Actual / Past radio. "Actual" = whole file used; "Past" = user must type what to distill (Haiku pre-filters). See [data-extraction.md](data-extraction.md).
+- **Critic via tool-use** — section critic now uses `tool_choice: submit_corrected_section`, eliminating essay / meta-commentary leaks structurally.
+- **Eval harness on 3 real doctor-corrected fixtures** (`npm run eval`): Mordavská, Kovačiková, Gozora.
 
 ---
 
@@ -335,7 +342,7 @@ All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` mer
 | `templates`         | User-defined templates with i18n, style guide, usage tracking                                                                                                                                                                               |
 | `api_usage`         | Per-call token/cost log; aggregated via SQL RPCs (`aggregate_usage_by_user`, `aggregate_usage_by_visit`, `get_dashboard_usage_totals`, `aggregate_usage_by_model`, `aggregate_usage_by_operation`) to avoid Supabase 1000-row default limit |
 | `audit_logs`        | User-action audit trail                                                                                                                                                                                                                     |
-| `transcript_chunks` | Legacy chunk + embedding store (deprecated)                                                                                                                                                                                                 |
+| `transcript_chunks` | Inert legacy chunk + embedding store. No application code reads or writes it; pgvector extension + table + `match_chunks` RPC remain available as primitives for future retrieval work                                                      |
 
 ### Storage:
 
@@ -416,9 +423,8 @@ Separate Next.js app at `admin/`:
 - `POST /api/regenerate` — regenerate with same or different template
 - `POST /api/batch-transcribe` — batch audio transcription
 
-### Search
+### Lookup
 
-- `GET /api/search` — encounter search (Cmd+K)
 - `GET /api/icd-search` — ICD-10 code search
 - `GET /api/icd-resolve` — resolve ICD codes
 - `GET /api/medication-search` — medication autocomplete

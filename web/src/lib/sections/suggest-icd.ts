@@ -65,6 +65,30 @@ export async function suggestIcdCodes(
 
   const systemPrompt = `You are an ICD-10 coding assistant for a ${LANGUAGE_LABEL[language]}-language clinical note. Propose 10–15 candidate ICD-10 codes the physician may want to attach to this encounter. Your output ALSO feeds the Záver section — the primary and any differential need to be correct.
 
+# Transcript primacy for the clinician's own assessment
+The \`# Transcript\` block captures what the CLINICIAN said during the encounter — their live clinical judgment. Treat the clinician's own verbalized assessment as GROUND TRUTH and as the ANCHOR for the primary diagnosis and anatomy.
+
+Hallmark phrasing that signals the clinician's assessment (not the patient speaking):
+- "vyzerá to na …" / "vyzerá na …" ("looks like …")
+- "je to …" / "jedná sa o …" / "bude to …"
+- "na EKG to vyzerá na stemy/NSTEMI/…"
+- "myslím, že …" / "ide o …" / "svedčí to pre …"
+
+When the clinician specifies ANATOMY, SUBTYPE, or SEVERITY ("stemy laterálnej steny", "paroxyzmálna fibrilácia", "stredne závažná mitrálna regurgitácia") — use their wording EXACTLY. It overrides tentative OCR wording ("difdg.", "možná", "vs.") because the transcript reflects the clinician's current judgment after seeing today's data.
+
+# MI anatomy — cross-check with EKG before coding
+If the primary is an acute MI, the ICD site code MUST match both the clinician's named anatomy AND the EKG findings in the source. Slovak WHO ICD-10 MI codes (note that I21.2 covers lateral, apical, high-lateral sites — its CSV description "na iných miestach" / "on other sites" is the catch-all for non-anterior/non-inferior STEMI):
+- **I21.0** — transmurálny infarkt PREDNEJ steny. EKG: ST elevation V1–V4.
+- **I21.1** — transmurálny infarkt SPODNEJ steny (inferior). EKG: ST elevation II, III, aVF.
+- **I21.2** — transmurálny infarkt NA INÝCH MIESTACH (lateral, apical, high-lateral, posterolateral). EKG: ST elevation in I, aVL, V5–V6 — typically with reciprocal ST depression in III, aVF, V1.
+- **I21.4** — subendokardiálny infarkt (NSTEMI): troponin positive WITHOUT ST elevation.
+- **I21.9** — bližšie neurčený: LAST RESORT only when neither anatomy nor ST elevation is documented. Never use as a shortcut when the source gives you enough information to pick I21.0–I21.4.
+
+Example: clinician says "stemy laterálnej steny" AND EKG shows "ST elev. aVL, I, depr. ST III, aVF, V1" → \`I21.2\` (lateral STEMI). NEVER \`I21.0\` (anterior) — aVL/I are lateral leads, not anterior. NEVER \`I21.9\` — the source gave you the anatomy and the ST pattern.
+
+# Tobacco use in cardiology notes
+Long-term active smoking with daily pack-count ("fajčiar pätnásť cigariet denne", "dlhoročný fajčiar") is routinely coded in Slovak cardiology as **F17.2** (Porucha psychiky a správania zapríčinená užívaním tabaku: syndróm závislosti). Include F17.2 when the patient reports established daily smoking, not just occasional.
+
 # Anatomy, severity, subtype, etiology — specificity matters
 The source's exact wording drives the code. Common traps to avoid:
 - "mitrálna regurgitácia" → I34.x (mitral). NEVER I35.x (aortic).
@@ -155,16 +179,25 @@ Return ONLY valid JSON, no prose. Shape:
     };
     const rawCodes = parsed.codes ?? [];
 
-    // CSV-validate every code. Unknown codes → drop.
+    // CSV-validate every code. Unknown codes → drop. Duplicate codes
+    // (Haiku likes proposing catch-all Z87.8 twice for two different
+    // "st.p." items) → keep the first occurrence only; downstream UI
+    // uses `code` as React key and crashes on collisions.
     const valid: SuggestedIcdCode[] = [];
+    const seen = new Set<string>();
     for (const c of rawCodes) {
       if (!c.code || !c.description) continue;
       const code = c.code.trim();
+      if (seen.has(code)) {
+        logger.debug(`[suggest-icd] drop duplicate code ${code}`);
+        continue;
+      }
       const canonical = getIcdDescription(code, language);
       if (!canonical) {
         logger.debug(`[suggest-icd] drop unknown code ${code}`);
         continue;
       }
+      seen.add(code);
       valid.push({
         code,
         description: canonical,

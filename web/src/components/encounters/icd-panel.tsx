@@ -29,6 +29,20 @@ interface IcdPanelProps {
   setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
 }
 
+/** Keep first occurrence of each code — older encounters persisted
+ *  duplicates before the suggester learned to dedup, and React uses
+ *  `code` as the list key. */
+function dedupeByCode(codes: IcdCode[]): IcdCode[] {
+  const seen = new Set<string>();
+  const out: IcdCode[] = [];
+  for (const c of codes) {
+    if (!c?.code || seen.has(c.code)) continue;
+    seen.add(c.code);
+    out.push(c);
+  }
+  return out;
+}
+
 /** Inner content of the ICD panel — reusable without the desktop sidebar wrapper. */
 export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   const t = useTranslations("encounters.detail");
@@ -37,7 +51,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   // Selected codes from visit metadata
   const [selectedCodes, setSelectedCodes] = useState<IcdCode[]>(() => {
     const meta = visit.metadata as Record<string, unknown>;
-    return (meta?.selected_icd_codes as IcdCode[]) || [];
+    return dedupeByCode((meta?.selected_icd_codes as IcdCode[]) || []);
   });
 
   // Suggested codes from clinical analysis — prefer the full pre-filter list
@@ -53,11 +67,20 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
       (analysis?.suggestedIcdCodes as IcdCode[] | undefined) ??
       (analysis?.candidateIcdCodes as IcdCode[] | undefined);
     if (!source) return [];
-    return source.map((c) => ({
-      code: c.code,
-      description: c.description,
-      confidence: c.confidence,
-    }));
+    // Dedupe by code — older encounters persisted duplicates before the
+    // suggester learned to dedup, and React uses `code` as the list key.
+    const seen = new Set<string>();
+    const out: IcdCode[] = [];
+    for (const c of source) {
+      if (!c?.code || seen.has(c.code)) continue;
+      seen.add(c.code);
+      out.push({
+        code: c.code,
+        description: c.description,
+        confidence: c.confidence,
+      });
+    }
+    return out;
   })();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -74,7 +97,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   useEffect(() => {
     const meta = visit.metadata as Record<string, unknown>;
     const stored = (meta?.selected_icd_codes as IcdCode[]) || [];
-    setSelectedCodes(stored);
+    setSelectedCodes(dedupeByCode(stored));
   }, [visit.metadata]);
 
   // Resolve codes + descriptions for selected + suggested codes in the current locale

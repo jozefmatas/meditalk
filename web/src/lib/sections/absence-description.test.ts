@@ -94,8 +94,10 @@ describe("isAbsenceDescription", () => {
 
   it("does NOT strip responses longer than the cap", () => {
     // Very-long outputs are assumed to be real content, not "describing absence".
-    const long = "V surových zdrojoch " + "text ".repeat(200);
-    expect(long.length).toBeGreaterThan(600);
+    // Cap was raised 600 → 1500 when Haiku started producing multi-paragraph
+    // reasoning essays. Use a long enough string to exceed the new cap.
+    const long = "V surových zdrojoch " + "text ".repeat(500);
+    expect(long.length).toBeGreaterThan(1500);
     expect(isAbsenceDescription(long)).toBe(false);
   });
 
