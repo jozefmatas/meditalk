@@ -99,6 +99,7 @@ The source's exact wording drives the code. Common traps to avoid:
 - "AV blok 1. stupňa" → I44.0 (first degree). NEVER I44.1 (second degree).
 - "st.p. strumektómii, na terapii Euthyroxom" → E89.0 (post-surgical hypothyroidism). NEVER E03.2 (drug-induced).
 - "st.p. operácii katarakty" → Z96.1 or omit. NEVER H26.9 (active cataract).
+- "monoklonálna gamapatia" / "MGUS" / "gamapatia typu IgG" → D47.2 (Monoklonálna gamapatia). Commonly phrased in reports as "MGUS" or "gamapatia typu IgG kappa vs MGUS" — both map to D47.2.
 If the source denies or negates a finding, do NOT emit a code for it.
 
 # Scope
