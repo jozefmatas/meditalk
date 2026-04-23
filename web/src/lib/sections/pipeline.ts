@@ -30,7 +30,7 @@ import {
 } from "./section-agent";
 import { buildSectionExamplesMap } from "../templates/reference-notes";
 import { normalizeLabel } from "../parse-note-sections";
-import { criticPass } from "./critic";
+import { criticPass, type CriticModel } from "./critic";
 import { RECONCILERS } from "./reconcilers";
 import { logger } from "@/lib/logger";
 
@@ -103,36 +103,8 @@ function isExamNarrativeLabel(title: string): boolean {
   return EXAM_NARRATIVE_LABELS.has(normalizeLabel(title));
 }
 
-/**
- * Sections whose critic pass is routed to Sonnet 4.6 instead of Haiku.
- * These are the sections where chained clinical inference, dense list
- * preservation, or proper-noun fidelity matters most:
- *
- * - **Záver / Assessment** — ICD anatomy (I21.0/1/2), comorbidity
- *   coding (E89.0 post-surgical hypothyroidism vs E03.2 drug-induced),
- *   specific-over-unspecified (D47.2 MGUS, I34.0 mitral vs I35.x aortic).
- * - **OA / Past medical history** — dense Slovak shorthand lists
- *   (ICHS, DM 2, DLP, st.p. CHE, BPH, VAS, coxartroza). Haiku drops
- *   items or normalizes abbreviations unnecessarily.
- * - **LA / Medications** — drug-name fidelity (no "Minivi Meld"
- *   hallucinations), dose-schedule preservation, chronic vs acute
- *   split per contract.
- *
- * Every other section stays on Haiku (default in critic.ts). Latency
- * is unaffected because critic calls run in parallel.
- */
-const SONNET_CRITIC_LABELS = new Set<string>([
-  // Záver / Assessment / Conclusion
-  ...ZAVER_LABELS,
-  // OA — Past medical history (sk/cs/en forms)
-  "oa",
-  "osobna anamneza",
-  "osobni anamneza",
-  "pmh",
-  "past medical history",
-  "medical history",
-  "prior medical history",
-  // LA — Medications (sk/cs/en forms)
+/** Medication list section labels across sk/cs/en. */
+const LA_LABELS = new Set<string>([
   "la",
   "liekova anamneza",
   "lekova anamneza",
@@ -143,9 +115,10 @@ const SONNET_CRITIC_LABELS = new Set<string>([
   "meds",
 ]);
 
-function shouldUseSonnetCritic(title: string): boolean {
-  return SONNET_CRITIC_LABELS.has(normalizeLabel(title));
+function isLaTitle(title: string): boolean {
+  return LA_LABELS.has(normalizeLabel(title));
 }
+
 
 /**
  * Common Slovak medical transcription typos that slip past the
@@ -502,12 +475,18 @@ export async function runCriticAndReconcilers(args: {
 
   if (config.critic) {
     try {
-      // Route the hardest sections (Záver / OA / LA) to Sonnet — chained
-      // ICD inference, dense shorthand preservation, and drug-name
-      // fidelity benefit from the stronger reasoning tier. See
-      // `SONNET_CRITIC_LABELS` for the full list and rationale. Every
-      // other section stays on Haiku.
-      const criticModel = shouldUseSonnetCritic(config.title) ? "sonnet" : "haiku";
+      // Critic runs on Sonnet 4.6 as the default — better grounding,
+      // denial discrimination, and dense-shorthand preservation across
+      // the board. Exception: LA (medication list) stays on Haiku
+      // because Sonnet's tighter grounding tends to drop chronic home
+      // meds the OCR mentions but that aren't explicitly today's
+      // prescription (observed in eval: Rytmonorm, Nolpaza). Haiku is
+      // more forgiving here, which is correct for a med list where
+      // completeness beats strict grounding.
+      // Latency is unaffected — critic calls run in parallel.
+      const criticModel: CriticModel = isLaTitle(config.title)
+        ? "haiku"
+        : "sonnet";
       const result = await criticPass({
         draft: draftContent,
         source,
