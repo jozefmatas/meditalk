@@ -82,9 +82,6 @@ export async function routeAdjustment(
   const systemPrompt = `You classify which sections of a ${LANGUAGE_LABEL[language]} clinical note need to be re-rendered after the doctor dictated an adjustment.
 
 # Rules
-- Return ONLY valid JSON — no prose, no markdown, no backticks.
-- Shape: {"affected": ["sectionId1", "sectionId2", ...], "reasoning": "one-line summary"}
-- The \`affected\` array must contain section ids copied VERBATIM from the list provided.
 - A section is "affected" when the adjustment introduces content that THAT section OWNS.
 - Examples of clear mappings:
     - "TK 135/80" or "tlak sto tridsaťpäť" → Krvný tlak
@@ -97,7 +94,7 @@ export async function routeAdjustment(
     - "pacient začal brať Concor 5 mg" → LA
     - "dnes ráno bolesť na hrudi ustúpila" → TO
 - If the adjustment is ambiguous, INCLUDE the section (bias toward re-rendering).
-- If the adjustment mentions nothing relevant, return \`"affected": []\`.
+- If the adjustment mentions nothing relevant, return an empty array.
 - Záver should be included only when a section that feeds Záver (OA, TO, diagnoses) changes.
 
 # Sections available
@@ -108,10 +105,34 @@ ${sectionList}`;
   try {
     const response = await client().messages.create({
       model: MODEL_ID,
-      max_tokens: 400,
+      max_tokens: 500,
       temperature: 0,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [
+        {
+          name: "select_affected_sections",
+          description:
+            "Select the subset of section ids whose content is affected by the adjustment delta.",
+          input_schema: {
+            type: "object",
+            properties: {
+              affected: {
+                type: "array",
+                description:
+                  "Section ids to re-render, copied VERBATIM from the list. Empty array when nothing relevant.",
+                items: { type: "string" },
+              },
+              reasoning: {
+                type: "string",
+                description: "One-line rationale for telemetry.",
+              },
+            },
+            required: ["affected"],
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "select_affected_sections" },
     });
 
     if (usage) {
@@ -126,27 +147,25 @@ ${sectionList}`;
       });
     }
 
-    const text = response.content
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim();
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      logger.warn("[adjust-router] no JSON in response; falling back to all");
-      return { affectedSectionIds: allIds };
+    let affectedRaw: unknown[] = [];
+    let reasoning: string | undefined;
+    for (const block of response.content) {
+      if (
+        block.type === "tool_use" &&
+        block.name === "select_affected_sections"
+      ) {
+        const input = block.input as { affected?: unknown; reasoning?: unknown };
+        if (Array.isArray(input.affected)) affectedRaw = input.affected;
+        if (typeof input.reasoning === "string") reasoning = input.reasoning;
+        break;
+      }
     }
-    const parsed = JSON.parse(match[0]) as {
-      affected?: unknown;
-      reasoning?: unknown;
-    };
-    const affectedRaw = Array.isArray(parsed.affected) ? parsed.affected : [];
+
     const valid = new Set(allIds);
     const affectedSectionIds = affectedRaw
       .filter((x): x is string => typeof x === "string" && valid.has(x))
       .filter((v, i, arr) => arr.indexOf(v) === i);
 
-    const reasoning =
-      typeof parsed.reasoning === "string" ? parsed.reasoning : undefined;
     logger.debug(
       `[adjust-router] affected=${JSON.stringify(affectedSectionIds)} reasoning="${reasoning ?? ""}"`,
     );

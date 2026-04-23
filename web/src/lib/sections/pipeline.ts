@@ -22,7 +22,6 @@ import type { Template, TemplateSection } from "../templates/types";
 import type { SupportedLanguage } from "../types";
 import {
   renderSection,
-  isAbsenceDescription,
   type Language,
   type RawSource,
   type RenderedSection,
@@ -102,244 +101,6 @@ function isStructuralVitalLabel(title: string): boolean {
 
 function isExamNarrativeLabel(title: string): boolean {
   return EXAM_NARRATIVE_LABELS.has(normalizeLabel(title));
-}
-
-/**
- * Slovak number-word forms for 0–220 (covers all clinically plausible
- * vital values: HR 30–200, weight 30–200 kg, height 100–220 cm, BMI
- * 10–50). Used to verify that a digit in the draft is backed by EITHER
- * a digit in the source OR its spoken Slovak form (the transcript is
- * speech, so doctors frequently say "sto tridsaťpäť" instead of 135).
- */
-const SK_UNITS: Record<number, string> = {
-  0: "nula",
-  1: "jeden",
-  2: "dva",
-  3: "tri",
-  4: "štyri",
-  5: "päť",
-  6: "šesť",
-  7: "sedem",
-  8: "osem",
-  9: "deväť",
-  10: "desať",
-  11: "jedenásť",
-  12: "dvanásť",
-  13: "trinásť",
-  14: "štrnásť",
-  15: "pätnásť",
-  16: "šestnásť",
-  17: "sedemnásť",
-  18: "osemnásť",
-  19: "devätnásť",
-};
-const SK_TENS: Record<number, string> = {
-  20: "dvadsať",
-  30: "tridsať",
-  40: "štyridsať",
-  50: "päťdesiat",
-  60: "šesťdesiat",
-  70: "sedemdesiat",
-  80: "osemdesiat",
-  90: "deväťdesiat",
-};
-const SK_HUNDREDS: Record<number, string> = {
-  100: "sto",
-  200: "dvesto",
-};
-function toSlovakNumberForms(n: number): string[] {
-  if (n < 0 || n > 999) return [];
-  const forms = new Set<string>();
-  const add = (s: string) => {
-    const trimmed = s.trim();
-    if (trimmed) forms.add(trimmed);
-  };
-  if (n < 20) {
-    const w = SK_UNITS[n];
-    if (w) add(w);
-    return [...forms];
-  }
-  if (n < 100) {
-    const tens = Math.floor(n / 10) * 10;
-    const units = n % 10;
-    const t = SK_TENS[tens];
-    if (!t) return [];
-    if (units === 0) {
-      add(t);
-    } else {
-      add(`${t}${SK_UNITS[units]}`); // "tridsaťpäť"
-      add(`${t} ${SK_UNITS[units]}`); // "tridsať päť"
-    }
-    return [...forms];
-  }
-  const hundreds = Math.floor(n / 100) * 100;
-  const rest = n % 100;
-  const h = SK_HUNDREDS[hundreds];
-  if (!h) return [];
-  if (rest === 0) {
-    add(h);
-  } else {
-    for (const sub of toSlovakNumberForms(rest)) {
-      add(`${h}${sub}`); // "stotridsaťpäť"
-      add(`${h} ${sub}`); // "sto tridsaťpäť"
-      add(sub); // bare rest, in case speaker drops "sto"
-    }
-  }
-  return [...forms];
-}
-
-/**
- * Fold text: lowercase + strip diacritics. Slovak speech / clinical
- * notes frequently omit háčky and dĺžne; compare in folded space so
- * "pätnásť" and "patnast" both match.
- */
-function foldForGrounding(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-/**
- * Check every number in the drafted value against the raw source. If a
- * number isn't backed by source (either as a digit string OR as its
- * Slovak number-word form), the model invented it — clear the whole
- * draft.
- *
- * Normalises decimal separators (model may emit 27.9 while source has
- * 27,9). Single-digit numbers are considered trivially grounded (they
- * appear inside other words too often to strip on that basis alone).
- */
-function stripUngroundedVitalValue(content: string, source: RawSource): string {
-  const draft = content.trim();
-  if (!draft) return content;
-
-  const rawBlob = [
-    source.transcript ?? "",
-    source.doctorNotes ?? "",
-    ...(source.files ?? []).map((f) => f.text ?? ""),
-  ]
-    .join("\n")
-    .replace(/,/g, "."); // normalise decimal separator
-  const digitBlob = rawBlob;
-  const wordBlob = foldForGrounding(rawBlob);
-
-  // Pull every number out of the draft — "27,9", "80", "170.5", etc.
-  const numberRe = /\d+(?:[.,]\d+)?/g;
-  const numbers = draft.match(numberRe) ?? [];
-  if (numbers.length === 0) return content;
-
-  for (const n of numbers) {
-    const normalised = n.replace(/,/g, ".");
-    if (digitBlob.includes(normalised)) continue;
-
-    // Single digits 0–9 are too common inside other words (V1, V2, II,
-    // stp) to strip on "not literally in source" basis — skip them.
-    const asInt = Number(normalised);
-    if (Number.isInteger(asInt) && asInt >= 0 && asInt < 10) continue;
-
-    // Decimals (e.g. 27.9) aren't worth enumerating Slovak word forms
-    // for — require a digit match. If the digit wasn't found, strip.
-    if (normalised.includes(".")) return "";
-
-    // Integer: check Slovak number-word forms (0–999).
-    if (!Number.isInteger(asInt) || asInt > 999) return "";
-    const forms = toSlovakNumberForms(asInt).map((f) => foldForGrounding(f));
-    const grounded = forms.some((f) => f && wordBlob.includes(f));
-    if (!grounded) return "";
-  }
-  return content;
-}
-
-/**
- * Boilerplate markers a narrative exam section should never emit
- * unless the exact phrase appears in the source. These are canonical
- * "normal findings" sentences Haiku tends to fabricate from voice
- * examples when no real exam was dictated.
- */
-const EXAM_BOILERPLATE_PATTERNS: RegExp[] = [
-  /pri\s+vedom[ií]/i,
-  /habitus\s+(st[ií]hly|obezny|normaln|prim)/i,
-  /dychanie\s+(bez\s+raz|vezikularne|ciste)/i,
-  /srdce\s+pravideln|srdecn[eé]\s+tony\s+pravideln/i,
-  /abdomen\s+(mäkk|prihmat|bez\s+bolest)|bru[sš]n[aá]\s+stena\s+m[äa]kk/i,
-  /dolne\s+koncatiny\s+bez\s+edem/i,
-  /neurologick[eé]\s+(nalez|vysetren)\s+(v\s+norme|bez\s+lozisk|bez\s+patol)/i,
-  /kozn[yý]\s+kryt\s+bez\s+ikter|koza\s+bez\s+ikter/i,
-  /bez\s+sumov/i,
-];
-
-/**
- * Fold text: lowercase + strip diacritics. Slovak clinical text
- * sometimes omits diacritics; compare in the folded space.
- */
-function fold(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-/**
- * If the narrative exam content is dominated by boilerplate sentences
- * that aren't grounded in the source, force empty.
- *
- * A clause is considered GROUNDED when a 25-char substring drawn from
- * it exists in the folded source — loose enough for rephrasing but
- * tight enough that shared common words ("pacient", "bez") don't
- * trivially pass. For short drafts (≤2 clauses) we're stricter: ANY
- * boilerplate-matching clause that can't be substring-matched in
- * source triggers a full strip — those are the "Pacient pri vedomí,
- * orientovaný." residues that the permissive gate used to miss.
- */
-function stripBoilerplateExam(content: string, source: RawSource): string {
-  const draft = content.trim();
-  if (!draft) return content;
-
-  const sourceBlob = fold(
-    [
-      source.transcript ?? "",
-      source.doctorNotes ?? "",
-      ...(source.files ?? []).map((f) => f.text ?? ""),
-    ].join("\n"),
-  );
-
-  const clauses = draft
-    .split(/[.!?]|,(?=\s|$)/)
-    .map((c) => c.trim())
-    .filter(Boolean);
-  if (clauses.length === 0) return content;
-
-  let boilerplateCount = 0;
-  let groundedClauseCount = 0;
-  let ungroundedBoilerplateCount = 0;
-  for (const clause of clauses) {
-    const folded = fold(clause);
-    const window = folded.slice(0, Math.min(folded.length, 25));
-    const grounded = window.length >= 15 && sourceBlob.includes(window);
-    if (grounded) groundedClauseCount++;
-    const isBoilerplate = EXAM_BOILERPLATE_PATTERNS.some((re) =>
-      re.test(folded),
-    );
-    if (isBoilerplate) {
-      boilerplateCount++;
-      if (!grounded) ungroundedBoilerplateCount++;
-    }
-  }
-
-  // Short draft: any ungrounded boilerplate clause strips the whole
-  // section. Covers "Pacient pri vedomí, orientovaný." style residues.
-  if (clauses.length <= 2 && ungroundedBoilerplateCount > 0) {
-    return "";
-  }
-
-  // Long draft: require the majority to be boilerplate AND zero
-  // grounded clauses before stripping.
-  const boilerplateRatio = boilerplateCount / clauses.length;
-  if (boilerplateRatio > 0.6 && groundedClauseCount === 0) {
-    return "";
-  }
-  return content;
 }
 
 export function findZaverSection(
@@ -468,10 +229,11 @@ export async function generateNote(
     // Celkový stav) the "example" IS the concrete finding, and Haiku
     // mimics it — producing phantom vitals or generic "normal exam"
     // boilerplate when the current source has no corresponding data.
-    // Skip examples for both categories; the hardened contracts gate
-    // output on whether real findings exist in the source.
-    const isVitalSection = isStructuralVitalLabel(title);
-    const skipExamples = isVitalSection || isExamNarrativeLabel(title);
+    // Skip examples for both categories; the claims-grounding gate
+    // still catches outright invention but voice leaks are much
+    // stronger than per-section regex for these slots.
+    const skipExamples =
+      isStructuralVitalLabel(title) || isExamNarrativeLabel(title);
     const examples = skipExamples ? undefined : sectionExamplesMap.get(leaf.id);
     if (skipExamples) {
       logger.debug(`[pipeline] skipping examples for "${title}" (${leaf.id})`);
@@ -490,39 +252,6 @@ export async function generateNote(
     } catch (err) {
       logger.error(`[pipeline] section ${leaf.id} failed:`, err);
       draft = { id: leaf.id, title, content: "" };
-    }
-
-    // Post-render grounding check for NUMERIC vitals sections. The
-    // first version of this check was pure digit-substring matching,
-    // which stripped legitimate Slovak word → digit translations
-    // ("stotridsaťpäť" in source, "135" in draft). The current version
-    // accepts digits OR their Slovak number-word forms (see
-    // toSlovakNumberForms). Single digits 0–9 are skipped to avoid
-    // trivial false-strips on lead labels like V1, II, stp.
-    if (isVitalSection && draft.content.trim().length > 0) {
-      const stripped = stripUngroundedVitalValue(draft.content, source);
-      if (stripped !== draft.content) {
-        logger.debug(
-          `[pipeline] stripped ungrounded value from "${title}" (${leaf.id}): "${draft.content.trim()}"`,
-        );
-        draft = { ...draft, content: stripped };
-      }
-    }
-
-    // Post-render boilerplate check for NARRATIVE exam sections —
-    // Celkové vyšetrenie / Celkový stav / Fyzikálne vyšetrenie. The
-    // prompt's "forbidden fallbacks" list + the hardened contract
-    // should suppress generic "normal exam" sentences, but Haiku
-    // sometimes drifts back. If the draft is dominated by
-    // unsourceable boilerplate clauses, force empty.
-    if (isExamNarrativeLabel(title) && draft.content.trim().length > 0) {
-      const stripped = stripBoilerplateExam(draft.content, source);
-      if (stripped !== draft.content) {
-        logger.debug(
-          `[pipeline] stripped boilerplate exam from "${title}" (${leaf.id}): "${draft.content.trim().slice(0, 100)}"`,
-        );
-        draft = { ...draft, content: stripped };
-      }
     }
 
     // If no critic: run reconcilers immediately, then emit final.
@@ -663,27 +392,12 @@ export async function runCriticAndReconcilers(args: {
     }
   }
 
-  // Post-critic boilerplate check — for narrative exam sections, a
-  // residual sentence from the forbidden-fallback list ("Pacient pri
-  // vedomí, orientovaný", etc.) can survive the critic pass. Re-run
-  // the same strip we apply on the pre-critic draft.
-  if (isExamNarrativeLabel(config.title) && content.trim().length > 0) {
-    const stripped = stripBoilerplateExam(content, source);
-    if (stripped !== content) {
-      logger.debug(
-        `[pipeline] post-critic boilerplate strip for "${config.title}"`,
-      );
-      content = stripped;
-    }
-  }
-
-  // Safety net — strip absence-description leaks from the critic output
-  // (same guard the section-agent applies to its own draft). Catches
-  // analytical essays Haiku sometimes writes when it decides the
-  // section should be empty.
-  if (isAbsenceDescription(content)) {
-    content = "";
-  }
+  // (Both the section-agent renderer and the critic now use tool-use
+  // with claims/evidence. Ungrounded claims are dropped at render;
+  // the critic returns a single string via its forced tool call. The
+  // old regex defences — isAbsenceDescription, stripBoilerplateExam —
+  // are no longer needed because no text channel exists for Haiku to
+  // emit essays or boilerplate.)
 
   return applyReconcilers(content, config.reconcilers, source, language);
 }

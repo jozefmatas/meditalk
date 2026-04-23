@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-23 (file-focus filter + /api/adjust route with router Haiku + critic via tool-use + Slovak number-word grounding. Critic enabled on every leaf section.)_
+_Last updated: 2026-04-23 (all-in Anthropic tool-use: section-agent / suggester / adjust-router / file-focus all converted to forced tool calls with server-side evidence validation. ~500 lines of regex defences removed.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -8,19 +8,38 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](../web
 
 ---
 
-## New this session (2026-04-23)
+## All-in tool-use (2026-04-23)
 
-- **`/api/adjust`** — incremental re-render endpoint. Client sends only the delta (new transcript / new file ids). A Haiku "router" (`sections/adjust-router.ts`) classifies which leaf sections the delta touches; `generateNote` re-renders only those via the new `leafIdFilter` option; untouched sections keep their prior content from `visit.metadata.section_contents` (persisted on every generate). Vital-group atomicity: if any one of Krvný tlak / Pulz / Výška / Hmotnosť / BMI / EKG / Celkové vyšetrenie is flagged, the whole group re-renders.
-- **File-focus filter** — `sections/file-focus.ts`. When the user types a distillation directive in the per-file context dialog ("Past" mode), a Haiku extraction pass pre-filters the file to just the matching passages BEFORE any section agent or ICD suggester sees it. Cached in `visit.metadata.file_focus_cache` keyed on `(fileId, textHash, directive)` so unchanged files skip re-filtering on regenerate/adjust.
-- **Critic via tool-use** — `sections/critic.ts` now forces `tool_choice: submit_corrected_section`. Haiku returns a tool call with a single string field — no text channel for essay / meta-commentary leaks. Replaces the prompt-only "no reasoning essays" rule that Haiku ignored.
-- **Critic enabled on every leaf section** via `scripts/enable-critic-everywhere.mjs` (214 sections across 9 templates). Záver keeps its own critic call from the route.
-- **Slovak number-word grounding** — `stripUngroundedVitalValue` accepts "sto tridsaťpäť" as backing for "135" in the draft, via `toSlovakNumberForms(n)` (0–999). Removes false-positive stripping of legit speech→digit translations when the doctor dictates vitals.
-- **Template guardrails added** via migrations: objective-exam grounding HARD RULE (`add-objective-grounding-rule.mjs`), clinical-voice 3rd-person (`add-voice-guardrail.mjs`), capitalization + Slovak gender agreement (`add-grammar-guardrails.mjs`).
-- **Section contract tightenings**: TO opener + echo integration + no-age-invention (`tighten-to-contract.mjs`), LA chronic+acute meds with strict discontinued-filter (`expand-la-contract.mjs`), Pulz single-snapshot no-timeline (`tighten-pulz-contract.mjs`), Výška/Hmotnosť/BMI empty-unless-source (`harden-vitals-contracts.mjs`), Celkové vyšetrenie no-boilerplate (`harden-celkove-contract.mjs`), EA denial-example cleanup (`strip-contract-denial-examples.mjs`).
-- **Záver formatting** — `formatZaverFromSuggestions` now emits each ICD on its own line (newline-separated) instead of comma-joined. `renderContent` wraps each line in its own `<p>` for clean reading.
+Every Haiku call in the pipeline now uses `tool_choice: { type: "tool", name: ... }` to force structured output. Grounding is enforced server-side via substring validation against the raw source (diacritic-folded). Prompt-level safety rules are reinforced but never relied on alone — the schema is the defence.
+
+- **`renderSection`** (`sections/section-agent.ts`) — forces `submit_section_claims` returning `{claims: [{text, evidence, kind}]}`. Each claim pairs one clinical sentence with the verbatim source span that supports it. `validateClaims` drops any claim whose evidence fails a folded substring check against `transcript + doctorNotes + files[]`. Evidence minimum: 4 chars (short enough for clinical abbreviations like `LPHB`, `RBBB`; long enough to avoid 1–2 char collisions). `kind: "inferred_paraphrase"` marks safe speech→clinical normalisations ("cukrovka" → "Diabetes mellitus.", "sto tridsaťpäť" → "135") with the colloquial span as evidence. The schema forbids two-span concatenation with "…" / "..." because that breaks substring matching.
+- **`criticPass`** (`sections/critic.ts`) — forces `submit_corrected_section` returning `{corrected: string}`. Haiku has no text channel to leak essays, meta-commentary, or "The correct AA section is:" prefixes. Empty-section = pass `""`.
+- **`suggestIcdCodes`** (`sections/suggest-icd.ts`) — forces `submit_icd_candidates` returning `{codes: [{code, description, confidence, evidence, differential?}]}`. Evidence is ONE contiguous verbatim substring (≥4 chars); concatenation with joiners is banned. Server validates CSV membership, evidence-in-source, and dedups by code. `confidence` is a schema enum (`high|medium|low`); no normalisation needed.
+- **`routeAdjustment`** (`sections/adjust-router.ts`) — forces `select_affected_sections` returning `{affected: string[], reasoning?: string}`. Returns the subset of leaf section ids a mid-visit adjustment touches. No JSON regex parsing.
+- **`extractWithDirective`** (`sections/file-focus.ts`) — forces `submit_extracted_passages` returning `{passages: [{text, match_reason?}]}`. Each passage is a verbatim substring of the document; server validates and drops anything that can't be substring-matched in the original file.
+
+### What got removed
+
+- `isAbsenceDescription` — regex net for meta-commentary essays. Obsolete: critic tool-use has no text channel.
+- `stripBoilerplateExam` + `EXAM_BOILERPLATE_PATTERNS` — forbidden-fallback strip list. Obsolete: the claims schema rejects any clause without source evidence.
+- `stripUngroundedVitalValue` + `toSlovakNumberForms(0..999)` — Slovak number-word grounding table. Obsolete: the `inferred_paraphrase` kind + evidence citation handles "sto tridsaťpäť" → "135" natively.
+- `extractEssayAnswer` + the post-critic regex extractor — obsolete once critic returns a single string field via tool call.
+- The old `USE_CLAIMS_AGENT` / `SECTION_AGENT_TOOL_USE` env flags — claims is the only path now; no fallback.
+- `section-agent-claims.ts` spike file and `absence-description.test.ts` — deleted.
+
+Net: ~500 lines of regex defence code removed. All 451 unit tests still pass.
+
+### Prior session items still in force
+
+- **`/api/adjust`** — incremental re-render endpoint. Client sends only the delta. The Haiku router classifies affected leaves; `generateNote` re-renders only those via `leafIdFilter`; untouched sections keep their prior content from `visit.metadata.section_contents`. Vital-group atomicity: flagging any of Krvný tlak / Pulz / Výška / Hmotnosť / BMI / EKG / Celkové vyšetrenie re-renders the whole group.
+- **File-focus cache** — `visit.metadata.file_focus_cache` keyed on `(fileId, textHash, directive)` so unchanged files skip re-filtering.
+- **Critic enabled on every leaf** (214 sections) via `scripts/enable-critic-everywhere.mjs`. Záver keeps its own critic call from the route.
+- **Template guardrails**: objective-exam grounding, clinical-voice 3rd-person, Slovak grammar rules (via scripts).
+- **Section contract tightenings**: TO, LA, Pulz, Výška/Hmotnosť/BMI, Celkové vyšetrenie, EA (via scripts).
+- **Záver line formatting**: `formatZaverFromSuggestions` emits each ICD on its own line; `renderContent` wraps each line in its own `<p>`.
 - **Eval harness**: 3 real doctor-corrected fixtures (`mordavska-nstemi`, `kovacikova-real`, `gozora-stemi`). Diacritic-fold matching, `EVAL_VERBOSE=1` dumps full notes.
-- **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type what to distill (required). Backing data stays a single `context` string (no new role field).
-- **ICD panel dedup** — server suggester dedups by code; UI also dedups to defend against persisted duplicates.
+- **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type a directive to distill.
+- **ICD panel dedup** — server + UI dedup by code.
 
 ---
 

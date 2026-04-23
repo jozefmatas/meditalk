@@ -68,18 +68,14 @@ export async function extractWithDirective(params: {
 
   const systemPrompt = `You extract verbatim passages from a ${LANGUAGE_LABEL[language]}-language medical document per the uploading physician's directive.
 
-The physician has restricted which parts of the document should feed the clinical note. Your job: read the document, decide which sections match the directive, and return them — VERBATIM, in their original order, with their headings preserved. Nothing else.
+The physician has restricted which parts of the document should feed the clinical note. Your job: read the document, decide which passages match the directive, and return them as a list — each passage VERBATIM from the source.
 
 # Rules
-- Return ONLY verbatim passages from the document. No summary, no rewrite, no commentary.
-- Preserve headings, line breaks, and original formatting of matched passages.
-- If NOTHING in the document matches, return an empty string (zero characters).
-- If the directive is broad or ambiguous ("echokg a záver"), err on the side of INCLUSION — pull every passage whose heading or content plausibly matches either keyword.
+- Every \`text\` you return MUST be a verbatim substring of the document. Fake passages get DROPPED by server-side substring validation.
+- Preserve headings and their bodies together as a single passage when they belong together.
+- If the directive is broad ("echokg a záver"), err on the side of INCLUSION — pull every passage whose heading or content plausibly matches either keyword.
 - Match loosely on section headings: "echokg" / "echo" / "ECHOKG" / "echokardiografia" all match. "záver" / "Záver" / "Diagnostický záver" / "Summary" all match.
-- Do NOT include adjacent unrelated content just because it's near a matched section.
-
-# Output
-Raw ${LANGUAGE_LABEL[language]} text of the matched passages, concatenated in their original order with a blank line between distinct passages. No preamble, no markdown wrapping, no explanation. Empty string when nothing matches.`;
+- Return an empty array when nothing matches.`;
 
   const userMessage = `# Directive
 ${directive}
@@ -94,6 +90,41 @@ ${text}`;
       temperature: 0,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [
+        {
+          name: "submit_extracted_passages",
+          description:
+            "Submit the passages of the document that match the physician's directive, verbatim.",
+          input_schema: {
+            type: "object",
+            properties: {
+              passages: {
+                type: "array",
+                description:
+                  "Verbatim passages matching the directive, in original document order. Empty array when nothing matches.",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: {
+                      type: "string",
+                      description:
+                        "ONE contiguous verbatim substring of the document (≥8 chars). NEVER concatenate multiple places with '…' or '...'. Server validates via substring match — concatenated spans will be dropped.",
+                    },
+                    match_reason: {
+                      type: "string",
+                      description:
+                        "Short rationale (e.g. 'matches echokg heading').",
+                    },
+                  },
+                  required: ["text"],
+                },
+              },
+            },
+            required: ["passages"],
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "submit_extracted_passages" },
     });
 
     if (usage) {
@@ -108,13 +139,45 @@ ${text}`;
       });
     }
 
-    const extracted = response.content
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim();
+    // Extract + validate each passage against the source text.
+    const passages: Array<{ text: string }> = [];
+    for (const block of response.content) {
+      if (
+        block.type === "tool_use" &&
+        block.name === "submit_extracted_passages"
+      ) {
+        const input = block.input as { passages?: unknown };
+        if (Array.isArray(input.passages)) {
+          for (const p of input.passages) {
+            if (!p || typeof p !== "object") continue;
+            const obj = p as { text?: unknown };
+            if (typeof obj.text === "string" && obj.text.trim().length >= 8) {
+              passages.push({ text: obj.text });
+            }
+          }
+        }
+        break;
+      }
+    }
+
+    const sourceFolded = text.toLowerCase();
+    const valid: string[] = [];
+    for (const p of passages) {
+      const span = p.text.trim();
+      // Substring match in source (case-insensitive, preserves diacritics).
+      if (sourceFolded.includes(span.toLowerCase())) {
+        valid.push(span);
+      } else {
+        logger.debug(
+          `[file-focus] dropped ungrounded passage (${span.length}ch) from ${fileName}`,
+        );
+      }
+    }
+
+    const extracted = valid.join("\n\n");
 
     logger.debug(
-      `[file-focus] "${fileName}" directive="${directive.slice(0, 60)}" — ${text.length}ch → ${extracted.length}ch`,
+      `[file-focus] "${fileName}" directive="${directive.slice(0, 60)}" — ${text.length}ch → ${extracted.length}ch (${valid.length}/${passages.length} passages kept)`,
     );
     return extracted;
   } catch (err) {
