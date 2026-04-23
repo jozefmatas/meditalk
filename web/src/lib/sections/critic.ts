@@ -23,7 +23,15 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
 import type { Language, RawSource } from "./section-agent";
 
-const MODEL_ID = "claude-haiku-4-5-20251001";
+/** Model tier for the critic pass. Haiku is the default; Sonnet is used
+ *  on sections that need multi-step clinical inference (Záver ICD
+ *  anatomy, OA shorthand preservation, LA dose fidelity). */
+export type CriticModel = "haiku" | "sonnet";
+
+const MODEL_IDS: Record<CriticModel, string> = {
+  haiku: "claude-haiku-4-5-20251001",
+  sonnet: "claude-sonnet-4-6",
+};
 
 let _client: Anthropic | null = null;
 function client(): Anthropic {
@@ -47,6 +55,8 @@ export interface CriticInput {
   sectionContext: string;
   language: Language;
   usage?: UsageContext;
+  /** Model tier for this critic call. Defaults to haiku. */
+  model?: CriticModel;
 }
 
 export interface CriticResult {
@@ -65,15 +75,14 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
 
   const systemPrompt = buildSystemPrompt(input);
   const userMessage = buildUserMessage(input, draft);
+  const modelId = MODEL_IDS[input.model ?? "haiku"];
 
-  // Structured output via tool-use — forces Haiku to return the
+  // Structured output via tool-use — forces the model to return the
   // corrected text inside a single string field. No essay-leak is
-  // possible because the response body is a tool call, not free
-  // prose. If the correct output is empty, Haiku passes an empty
-  // string. This is a cleaner fix than prompt-only ("please don't
-  // write essays") since Haiku has no text channel to ramble in.
+  // possible because the response body is a tool call, not free prose.
+  // If the correct output is empty, the model passes an empty string.
   const response = await client().messages.create({
-    model: MODEL_ID,
+    model: modelId,
     max_tokens: 2000,
     temperature: 0,
     system: systemPrompt,
@@ -104,7 +113,7 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
       userId: input.usage.userId,
       visitId: input.usage.visitId,
       provider: "anthropic",
-      model: MODEL_ID,
+      model: modelId,
       operation: "generate_section",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,

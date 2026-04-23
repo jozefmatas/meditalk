@@ -86,6 +86,9 @@ If the primary is an acute MI, the ICD site code MUST match both the clinician's
 
 Example: clinician says "stemy laterálnej steny" AND EKG shows "ST elev. aVL, I, depr. ST III, aVF, V1" → \`I21.2\` (lateral STEMI). NEVER \`I21.0\` (anterior) — aVL/I are lateral leads, not anterior. NEVER \`I21.9\` — the source gave you the anatomy and the ST pattern.
 
+## Specificity is NOT optional
+If the transcript names the anatomy in Slovak ("laterálnej steny", "prednej steny", "spodnej steny", "inferolaterálny") AND you can see an ST-elevation pattern in the source, emit the SPECIFIC I21.0/I21.1/I21.2 code. I21.9 is explicitly WRONG here — the source gave you enough to specify, and I21.9 means "we couldn't tell". Using I21.9 when a specific site is named is a CODING ERROR, not safety. The specific code is what the clinician documented; defaulting to I21.9 drops information.
+
 # Tobacco use in cardiology notes
 Long-term active smoking with daily pack-count ("fajčiar pätnásť cigariet denne", "dlhoročný fajčiar") is routinely coded in Slovak cardiology as **F17.2** (Porucha psychiky a správania zapríčinená užívaním tabaku: syndróm závislosti). Include F17.2 when the patient reports established daily smoking, not just occasional.
 
@@ -96,6 +99,7 @@ The source's exact wording drives the code. Common traps to avoid:
 - "AV blok 1. stupňa" → I44.0 (first degree). NEVER I44.1 (second degree).
 - "st.p. strumektómii, na terapii Euthyroxom" → E89.0 (post-surgical hypothyroidism). NEVER E03.2 (drug-induced).
 - "st.p. operácii katarakty" → Z96.1 or omit. NEVER H26.9 (active cataract).
+- "monoklonálna gamapatia" / "MGUS" / "gamapatia typu IgG" → D47.2 (Monoklonálna gamapatia). Commonly phrased in reports as "MGUS" or "gamapatia typu IgG kappa vs MGUS" — both map to D47.2.
 If the source denies or negates a finding, do NOT emit a code for it.
 
 # Scope
@@ -120,31 +124,80 @@ Include candidates for:
 - Never propose a code for a condition the patient denied.
 - Never propose a code derived from a raw imaging/lab finding the clinician didn't diagnose.
 
-# Output
-Return ONLY valid JSON, no prose. Shape:
-\`\`\`json
-{
-  "codes": [
-    { "code": "R07.4", "description": "Bolesť v hrudníku, bližšie neurčená", "confidence": "high", "differential": "nemožno vylúčiť NSTEMI" },
-    { "code": "I10", "description": "Primárna [esenciálna] artériová hypertenzia", "confidence": "high" },
-    ...
-  ]
-}
-\`\`\`
+# Tool-use contract
+Respond by calling \`submit_icd_candidates\` with \`{codes: [...]}\`. Each code carries an \`evidence\` field — ONE verbatim contiguous substring of the source that supports the diagnosis. The server verifies evidence against source; unsupported codes are DROPPED.
+- \`evidence\` rules (HARD):
+  - ONE contiguous span copied verbatim from the source, no paraphrasing, no normalisation, no typo-fixing.
+  - NEVER concatenate multiple spans with "…", "...", or other joiners. If you need to cite two places, pick the MORE TELLING single span.
+  - At least 4 characters. A short diagnostic abbreviation (e.g. "I10", "SZpEF", "AH") is fine if that is the actual token in the source.
+  - If the code is a chronic comorbidity from an OA list, cite the line entry (e.g. "Arteriová hypertenzia" from the discharge letter).
+  - If the code is today's primary, cite the clinician's assessment phrase (e.g. "Non STE AKS (subakutny v.s.)", "stemy laterálnej steny ľavej komory").
 - Order by clinical relevance: primary first, chronic comorbidities next, states-post last.
 - Confidence: "high" = explicitly diagnosed; "medium" = strongly implied; "low" = plausible but less certain.
 - 10–15 codes total. If the encounter is genuinely simple, fewer is fine.
-- Omit \`differential\` unless the primary is a symptom code.`;
+- Omit \`differential\` unless the primary is a symptom code awaiting work-up.
+- Faking evidence is strictly worse than omitting a code.`;
 
   const userMessage = `# Raw source\n${sourceDump}`;
 
   try {
     const response = await client().messages.create({
       model: MODEL_ID,
-      max_tokens: 2000,
+      max_tokens: 3000,
       temperature: 0,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
+      tools: [
+        {
+          name: "submit_icd_candidates",
+          description:
+            "Submit 10–15 candidate ICD-10 codes for the encounter, each paired with the verbatim source span that supports it.",
+          input_schema: {
+            type: "object",
+            properties: {
+              codes: {
+                type: "array",
+                description:
+                  "Ordered list of ICD-10 candidates. Primary first, chronic comorbidities next, states-post last.",
+                items: {
+                  type: "object",
+                  properties: {
+                    code: {
+                      type: "string",
+                      description:
+                        "WHO Slovak ICD-10 code: Letter + 2 digits optionally + `.digit` or `.digit-digit`. Reject ICD-10-CM codes with 3+ digits after the decimal.",
+                    },
+                    description: {
+                      type: "string",
+                      description:
+                        "Short description of the code (server overrides with canonical CSV text, but include for clarity).",
+                    },
+                    confidence: {
+                      type: "string",
+                      enum: ["high", "medium", "low"],
+                      description:
+                        "high = explicitly diagnosed; medium = strongly implied; low = plausible but uncertain.",
+                    },
+                    evidence: {
+                      type: "string",
+                      description:
+                        "ONE contiguous verbatim substring of the source (≥4 chars) that supports this diagnosis. NEVER concatenate with '…' / '...' — pick one span. For chronic comorbidities, cite the OA list entry verbatim. Required.",
+                    },
+                    differential: {
+                      type: "string",
+                      description:
+                        "Verbatim 'nemožno vylúčiť …' clause from the source. Only for symptom-code primaries awaiting work-up.",
+                    },
+                  },
+                  required: ["code", "description", "confidence", "evidence"],
+                },
+              },
+            },
+            required: ["codes"],
+          },
+        },
+      ],
+      tool_choice: { type: "tool", name: "submit_icd_candidates" },
     });
 
     if (usage) {
@@ -159,30 +212,38 @@ Return ONLY valid JSON, no prose. Shape:
       });
     }
 
-    const text = response.content
-      .map((block) => (block.type === "text" ? block.text : ""))
-      .join("")
-      .trim();
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      logger.warn("[suggest-icd] no JSON in response");
-      return [];
+    // Extract the forced tool call.
+    let rawCodes: Array<{
+      code?: string;
+      description?: string;
+      confidence?: string;
+      evidence?: string;
+      differential?: string;
+    }> = [];
+    for (const block of response.content) {
+      if (
+        block.type === "tool_use" &&
+        block.name === "submit_icd_candidates"
+      ) {
+        const input = block.input as { codes?: unknown };
+        if (Array.isArray(input.codes)) {
+          rawCodes = input.codes as typeof rawCodes;
+        }
+        break;
+      }
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as {
-      codes?: Array<{
-        code?: string;
-        description?: string;
-        confidence?: string;
-        differential?: string;
-      }>;
-    };
-    const rawCodes = parsed.codes ?? [];
+    // Build a source blob for evidence validation (same shape as the
+    // section-agent's validation).
+    const sourceBlob = foldForValidation(
+      [
+        source.transcript ?? "",
+        source.doctorNotes ?? "",
+        ...(source.files ?? []).map((f) => f.text ?? ""),
+      ].join("\n"),
+    );
 
-    // CSV-validate every code. Unknown codes → drop. Duplicate codes
-    // (Haiku likes proposing catch-all Z87.8 twice for two different
-    // "st.p." items) → keep the first occurrence only; downstream UI
-    // uses `code` as React key and crashes on collisions.
+    // Validate each code: CSV-validate + evidence-in-source + dedup.
     const valid: SuggestedIcdCode[] = [];
     const seen = new Set<string>();
     for (const c of rawCodes) {
@@ -197,11 +258,27 @@ Return ONLY valid JSON, no prose. Shape:
         logger.debug(`[suggest-icd] drop unknown code ${code}`);
         continue;
       }
+      const evidence = typeof c.evidence === "string" ? c.evidence.trim() : "";
+      if (evidence.length < 4) {
+        logger.debug(`[suggest-icd] drop code ${code} — missing evidence`);
+        continue;
+      }
+      if (!sourceBlob.includes(foldForValidation(evidence))) {
+        logger.debug(
+          `[suggest-icd] drop code ${code} — evidence not in source: "${evidence.slice(0, 80)}"`,
+        );
+        continue;
+      }
       seen.add(code);
       valid.push({
         code,
         description: canonical,
-        confidence: normalizeConfidence(c.confidence),
+        confidence:
+          c.confidence === "high" ||
+          c.confidence === "medium" ||
+          c.confidence === "low"
+            ? c.confidence
+            : undefined,
         differential:
           typeof c.differential === "string" && c.differential.trim()
             ? c.differential.trim()
@@ -217,13 +294,9 @@ Return ONLY valid JSON, no prose. Shape:
   }
 }
 
-function normalizeConfidence(
-  raw: string | undefined,
-): "high" | "medium" | "low" | undefined {
-  if (!raw) return undefined;
-  const lower = raw.toLowerCase();
-  if (lower.includes("high")) return "high";
-  if (lower.includes("medium") || lower.includes("mod")) return "medium";
-  if (lower.includes("low")) return "low";
-  return undefined;
+function foldForValidation(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }

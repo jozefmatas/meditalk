@@ -85,4 +85,103 @@ describe("drug-normalizer", () => {
     // Arixtra's "2,5" must survive as a single entry — no phantom split.
     expect(out).toContain("Arixtra 2,5 mg sc à 24h (15:00)");
   });
+
+  it("dedupes exact-duplicate drug entries (same brand + same dose)", () => {
+    // Reproduces the real-world "TRITACE 1/3-0-0, TRITACE 1/3-0-0" bug.
+    const input = "TRITACE 1/3-0-0, TRITACE 1/3-0-0, Zetovar";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/TRITACE/gi) ?? []).length;
+    expect(tritaceCount).toBe(1);
+    expect(out).toContain("Zetovar");
+  });
+
+  it("keeps entries with same brand but DIFFERENT dose (not a duplicate)", () => {
+    // Patient taking 2× same drug at different strengths is legitimate.
+    const input = "TRITACE 1/3-0-0, TRITACE 1/2-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/TRITACE/gi) ?? []).length;
+    expect(tritaceCount).toBe(2);
+  });
+
+  it("dedupes across newlines, not just within a comma-separated line", () => {
+    const input = "ANOPYRIN 100 mg 0-1-0\nANOPYRIN 100 mg 0-1-0";
+    const out = drugNormalizer(input, src, ctx);
+    const anopyrinCount = (out.match(/ANOPYRIN/gi) ?? []).length;
+    expect(anopyrinCount).toBe(1);
+  });
+
+  it("dedup tolerates whitespace / case drift in dose schedule", () => {
+    // " 1/3-0-0 " and "1/3-0-0" should fingerprint to the same value.
+    const input = "TRITACE 1/3-0-0, tritace  1/3-0-0 ";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/tritace/gi) ?? []).length;
+    expect(tritaceCount).toBe(1);
+  });
+
+  it("collapses brand + generic of the SAME active ingredient (TRITACE ↔ Ramipril)", () => {
+    // Real-world pattern: patient reports 'TRITACE' in speech, discharge
+    // letter has 'Ramipril Actavis'. Both map to 'ramipril' in the CSV.
+    // Dedup at the active-ingredient level keeps the first form only.
+    const input = "TRITACE 1/3-0-0, Ramipril Actavis 1/3-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    // Expect the first entry (TRITACE) to survive, the second to drop.
+    expect(out).toContain("TRITACE");
+    expect(out).not.toContain("Ramipril Actavis");
+  });
+
+  it("keeps brands with the SAME active ingredient when doses differ", () => {
+    // Different strengths of the same ingredient is legitimate — the
+    // patient might take one in the morning and another in the evening.
+    const input = "TRITACE 5 mg 1-0-0, Ramipril Actavis 10 mg 0-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toContain("TRITACE");
+    expect(out).toContain("Ramipril Actavis");
+  });
+
+  it("falls back to brand-prefix dedup when active ingredient unknown", () => {
+    // A made-up brand the CSV doesn't know — must still exact-dedup.
+    const input = "Zqxwvbrt 1-0-1, Zqxwvbrt 1-0-1, Zqxwvbrt 2-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    const count = (out.match(/Zqxwvbrt/gi) ?? []).length;
+    // Two distinct dose-schedule entries → 2 kept; 3 would be a dedup miss.
+    expect(count).toBe(2);
+  });
+
+  it("drops dose-less entry when same ingredient has a dose elsewhere (dosed FIRST)", () => {
+    // Reproduces the live bug: TRITACE has dose, Ramipril Actavis listed
+    // afterwards without dose — both map to ramipril, same prescription.
+    const input = "TRITACE 1/3-0-0, Ramipril Actavis";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toContain("TRITACE");
+    expect(out).not.toContain("Ramipril Actavis");
+  });
+
+  it("drops dose-less entry when same ingredient has a dose elsewhere (dose-less FIRST)", () => {
+    // Order-independent: even when the dose-less mention comes first,
+    // we drop it in favour of the dosed form (appears later).
+    const input = "Ramipril Actavis, TRITACE 1/3-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).not.toContain("Ramipril Actavis");
+    expect(out).toContain("TRITACE");
+  });
+
+  it("keeps all distinct-dose entries even when some have no dose", () => {
+    // If several legitimate dose schedules exist, all are kept — only
+    // the dose-less entry of the same ingredient is removed.
+    const input = "Ramipril Actavis, TRITACE 5 mg 1-0-0, Piramil 10 mg 0-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    // Dose-less one dropped, two dosed ones kept.
+    expect(out).not.toContain("Ramipril Actavis");
+    expect(out).toContain("TRITACE 5 mg 1-0-0");
+    expect(out).toContain("Piramil 10 mg 0-0-1");
+  });
+
+  it("keeps two dose-less entries of the same ingredient (first only)", () => {
+    // Two mentions with no dose info at all: the first is kept, the
+    // second is an exact-fingerprint duplicate.
+    const input = "Ramipril Actavis, Ramipril Actavis";
+    const out = drugNormalizer(input, src, ctx);
+    const count = (out.match(/Ramipril Actavis/gi) ?? []).length;
+    expect(count).toBe(1);
+  });
 });

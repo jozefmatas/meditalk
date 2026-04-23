@@ -15,6 +15,7 @@
 import type { Reconciler } from "./index";
 import {
   correctMedicationBaseName,
+  getActiveIngredient,
   isValidMedication,
 } from "../../lookup/medications";
 
@@ -90,17 +91,110 @@ function normalizeEntry(
   );
 }
 
+/**
+ * Parse a normalized entry into its dedup-relevant parts.
+ * Returns `null` when the entry has no recognizable brand prefix
+ * (unknown / multi-ingredient / free-text); such entries are passed
+ * through unchanged.
+ */
+interface ParsedEntry {
+  key: string; // active ingredient (when known) else brand prefix, UPPER
+  dose: string; // dose-schedule signature (UPPER, no whitespace), "" if absent
+}
+
+function parseEntry(
+  entry: string,
+  locale: import("../section-agent").Language,
+): ParsedEntry | null {
+  const trimmed = entry.trim();
+  if (!trimmed) return null;
+  const prefixMatch = trimmed.match(PREFIX_RE);
+  if (!prefixMatch) return null;
+  const prefix = prefixMatch[1].trim();
+  if (prefix.length < 3) return null;
+
+  // Prefer active ingredient (generic name) so brand-level variants
+  // (TRITACE, Ramipril Actavis, Piramil) collapse to a single key.
+  // Fall back to the brand prefix for meds the CSV doesn't index.
+  const ingredient = getActiveIngredient(prefix, locale);
+  const key = (ingredient ?? prefix).toUpperCase();
+
+  // Dose-schedule signature (e.g. "1/3-0-0", "1-0-1", "200 mg")
+  // folded to no-whitespace + upper so cosmetic drift doesn't prevent
+  // match. Empty string when the entry has no dose info.
+  const dose = trimmed
+    .slice(prefixMatch[0].length)
+    .replace(/\s+/g, "")
+    .toUpperCase();
+
+  return { key, dose };
+}
+
 export const drugNormalizer: Reconciler = (text, _source, ctx) => {
   if (!text.trim()) return text;
 
   const locale = ctx.language;
   const lines = text.split("\n");
 
-  const correctedLines = lines.map((line) => {
-    const entries = splitEntries(line);
-    const corrected = entries.map((e) => normalizeEntry(e, locale));
-    return corrected.join(",");
-  });
+  // Pass 1 — flatten all entries across lines, normalize each, and
+  // index by active-ingredient key. We need the full picture before
+  // making dedup decisions because order matters: if "Ramipril
+  // Actavis" (no dose) appears BEFORE "TRITACE 1/3-0-0", a one-pass
+  // approach would keep both. The two-pass approach collapses them
+  // regardless of input order.
+  interface Flat {
+    line: number;
+    normalized: string;
+    parsed: ParsedEntry | null;
+  }
+  const flat: Flat[] = [];
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    for (const raw of splitEntries(lines[lineIdx])) {
+      const normalized = normalizeEntry(raw, locale);
+      const parsed = parseEntry(normalized, locale);
+      flat.push({ line: lineIdx, normalized, parsed });
+    }
+  }
 
-  return correctedLines.join("\n");
+  // Keys that appear with a non-empty dose somewhere in the text.
+  // Dose-less mentions of these keys are dropped as redundant.
+  const keysWithDose = new Set<string>();
+  for (const f of flat) {
+    if (f.parsed?.dose) keysWithDose.add(f.parsed.key);
+  }
+
+  // Pass 2 — compute keep flags.
+  // Rules:
+  //   1. If entry has no recognizable prefix, keep (pass-through).
+  //   2. If the entry's (key + dose) fingerprint was already kept, drop
+  //      (exact duplicate — same brand/generic AND same dose).
+  //   3. If entry has NO dose AND some other entry in the text has the
+  //      same key with a dose, drop as redundant mention.
+  const seenFingerprints = new Set<string>();
+  const keep: boolean[] = [];
+  for (const f of flat) {
+    if (!f.parsed) {
+      keep.push(true);
+      continue;
+    }
+    const { key, dose } = f.parsed;
+    if (!dose && keysWithDose.has(key)) {
+      keep.push(false);
+      continue;
+    }
+    const fp = `${key}::${dose}`;
+    if (seenFingerprints.has(fp)) {
+      keep.push(false);
+      continue;
+    }
+    seenFingerprints.add(fp);
+    keep.push(true);
+  }
+
+  // Pass 3 — reconstruct, preserving original line structure + order.
+  const byLine: string[][] = lines.map(() => []);
+  for (let i = 0; i < flat.length; i++) {
+    if (keep[i]) byLine[flat[i].line].push(flat[i].normalized);
+  }
+  return byLine.map((entries) => entries.join(",")).join("\n");
 };

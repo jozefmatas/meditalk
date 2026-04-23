@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-23 (file-focus filter + /api/adjust route with router Haiku + critic via tool-use + Slovak number-word grounding. Critic enabled on every leaf section.)_
+_Last updated: 2026-04-23 (Anthropic tool-use on critic / suggester / adjust-router / file-focus; section-agent stays on free-text prose output. Claims-with-evidence variant was tried and reverted — it atomised prose + dropped compact clinical shorthand).)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -8,19 +8,121 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](../web
 
 ---
 
-## New this session (2026-04-23)
+## Tool-use rollout status (2026-04-23)
 
-- **`/api/adjust`** — incremental re-render endpoint. Client sends only the delta (new transcript / new file ids). A Haiku "router" (`sections/adjust-router.ts`) classifies which leaf sections the delta touches; `generateNote` re-renders only those via the new `leafIdFilter` option; untouched sections keep their prior content from `visit.metadata.section_contents` (persisted on every generate). Vital-group atomicity: if any one of Krvný tlak / Pulz / Výška / Hmotnosť / BMI / EKG / Celkové vyšetrenie is flagged, the whole group re-renders.
-- **File-focus filter** — `sections/file-focus.ts`. When the user types a distillation directive in the per-file context dialog ("Past" mode), a Haiku extraction pass pre-filters the file to just the matching passages BEFORE any section agent or ICD suggester sees it. Cached in `visit.metadata.file_focus_cache` keyed on `(fileId, textHash, directive)` so unchanged files skip re-filtering on regenerate/adjust.
-- **Critic via tool-use** — `sections/critic.ts` now forces `tool_choice: submit_corrected_section`. Haiku returns a tool call with a single string field — no text channel for essay / meta-commentary leaks. Replaces the prompt-only "no reasoning essays" rule that Haiku ignored.
-- **Critic enabled on every leaf section** via `scripts/enable-critic-everywhere.mjs` (214 sections across 9 templates). Záver keeps its own critic call from the route.
-- **Slovak number-word grounding** — `stripUngroundedVitalValue` accepts "sto tridsaťpäť" as backing for "135" in the draft, via `toSlovakNumberForms(n)` (0–999). Removes false-positive stripping of legit speech→digit translations when the doctor dictates vitals.
-- **Template guardrails added** via migrations: objective-exam grounding HARD RULE (`add-objective-grounding-rule.mjs`), clinical-voice 3rd-person (`add-voice-guardrail.mjs`), capitalization + Slovak gender agreement (`add-grammar-guardrails.mjs`).
-- **Section contract tightenings**: TO opener + echo integration + no-age-invention (`tighten-to-contract.mjs`), LA chronic+acute meds with strict discontinued-filter (`expand-la-contract.mjs`), Pulz single-snapshot no-timeline (`tighten-pulz-contract.mjs`), Výška/Hmotnosť/BMI empty-unless-source (`harden-vitals-contracts.mjs`), Celkové vyšetrenie no-boilerplate (`harden-celkove-contract.mjs`), EA denial-example cleanup (`strip-contract-denial-examples.mjs`).
-- **Záver formatting** — `formatZaverFromSuggestions` now emits each ICD on its own line (newline-separated) instead of comma-joined. `renderContent` wraps each line in its own `<p>` for clean reading.
+Four of the five Haiku calls in the pipeline now use `tool_choice: { type: "tool", name: ... }` to force structured output with server-side validation. The fifth (section-agent) stays on free-text prose because structured "claims" output broke prose formatting.
+
+- **`renderSection`** (`sections/section-agent.ts`) — **FREE-TEXT**. Reads the source + section contract and emits prose directly. `isAbsenceDescription` (exported from the same file) strips "(empty)" / "žiadne údaje" / essay-describing-absence leaks before the content reaches the UI. Grounding is enforced downstream by the critic pass.
+  - _Why not claims-with-evidence?_ Attempted a tool-use version that returned `{claims: [{text, evidence, kind}]}` with per-claim server-side substring validation. Two problems emerged: (1) each claim rendered as its own `<p>`, destroying compact single-paragraph sections like OA / LA (which use comma-separated Slovak clinical shorthand); (2) extraction became too conservative, dropping specifics like "sy námahovej AP CCS II" or "DLP" that were plainly in the source. Reverted.
+- **`criticPass`** (`sections/critic.ts`) — forces `submit_corrected_section` returning `{corrected: string}`. The model has no text channel to leak essays, meta-commentary, or "The correct AA section is:" prefixes. Empty-section = pass `""`. Accepts an optional `model: "haiku" | "sonnet"` tier. **Sonnet 4.6 is the default for every section EXCEPT LA**; LA stays on Haiku. Rationale:
+  - Sonnet's tighter grounding pays off for narrative + reasoning sections: AA denial discrimination (catches "Myslím, že nie" as a denial), OA shorthand preservation, Záver ICD inference (I21.2 lateral over I21.9, I34.0 over I35.x, D47.2 MGUS), TO narrative synthesis, EA silence-vs-denial.
+  - LA (medication list) penalises Sonnet's strictness: Sonnet's critic aggressively strips meds it considers "not today's prescription" (observed in eval: Rytmonorm, Nolpaza dropped when OCR lists them as chronic meds). For a med list where completeness matters more than strict grounding, Haiku's more forgiving behaviour is correct.
+  - Routing is a single line in `pipeline.ts`: `isLaTitle(config.title) ? "haiku" : "sonnet"`. Easy to iterate on per-section overrides if other sections show similar completeness-over-strictness trade-offs.
+  - Cost: ~$0.10-0.15/visit extra for broader Sonnet coverage. Latency: unaffected — critic calls run in parallel per section, and Sonnet was already on the critical path for Záver/OA.
+  - Eval: bumped from 76/84 baseline → 79-81/84 across two runs. All remaining failures are eval-assertion brittleness (`"Malc"` vs "Malackách", `"AH"` case-sensitive, `"štítn"` vs "strumektómia") rather than content quality.
+- **`suggestIcdCodes`** (`sections/suggest-icd.ts`) — forces `submit_icd_candidates` returning `{codes: [{code, description, confidence, evidence, differential?}]}`. Evidence is ONE contiguous verbatim substring (≥4 chars); concatenation with joiners is banned. Server validates CSV membership, evidence-in-source, and dedups by code.
+- **`routeAdjustment`** (`sections/adjust-router.ts`) — forces `select_affected_sections` returning `{affected: string[], reasoning?: string}`. Returns the subset of leaf section ids a mid-visit adjustment touches. No JSON regex parsing.
+- **`extractWithDirective`** (`sections/file-focus.ts`) — forces `submit_extracted_passages` returning `{passages: [{text, match_reason?}]}`. Each passage is a verbatim substring of the document; server validates and drops anything that can't be substring-matched in the original file.
+
+### What got removed
+
+- `stripBoilerplateExam` + `EXAM_BOILERPLATE_PATTERNS` — obsolete: the critic tool-use pass enforces the same contract more precisely.
+- `stripUngroundedVitalValue` + `toSlovakNumberForms(0..999)` — obsolete: the critic handles speech→digit paraphrase checks via its prompt + forced tool output.
+- `extractEssayAnswer` + the post-critic regex extractor — obsolete once critic returns a single string field via tool call.
+- The transient `USE_CLAIMS_AGENT` / `SECTION_AGENT_TOOL_USE` env flags and the `section-agent-claims.ts` spike file.
+
+`isAbsenceDescription` was kept — the free-text section-agent still needs it.
+
+### Prior session items still in force
+
+- **`/api/adjust`** — incremental re-render endpoint. Client sends only the delta. The Haiku router classifies affected leaves; `generateNote` re-renders only those via `leafIdFilter`; untouched sections keep their prior content from `visit.metadata.section_contents`. Vital-group atomicity: flagging any of Krvný tlak / Pulz / Výška / Hmotnosť / BMI / EKG / Celkové vyšetrenie re-renders the whole group.
+- **File-focus cache** — `visit.metadata.file_focus_cache` keyed on `(fileId, textHash, directive)` so unchanged files skip re-filtering.
+- **Critic enabled on every leaf** (214 sections) via `scripts/enable-critic-everywhere.mjs`. Záver keeps its own critic call from the route.
+- **Template guardrails**: objective-exam grounding, clinical-voice 3rd-person, Slovak grammar rules (via scripts).
+- **Section contract tightenings**: TO, LA, Pulz, Výška/Hmotnosť/BMI, Celkové vyšetrenie, EA (via scripts).
+- **Záver line formatting**: `formatZaverFromSuggestions` emits each ICD on its own line; `renderContent` wraps each line in its own `<p>`.
 - **Eval harness**: 3 real doctor-corrected fixtures (`mordavska-nstemi`, `kovacikova-real`, `gozora-stemi`). Diacritic-fold matching, `EVAL_VERBOSE=1` dumps full notes.
-- **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type what to distill (required). Backing data stays a single `context` string (no new role field).
-- **ICD panel dedup** — server suggester dedups by code; UI also dedups to defend against persisted duplicates.
+- **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type a directive to distill.
+- **ICD panel dedup** — server + UI dedup by code.
+
+---
+
+## Adding a new locale or specialty — what to touch
+
+This section answers the question: _"We ship sk + cardiology today. What do I update to ship cs / de / fr, or neurology / psychiatry / internal?"_ The table below maps every locale- or specialty-coupled surface in the codebase. Rule of thumb: the bulk of the system's intelligence is in **per-template data** (section contracts + voice corpus + template system prompt), which is admin-editable and needs no code change. Everything else is either structurally portable or hand-maintained in a small number of files.
+
+### Auto-portable (no code change, no prompt tweak)
+
+| Surface | Why it's portable |
+|---|---|
+| Source-substring grounding (critic + suggester evidence validation) | Works on any UTF-8 text; diacritic-folded |
+| Tool-use schemas (`submit_corrected_section`, `submit_icd_candidates`, `select_affected_sections`, `submit_extracted_passages`) | Schema only, no locale in field shape |
+| `stripUngroundedVitalValue` (Pulz / TK / Výška / Hmotnosť / BMI / EKG guard) | Arabic digits only — language-agnostic |
+| `/api/adjust` router + file-focus filter | Model-level classification; no hardcoded language strings |
+| PHI scrub (patient name, phone, email) | Regex patterns are structurally locale-neutral (SK-specific rodné číslo is an edge addition) |
+
+### Admin-editable per-template (no code change, but content work)
+
+| Surface | What to update |
+|---|---|
+| `section.context` — per-section clinical contract | Translate the contract; keep the OWNS / NEVER OWNS / FORMAT / LIMITS structure |
+| `template.systemPrompt` — template-wide guardrails | Translate worldview, abbreviation conventions, locale grammar rules |
+| `template.styleExamples` — voice corpus | Replace with locale's attending-note excerpts (style bible) |
+| `section.labels` — per-locale headings | Add the new locale key (sk / cs / en / …) to every section's `labels` map |
+| `section.model` — Haiku / Sonnet / Opus tier | Usually unchanged; bump to Sonnet if locale struggles on Haiku |
+
+All four live in `templates` table rows. Use `web/scripts/*.mjs` migration patterns to ship template changes.
+
+### Hand-maintained (code change required)
+
+| Surface | File | What changes for a new locale | What changes for a new specialty |
+|---|---|---|---|
+| `isAbsenceDescription` regex patterns | [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts) | Add locale-specific "no data" phrasings (e.g. German "keine Angabe", French "non renseigné") | Usually none |
+| Critic prompt — paraphrase examples ("cukrovka → DM") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Add locale paraphrase pairs (German "Zucker → DM", French "sucre → DT") | Specialty-specific paraphrases if any |
+| Critic prompt — unfounded-denial examples ("Alkohol neguje", "Infekčné ochorenie neguje") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Translate denial patterns to target locale | Typically none — denials are cross-specialty |
+| Critic prompt — boilerplate traps ("Pacient pri vedomí", "Habitus štíhly") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Locale's common boilerplate phrases | Specialty-specific exam boilerplate (e.g. neurology "reflexy sym. prítomné") |
+| Suggester prompt — ICD code knowledge (MI anatomy, F17.2, I48.0 specifics) | [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) | ICD codes are WHO-global; locale only affects description text | **Big specialty work**: add neurology / psychiatry / internal ICD traps and primary-code rules |
+| `LANGUAGE_LABEL` maps (`{ sk: "Slovak", ... }`) | `section-agent.ts`, `critic.ts`, `suggest-icd.ts`, `file-focus.ts`, `adjust-router.ts` | Add the new locale entry to all five maps | None |
+| `SupportedLanguage` type + `normalizeLanguage` | [`web/src/lib/types.ts`](../web/src/lib/types.ts), `pipeline.ts` | Add the new ISO code to the union | None |
+| `STRUCTURAL_VITAL_LABELS` + `EXAM_NARRATIVE_LABELS` (normalised label sets) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's label spellings (e.g. German "Größe", "Gewicht"; French "Taille", "Poids") | Add specialty-specific sections if they need the same voice-example skip treatment |
+| `ZAVER_LABELS` (recognised conclusion labels) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's "Assessment" / "Závěr" / "Fazit" / "Conclusion" variants | None |
+| ICD CSV lookup data | `web/src/lib/lookup/icd/*.csv` | Ship the locale's WHO ICD-10 CSV (SK, CS, EN already shipped) | None — codes are specialty-agnostic at the catalog level |
+| i18n message bundles | `web/messages/{sk,cs,en}.json` | Add new locale JSON | None |
+| Next-intl routing config | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Add new locale to `locales` list | None |
+| `next-intl` `localePrefix` strategy | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Usually unchanged (`as-needed` works for any set) | None |
+| PHI scrub — locale-specific IDs (SK/CZ rodné číslo, German Versicherungsnummer, etc.) | [`web/src/lib/phi-scrub.ts`](../web/src/lib/phi-scrub.ts) | Add the locale's national ID regex + guards | None |
+| ElevenLabs Scribe transcription prompt hints | [`web/src/lib/elevenlabs.ts`](../web/src/lib/elevenlabs.ts) | The `language_code` param already accepts any locale Scribe supports — verify ISO-639 code | None |
+
+### Checklist — adding a new locale (e.g. `de`)
+
+1. **Types + routing**: extend `SupportedLanguage`, `normalizeLanguage`, `LANGUAGE_LABEL` (5 files), add `de` to `next-intl` routing, ship `web/messages/de.json`.
+2. **ICD CSV**: drop the German WHO ICD-10 CSV into `web/src/lib/lookup/icd/`.
+3. **PHI scrub**: add the locale's national-ID pattern with guards.
+4. **Critic / suggester prompts**: add paraphrase pairs + denial patterns + boilerplate traps + ICD specifics (a few hours of clinician review).
+5. **`isAbsenceDescription`**: add 3-5 locale-specific absence phrasings.
+6. **Label sets**: extend `STRUCTURAL_VITAL_LABELS`, `EXAM_NARRATIVE_LABELS`, `ZAVER_LABELS`.
+7. **Templates**: clone existing templates; translate `section.context`, `template.systemPrompt`, `section.labels`; curate new `template.styleExamples` from locale corpus.
+8. **Evals**: add 1-2 doctor-corrected fixtures in the new locale to `web/src/lib/evals/fixtures/` and register in `scripts/run-evals.ts`.
+
+### Checklist — adding a new specialty (e.g. neurology)
+
+1. **ICD suggester prompt**: add specialty-specific code traps (e.g. G35 MS, G20 Parkinson, F32 depression), primary-code rules, and anatomy cross-checks to [`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts).
+2. **Critic prompt**: add specialty's common boilerplate traps (e.g. "reflexy sym. prítomné", "MMSE v norme") to the boilerplate list in [`critic.ts`](../web/src/lib/sections/critic.ts).
+3. **Templates**: create specialty templates with section hierarchy, `section.context` contracts tuned to the specialty, `template.systemPrompt` with specialty worldview, `template.styleExamples` from specialty corpus.
+4. **Evals**: add fixtures exercising specialty-specific risks (e.g. for neurology: stroke type discrimination, MS vs ALS, migraine subtype).
+5. **No code-level specialty flag** — all specialty logic lives in templates + prompt examples. The pipeline is specialty-neutral.
+
+### Scoping the work
+
+| Task | Locale lift | Specialty lift |
+|---|---|---|
+| Code changes | ~8 files, ~200 lines | ~2 files, ~50 lines |
+| Clinician content | ~1-2 days prompt review + translation | ~1 day for ICD traps + boilerplate |
+| Template authoring | 1 template cloned + translated per specialty | 3-5 new templates per specialty |
+| Voice corpus curation | 10-20 attending notes per template | Same, per template |
+| Eval fixtures | 2-3 per locale | 2-3 per specialty |
+
+The heaviest work is clinician review of prompt examples + template curation, not engineering. The code-side work is a half-day of plumbing.
 
 ---
 
