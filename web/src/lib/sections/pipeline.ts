@@ -103,6 +103,47 @@ function isExamNarrativeLabel(title: string): boolean {
   return EXAM_NARRATIVE_LABELS.has(normalizeLabel(title));
 }
 
+/**
+ * For structural vital sections (Pulz / TK / Výška / Hmotnosť / BMI /
+ * EKG), every Arabic-digit run in the draft must also appear in the
+ * raw source blob. When ANY digit token is missing, strip the section
+ * to empty — voice examples + ambient training data routinely leak
+ * phantom "SF 68/min" / "TK 120/80" that the critic misses because the
+ * numbers look clinically plausible.
+ *
+ * Digits are language-agnostic — this check works across sk/cs/en/any
+ * locale that writes Arabic numerals. Does NOT attempt Slovak number
+ * words ("sto tridsaťpäť"); if the model paraphrases word→digit, it
+ * must do so with a digit actually present in the source, otherwise the
+ * vital is dropped as ungrounded. That's the safe default.
+ */
+export function stripUngroundedVitalValue(
+  draft: string,
+  source: RawSource,
+): string {
+  const trimmed = draft.trim();
+  if (!trimmed) return draft;
+
+  const digitTokens = Array.from(trimmed.matchAll(/\d+/g)).map((m) => m[0]);
+  if (digitTokens.length === 0) return draft;
+
+  const sourceBlob = [
+    source.transcript ?? "",
+    source.doctorNotes ?? "",
+    ...(source.files ?? []).map((f) => f.text ?? ""),
+  ].join("\n");
+
+  for (const tok of digitTokens) {
+    if (!sourceBlob.includes(tok)) {
+      logger.debug(
+        `[pipeline] strip ungrounded vital: digit "${tok}" not in source — dropping "${trimmed.slice(0, 60)}"`,
+      );
+      return "";
+    }
+  }
+  return draft;
+}
+
 export function findZaverSection(
   template: Template,
   language: Language = "sk",
@@ -254,6 +295,12 @@ export async function generateNote(
       draft = { id: leaf.id, title, content: "" };
     }
 
+    // Structural-vital guard: ungrounded digits → strip the section.
+    if (isStructuralVitalLabel(title) && draft.content.trim()) {
+      const grounded = stripUngroundedVitalValue(draft.content, source);
+      if (grounded !== draft.content) draft = { ...draft, content: grounded };
+    }
+
     // If no critic: run reconcilers immediately, then emit final.
     if (!config.critic) {
       const finalContent = applyReconcilers(
@@ -390,6 +437,12 @@ export async function runCriticAndReconcilers(args: {
     } catch (err) {
       logger.error(`[pipeline] critic failed for "${config.title}":`, err);
     }
+  }
+
+  // Structural-vital guard: catch any digit the critic added or
+  // preserved that isn't in the source.
+  if (isStructuralVitalLabel(config.title) && content.trim()) {
+    content = stripUngroundedVitalValue(content, source);
   }
 
   // The critic already uses tool-use (`submit_corrected_section`) so
