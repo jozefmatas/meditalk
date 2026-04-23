@@ -392,13 +392,9 @@ export async function runCriticAndReconcilers(args: {
     }
   }
 
-  // (Both the section-agent renderer and the critic now use tool-use
-  // with claims/evidence. Ungrounded claims are dropped at render;
-  // the critic returns a single string via its forced tool call. The
-  // old regex defences — isAbsenceDescription, stripBoilerplateExam —
-  // are no longer needed because no text channel exists for Haiku to
-  // emit essays or boilerplate.)
-
+  // The critic already uses tool-use (`submit_corrected_section`) so
+  // it can't leak meta-commentary essays; the section-agent handles its
+  // own absence-description stripping via `isAbsenceDescription`.
   return applyReconcilers(content, config.reconcilers, source, language);
 }
 

@@ -2,23 +2,18 @@
  * Generic section agent — renders ONE section of a clinical note.
  *
  * Reads the raw source (transcript + doctor notes + OCR files) and
- * returns a claims-with-evidence payload via Anthropic tool-use. Each
- * claim is one clinical sentence paired with the verbatim source span
- * that supports it. The server validates every claim's evidence
- * against the source (substring match, diacritic-folded) and drops
- * ungrounded claims. Survivors' `text` fields are joined into the
- * section body.
+ * produces the section text per the admin-editable `section.context`
+ * contract. Free-text output, streamed straight into the note — prose
+ * style, abbreviations, and compact formatting come through verbatim.
  *
- * This replaces the older free-text renderer + a whole stack of
- * regex safety nets (`isAbsenceDescription`, `stripBoilerplateExam`,
- * `stripUngroundedVitalValue`, the Slovak number-word lookup table).
- * Grounding is now enforced structurally by the tool-call schema +
- * server-side evidence validation, so the regex defences aren't
- * needed.
+ * Grounding is enforced downstream: the critic tool-use pass strips
+ * invention, and the reconcilers (drug-normalizer, icd-validator)
+ * canonicalise drugs + ICD codes. `isAbsenceDescription` below catches
+ * the common "(empty — …)" / essay-describing-absence leaks so they
+ * don't ship as placeholder text.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
-import { logger } from "../logger";
 
 export type { UsageContext } from "../usage";
 
@@ -52,10 +47,8 @@ export interface SectionConfig {
   reconcilers?: string[];
   /**
    * When true, a second Haiku call audits this section's draft against
-   * the source before reconcilers run. With the claims agent as the
-   * default renderer the critic is largely redundant (claims are
-   * already grounded at render time) but remains opt-in for narrative
-   * sections where an extra pass still helps.
+   * the source before reconcilers run. Enable on narrative / clinical-
+   * judgment sections.
    */
   critic?: boolean;
 }
@@ -73,25 +66,6 @@ export interface RenderedSection {
 }
 
 export type Language = "sk" | "cs" | "en";
-
-/** One piece of the section body, paired with the source span that supports it. */
-export interface SectionClaim {
-  /** The clinical sentence / fragment as it should appear in the note. */
-  text: string;
-  /**
-   * A VERBATIM substring of the source that supports this claim. For
-   * paraphrases ("cukrovka" → "diabetes mellitus", "sto tridsaťpäť" →
-   * "135") the model cites the spoken form as evidence. Server checks
-   * that this substring appears in the encounter's source.
-   */
-  evidence: string;
-  /**
-   * `explicit` when the evidence verbatim states the fact. `inferred_paraphrase`
-   * when the text is a standard clinical normalisation of a colloquial
-   * evidence span. Used for telemetry; does not affect validation.
-   */
-  kind?: "explicit" | "inferred_paraphrase";
-}
 
 const MODEL_IDS: Record<SectionConfig["model"], string> = {
   haiku: "claude-haiku-4-5-20251001",
@@ -130,51 +104,13 @@ export async function renderSection(
 
   const response = await client().messages.create({
     model: modelId,
-    max_tokens: 3000,
+    max_tokens: 2000,
+    // temperature=0 for deterministic clinical documentation. Run-to-run
+    // drift at default 1.0 is unacceptable when the same raw source should
+    // produce the same note.
     temperature: 0,
     system: systemPrompt,
     messages: [{ role: "user", content: userMessage }],
-    tools: [
-      {
-        name: "submit_section_claims",
-        description:
-          "Submit the section body as a list of grounded claims. Each claim pairs the clinical text with the verbatim source span that supports it. Empty array when the section should have no content.",
-        input_schema: {
-          type: "object",
-          properties: {
-            claims: {
-              type: "array",
-              description:
-                "Ordered list of claims forming the section. Empty array → empty section.",
-              items: {
-                type: "object",
-                properties: {
-                  text: {
-                    type: "string",
-                    description:
-                      "The clinical sentence / fragment as it should appear in the note. 3rd-person clinical voice.",
-                  },
-                  evidence: {
-                    type: "string",
-                    description:
-                      "ONE contiguous verbatim substring of the source that supports this claim. NEVER concatenate two spans with '…' / '...'. For speech→clinical paraphrases, cite the original spoken form (e.g. 'Pokašľávam' for the claim 'Pokašľáva, hlavne v zime'). Minimum 4 characters. Must appear verbatim in transcript / doctor notes / file text.",
-                  },
-                  kind: {
-                    type: "string",
-                    enum: ["explicit", "inferred_paraphrase"],
-                    description:
-                      "explicit = fact stated literally; inferred_paraphrase = colloquial form normalised (cukrovka → diabetes mellitus).",
-                  },
-                },
-                required: ["text", "evidence"],
-              },
-            },
-          },
-          required: ["claims"],
-        },
-      },
-    ],
-    tool_choice: { type: "tool", name: "submit_section_claims" },
   });
 
   if (usage) {
@@ -189,88 +125,112 @@ export async function renderSection(
     });
   }
 
-  // Extract the tool-call payload.
-  const rawClaims: SectionClaim[] = [];
-  for (const block of response.content) {
-    if (block.type === "tool_use" && block.name === "submit_section_claims") {
-      const input = block.input as { claims?: unknown };
-      if (Array.isArray(input.claims)) {
-        for (const c of input.claims) {
-          if (!c || typeof c !== "object") continue;
-          const obj = c as Record<string, unknown>;
-          if (typeof obj.text !== "string") continue;
-          if (typeof obj.evidence !== "string") continue;
-          rawClaims.push({
-            text: obj.text.trim(),
-            evidence: obj.evidence.trim(),
-            kind:
-              obj.kind === "explicit" || obj.kind === "inferred_paraphrase"
-                ? obj.kind
-                : undefined,
-          });
-        }
-      }
-      break;
-    }
-  }
+  let content = response.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("")
+    .trim();
 
-  const validated = validateClaims(rawClaims, source);
-  const content = validated
-    .map((c) => c.text.trim())
-    .filter(Boolean)
-    .join("\n");
-
-  if (rawClaims.length !== validated.length) {
-    const dropped = rawClaims.filter((c) => !validated.includes(c));
-    logger.debug(
-      `[section-agent] "${section.title}" (${section.id}): kept ${validated.length}/${rawClaims.length} claim(s). Dropped: ${JSON.stringify(
-        dropped.map((c) => ({
-          text: c.text.slice(0, 60),
-          evidence: c.evidence.slice(0, 40),
-        })),
-      )}`,
-    );
+  if (isAbsenceDescription(content)) {
+    content = "";
   }
 
   return { id: section.id, title: section.title, content };
 }
 
-// ─── Claim validation ────────────────────────────────────────────────
+// ─── Absence-description safety net ──────────────────────────────────
 
 /**
- * Keep only claims whose `evidence` actually appears in the source
- * (after diacritic-fold + lowercase). Server-side hallucination gate.
- * Exported for tests; used here to gate section-agent output.
+ * Catches the common ways Claude describes an absence of content instead
+ * of actually being empty. Returns true when the ENTIRE output string is
+ * one of these "describing emptiness" phrases, so the caller can swap it
+ * for literal "".
+ *
+ * Intentionally strict: only flags responses that are short AND match a
+ * known absence pattern — real content that happens to mention "N/A"
+ * or parenthetical asides in the middle of a paragraph is never affected.
  */
-export function validateClaims(
-  claims: SectionClaim[],
-  source: RawSource,
-): SectionClaim[] {
-  const sourceBlob = [
-    source.transcript ?? "",
-    source.doctorNotes ?? "",
-    ...(source.files ?? []).map((f) => f.text ?? ""),
-  ].join("\n");
-  const folded = foldText(sourceBlob);
+export function isAbsenceDescription(text: string): boolean {
+  // Strip leading/trailing HTML comments — Haiku sometimes prefixes the
+  // response with "<!-- BMI Section -->" or similar before absence prose.
+  const t = text.replace(/<!--[\s\S]*?-->/g, "").trim();
+  if (t.length === 0) return true;
 
-  const out: SectionClaim[] = [];
-  for (const claim of claims) {
-    const evidence = claim.evidence.trim();
-    // Minimum 4 chars: short enough to accept clinical abbreviations as
-    // evidence anchors (LPHB, RBBB, ASP), long enough to avoid accidental
-    // 1-2 char substring collisions in the source.
-    if (evidence.length < 4) continue;
-    if (!folded.includes(foldText(evidence))) continue;
-    out.push(claim);
+  const firstLine = (t.split("\n")[0] ?? "").trim();
+  const head = t.slice(0, 200);
+
+  if (/^\(?\s*(empty|zero\s+characters?)\b/i.test(firstLine)) return true;
+  if (/^zero\s+characters?$/i.test(firstLine)) return true;
+  if (/^\([^()]*\bempty\b[^()]*\bzero\b[^()]*\)/i.test(firstLine)) return true;
+
+  if (
+    /^(the\s+current\s+output|per\s+the\s+section\s+contract|the\s+phrase\s+["']|after\s+review,?\s+the)/i.test(
+      head,
+    )
+  ) {
+    return true;
   }
-  return out;
-}
 
-function foldText(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+  if (
+    /^(the\s+draft\s+(contains|does\s+not)|the\s+section\s+contract|the\s+raw\s+source\s+(contains\s+no|does\s+not)|the\s+image\s+file\s+shows|since\s+no\s+\w+\s+(exist|findings|content|reading|data)|no\s+\w+\s+(exist|findings|content|reading)\s+in\s+the\s+source|based\s+on\s+the\s+(source|contract|instructions))/i.test(
+      head,
+    )
+  ) {
+    return true;
+  }
+
+  // Raised cap: leaks have produced 400+ char "reasoning essays" about
+  // why the section is empty. 1500 covers the multi-paragraph essays.
+  if (t.length > 1500) return false;
+
+  if (/^\([^()]*\)$/i.test(t)) {
+    return /empty|no\s|not\s|nie\s|neuv|žiadn|žiadne|pr[aá]zdn|n\/a|—/i.test(t);
+  }
+
+  if (/^(n\/a|none|—|-|žiadne|neuvedené|neuvedeno|not\s+stated)\.?$/i.test(t)) {
+    return true;
+  }
+
+  if (
+    t.length < 250 &&
+    /\bnie\s+(je|s[uú])\s+(v\s+zdroj|v\s+surov|v\s+dostupn|uved|dostupn|explicitne|k\s+dispoz|možn)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    t.length < 250 &&
+    /\bnenach[áa]dza\b[^.]*\b(v\s+)?(zdroj|surov|poskytnut|dostupn|materi[aá]l)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  const patterns = [
+    /^v\s+(surov|dostupn|zdrojov|poskytnut|raw\s+source)/i,
+    /^v\s+zdroj/i,
+    /^ziadn[eyo]\s+[uú]daj/i,
+    /^žiadne?\s+[uú]daj/i,
+    /^žiadne?\s+informáci/i,
+    /^žiadn[aey]\s+\p{L}+\s+(?:\p{L}+\s+)?(uveden|nie|dostup|v\s+zdroj|v\s+surov|explicit)/iu,
+    /^nie\s+(je|s[uú])\s+(uved|dostupn|explicitne|k\s+dispoz|možn)/i,
+    /^nebola\s+uved/i,
+    /^neuvedené/i,
+    /^bez\s+(v[ýy]šky|hmotnosti|[úu]dajov|informáci)/i,
+    /^pod[ľl]a\s+pravidiel/i,
+    /^no\s+(data|information|weight|height|value|specific|mention)/i,
+    /^not\s+(stated|available|specified|provided|mentioned|explicitly|documented)/i,
+    /^there\s+(is|are)\s+no\s+/i,
+    /^source\s+does\s+not/i,
+    /^the\s+(source|raw\s+source)\s+(does\s+not|doesn['']?t)/i,
+    /^bmi\s+nie\s+je\s+možn/i,
+    /vrátim\s+pr[aá]zdn/i,
+    /return\s+(?:an?\s+)?empty\s+string/i,
+    /respond\s+with\s+(?:an?\s+)?empty/i,
+  ];
+  return patterns.some((re) => re.test(t));
 }
 
 // ─── Prompt assembly ─────────────────────────────────────────────────
@@ -295,40 +255,15 @@ function buildSystemPrompt(
       : "";
 
   return `# Role
-You extract the "${section.title}" section of a structured ${localeLabel} clinical note from the raw encounter source. Output is a list of claims, each paired with the verbatim source span that supports it.
+You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation. A separate critic pass will double-check your output against the source; focus on faithful transformation, not defensive omission.
 
-# Tool-use contract
-You MUST respond by calling \`submit_section_claims\` with an object \`{claims: [...]}\`. Each claim has:
-- \`text\`: the clinical sentence / fragment that belongs in the note (3rd-person, ${localeLabel} clinical style, normalised wording).
-- \`evidence\`: a VERBATIM substring (≥8 chars) from the transcript / doctor notes / file text that supports this claim.
-- \`kind\`: "explicit" (fact stated literally) OR "inferred_paraphrase" (colloquial spoken form normalised — e.g. "cukrovka" → "diabetes mellitus").
+# Core rules (absolute)
+1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
+2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
+3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.${templateBlock}${examplesBlock}
 
-# Why the evidence field matters (do not fake this)
-The server checks that \`evidence\` appears verbatim in the source. Fabricated evidence → the claim is silently DROPPED from the note. Faking evidence is strictly worse than emitting no claim. If you don't have a source span that supports the claim, do not emit the claim.
-
-# Paraphrase rule (safe normalisations that still need evidence)
-When normalising colloquial speech into clinical terms, cite the spoken span verbatim. The \`text\` field uses the clinical form; \`evidence\` keeps the original.
-- Patient says "Pokašľávam, hlavne v zime" → \`text: "Pokašľáva, hlavne v zime."\`, \`evidence: "Pokašľávam, hlavne v zime"\`, \`kind: "inferred_paraphrase"\`.
-- Patient says "sto tridsaťpäť na osemdesiat" (BP) → \`text: "TK 135/80 mmHg."\`, \`evidence: "sto tridsaťpäť na osemdesiat"\`, \`kind: "inferred_paraphrase"\`.
-- Patient says "zomrel na mozgovú cievu" → \`text: "Zomrel na mozgovú príhodu (CMP)."\`, \`evidence: "zomrel na mozgovú"\`, \`kind: "inferred_paraphrase"\`.
-- Patient says "mám cukrovku" → \`text: "Diabetes mellitus."\`, \`evidence: "mám cukrovku"\`, \`kind: "inferred_paraphrase"\`.
-
-## Paraphrasing denials (HARD — do not drop these)
-Patient denials are frequently split across a doctor's question and the patient's short answer. When the doctor asked about X and the patient answered in the negative — including soft / hedged negatives ("Myslím, že nie", "Asi nie", "Nepamätám si") — EMIT the denial as \`X neguje.\` with the patient's answer as evidence.
-- Doctor asks "Alergiu na niečo?" / patient answers "Myslím, že nie" → \`text: "Alergie neguje."\`, \`evidence: "Myslím, že nie"\`, \`kind: "inferred_paraphrase"\`.
-- Doctor asks "Alergiu nemáte na nič?" / patient answers "Nemám" → \`text: "Alergie neguje."\`, \`evidence: "Alergiu nemáte na nič? Nemám"\`, \`kind: "inferred_paraphrase"\`.
-Silence ≠ denial still applies: if the doctor never asked and the patient never mentioned a topic, do NOT emit a denial for it.
-
-## Abbreviation evidence
-Clinical short forms (LPHB, RBBB, ASP, EKG, SF, EF, CMP, AH, ST, pro BNP, troponin…) are meaningful tokens. When citing an abbreviation as evidence, include at least 4 characters — a single 3-letter token ("SF") is too ambiguous; include its neighbour ("SF 70" / "SF, RS" / "ASP, RS"). Pick the shortest span that uniquely anchors the finding in the source.
-
-# Empty section
-If nothing in the source satisfies THIS section's contract, return \`{"claims": []}\`. The server renders empty sections invisibly. Do NOT fabricate placeholder denials ("Alkohol neguje", "Akútne negat.", "Infekčné ochorenie neguje") when the source is silent on the topic — silence is not a denial.
-
-# Core rules
-1. GROUND TRUTH. Every claim's evidence must be in the source. No exceptions.
-2. STAY IN LANE. Only claims that satisfy THIS section's contract. Other sections will claim what doesn't belong.
-3. NO DENIAL INVENTION. Silence ≠ denial. Don't emit "X neguje" unless the source contains the denial.${templateBlock}${examplesBlock}
+# Your task
+Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary. Follow the contract's format rules for this section (compact single paragraph vs. line-per-item vs. narrative prose).
 
 # Section contract (binding)
 ${section.context}`;

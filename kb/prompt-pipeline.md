@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-23 (all-in Anthropic tool-use: section-agent / suggester / adjust-router / file-focus all converted to forced tool calls with server-side evidence validation. ~500 lines of regex defences removed.)_
+_Last updated: 2026-04-23 (Anthropic tool-use on critic / suggester / adjust-router / file-focus; section-agent stays on free-text prose output. Claims-with-evidence variant was tried and reverted — it atomised prose + dropped compact clinical shorthand).)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -8,26 +8,25 @@ Read this before touching anything in [web/src/app/api/generate/route.ts](../web
 
 ---
 
-## All-in tool-use (2026-04-23)
+## Tool-use rollout status (2026-04-23)
 
-Every Haiku call in the pipeline now uses `tool_choice: { type: "tool", name: ... }` to force structured output. Grounding is enforced server-side via substring validation against the raw source (diacritic-folded). Prompt-level safety rules are reinforced but never relied on alone — the schema is the defence.
+Four of the five Haiku calls in the pipeline now use `tool_choice: { type: "tool", name: ... }` to force structured output with server-side validation. The fifth (section-agent) stays on free-text prose because structured "claims" output broke prose formatting.
 
-- **`renderSection`** (`sections/section-agent.ts`) — forces `submit_section_claims` returning `{claims: [{text, evidence, kind}]}`. Each claim pairs one clinical sentence with the verbatim source span that supports it. `validateClaims` drops any claim whose evidence fails a folded substring check against `transcript + doctorNotes + files[]`. Evidence minimum: 4 chars (short enough for clinical abbreviations like `LPHB`, `RBBB`; long enough to avoid 1–2 char collisions). `kind: "inferred_paraphrase"` marks safe speech→clinical normalisations ("cukrovka" → "Diabetes mellitus.", "sto tridsaťpäť" → "135") with the colloquial span as evidence. The schema forbids two-span concatenation with "…" / "..." because that breaks substring matching.
+- **`renderSection`** (`sections/section-agent.ts`) — **FREE-TEXT**. Reads the source + section contract and emits prose directly. `isAbsenceDescription` (exported from the same file) strips "(empty)" / "žiadne údaje" / essay-describing-absence leaks before the content reaches the UI. Grounding is enforced downstream by the critic pass.
+  - _Why not claims-with-evidence?_ Attempted a tool-use version that returned `{claims: [{text, evidence, kind}]}` with per-claim server-side substring validation. Two problems emerged: (1) each claim rendered as its own `<p>`, destroying compact single-paragraph sections like OA / LA (which use comma-separated Slovak clinical shorthand); (2) extraction became too conservative, dropping specifics like "sy námahovej AP CCS II" or "DLP" that were plainly in the source. Reverted.
 - **`criticPass`** (`sections/critic.ts`) — forces `submit_corrected_section` returning `{corrected: string}`. Haiku has no text channel to leak essays, meta-commentary, or "The correct AA section is:" prefixes. Empty-section = pass `""`.
-- **`suggestIcdCodes`** (`sections/suggest-icd.ts`) — forces `submit_icd_candidates` returning `{codes: [{code, description, confidence, evidence, differential?}]}`. Evidence is ONE contiguous verbatim substring (≥4 chars); concatenation with joiners is banned. Server validates CSV membership, evidence-in-source, and dedups by code. `confidence` is a schema enum (`high|medium|low`); no normalisation needed.
+- **`suggestIcdCodes`** (`sections/suggest-icd.ts`) — forces `submit_icd_candidates` returning `{codes: [{code, description, confidence, evidence, differential?}]}`. Evidence is ONE contiguous verbatim substring (≥4 chars); concatenation with joiners is banned. Server validates CSV membership, evidence-in-source, and dedups by code.
 - **`routeAdjustment`** (`sections/adjust-router.ts`) — forces `select_affected_sections` returning `{affected: string[], reasoning?: string}`. Returns the subset of leaf section ids a mid-visit adjustment touches. No JSON regex parsing.
 - **`extractWithDirective`** (`sections/file-focus.ts`) — forces `submit_extracted_passages` returning `{passages: [{text, match_reason?}]}`. Each passage is a verbatim substring of the document; server validates and drops anything that can't be substring-matched in the original file.
 
 ### What got removed
 
-- `isAbsenceDescription` — regex net for meta-commentary essays. Obsolete: critic tool-use has no text channel.
-- `stripBoilerplateExam` + `EXAM_BOILERPLATE_PATTERNS` — forbidden-fallback strip list. Obsolete: the claims schema rejects any clause without source evidence.
-- `stripUngroundedVitalValue` + `toSlovakNumberForms(0..999)` — Slovak number-word grounding table. Obsolete: the `inferred_paraphrase` kind + evidence citation handles "sto tridsaťpäť" → "135" natively.
+- `stripBoilerplateExam` + `EXAM_BOILERPLATE_PATTERNS` — obsolete: the critic tool-use pass enforces the same contract more precisely.
+- `stripUngroundedVitalValue` + `toSlovakNumberForms(0..999)` — obsolete: the critic handles speech→digit paraphrase checks via its prompt + forced tool output.
 - `extractEssayAnswer` + the post-critic regex extractor — obsolete once critic returns a single string field via tool call.
-- The old `USE_CLAIMS_AGENT` / `SECTION_AGENT_TOOL_USE` env flags — claims is the only path now; no fallback.
-- `section-agent-claims.ts` spike file and `absence-description.test.ts` — deleted.
+- The transient `USE_CLAIMS_AGENT` / `SECTION_AGENT_TOOL_USE` env flags and the `section-agent-claims.ts` spike file.
 
-Net: ~500 lines of regex defence code removed. All 451 unit tests still pass.
+`isAbsenceDescription` was kept — the free-text section-agent still needs it.
 
 ### Prior session items still in force
 
