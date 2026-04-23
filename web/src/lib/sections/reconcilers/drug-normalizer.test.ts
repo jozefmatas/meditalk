@@ -85,4 +85,36 @@ describe("drug-normalizer", () => {
     // Arixtra's "2,5" must survive as a single entry — no phantom split.
     expect(out).toContain("Arixtra 2,5 mg sc à 24h (15:00)");
   });
+
+  it("dedupes exact-duplicate drug entries (same brand + same dose)", () => {
+    // Reproduces the real-world "TRITACE 1/3-0-0, TRITACE 1/3-0-0" bug.
+    const input = "TRITACE 1/3-0-0, TRITACE 1/3-0-0, Zetovar";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/TRITACE/gi) ?? []).length;
+    expect(tritaceCount).toBe(1);
+    expect(out).toContain("Zetovar");
+  });
+
+  it("keeps entries with same brand but DIFFERENT dose (not a duplicate)", () => {
+    // Patient taking 2× same drug at different strengths is legitimate.
+    const input = "TRITACE 1/3-0-0, TRITACE 1/2-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/TRITACE/gi) ?? []).length;
+    expect(tritaceCount).toBe(2);
+  });
+
+  it("dedupes across newlines, not just within a comma-separated line", () => {
+    const input = "ANOPYRIN 100 mg 0-1-0\nANOPYRIN 100 mg 0-1-0";
+    const out = drugNormalizer(input, src, ctx);
+    const anopyrinCount = (out.match(/ANOPYRIN/gi) ?? []).length;
+    expect(anopyrinCount).toBe(1);
+  });
+
+  it("dedup tolerates whitespace / case drift in dose schedule", () => {
+    // " 1/3-0-0 " and "1/3-0-0" should fingerprint to the same value.
+    const input = "TRITACE 1/3-0-0, tritace  1/3-0-0 ";
+    const out = drugNormalizer(input, src, ctx);
+    const tritaceCount = (out.match(/tritace/gi) ?? []).length;
+    expect(tritaceCount).toBe(1);
+  });
 });

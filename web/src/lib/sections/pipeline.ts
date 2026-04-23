@@ -148,6 +148,45 @@ function shouldUseSonnetCritic(title: string): boolean {
 }
 
 /**
+ * Common Slovak medical transcription typos that slip past the
+ * section-agent + critic. Each entry is [wrong, right]. Matching is
+ * word-boundary + case-insensitive; the correction preserves the
+ * original case pattern only when the wrong form is all-lowercase or
+ * capitalised (MiXeD case like "HeMtÓMu" is normalised to "Hematómu").
+ *
+ * Keep the list SHORT and deterministic. Only add entries when the
+ * wrong form is clearly nonsense Slovak — never fold legitimate
+ * variants.
+ */
+const MEDICAL_TYPO_CORRECTIONS: Array<[wrong: string, right: string]> = [
+  ["hemtóm", "hematóm"], // "hemtómu" → "hematómu" (observed in prod)
+  ["infrkt", "infarkt"],
+  ["dyspoe", "dyspnoe"],
+  ["koronografia", "koronarografia"],
+  ["echokardiogrfia", "echokardiografia"],
+  ["hypertnzia", "hypertenzia"],
+];
+
+export function fixKnownMedicalTypos(text: string): string {
+  if (!text.trim()) return text;
+  let out = text;
+  for (const [wrong, right] of MEDICAL_TYPO_CORRECTIONS) {
+    // Replace the typo stem; Slovak case endings ("hemtómu", "hemtómom")
+    // re-attach because we match the stem only.
+    const escaped = wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "gi");
+    out = out.replace(re, (match) => {
+      // Preserve leading case: "Hemtóm" → "Hematóm", "hemtóm" → "hematóm".
+      if (match[0] === match[0].toUpperCase()) {
+        return right[0].toUpperCase() + right.slice(1);
+      }
+      return right;
+    });
+  }
+  return out;
+}
+
+/**
  * For structural vital sections (Pulz / TK / Výška / Hmotnosť / BMI /
  * EKG), every Arabic-digit run in the draft must also appear in the
  * raw source blob. When ANY digit token is missing, strip the section
@@ -499,6 +538,7 @@ export async function runCriticAndReconcilers(args: {
   // The critic already uses tool-use (`submit_corrected_section`) so
   // it can't leak meta-commentary essays; the section-agent handles its
   // own absence-description stripping via `isAbsenceDescription`.
+  // `applyReconcilers` also runs the deterministic medical-typo fix.
   return applyReconcilers(content, config.reconcilers, source, language);
 }
 
@@ -514,7 +554,10 @@ function applyReconcilers(
     if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
     out = reconciler(out, source, { language });
   }
-  return out;
+  // Universal last-pass: safe allowlist of Slovak medical typo fixes
+  // (hemtóm → hematóm, etc.). Runs on every section, after any
+  // configured reconcilers.
+  return fixKnownMedicalTypos(out);
 }
 
 function collectLeafSections(sections: TemplateSection[]): TemplateSection[] {

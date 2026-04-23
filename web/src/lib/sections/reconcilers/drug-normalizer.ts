@@ -90,16 +90,54 @@ function normalizeEntry(
   );
 }
 
+/**
+ * Fingerprint for dedup: brand prefix (uppercase) + stripped dose
+ * schedule, joined. Identical fingerprints → duplicate entry.
+ *
+ * We fingerprint on prefix + dose rather than the whole entry because:
+ * - Whitespace / punctuation drift shouldn't prevent dedup.
+ * - Entries with different dose schedules are NOT duplicates (e.g.
+ *   a drug the patient takes twice daily at different strengths).
+ */
+function fingerprintEntry(entry: string): string | null {
+  const trimmed = entry.trim();
+  if (!trimmed) return null;
+  const prefixMatch = trimmed.match(PREFIX_RE);
+  if (!prefixMatch) return null;
+  const prefix = prefixMatch[1].trim().toUpperCase();
+  if (prefix.length < 3) return null;
+  // Extract a dose-schedule signature (e.g. "1/3-0-0", "1-0-1", "200 mg")
+  // and fold to uppercase+no-whitespace so "1/3-0-0" and " 1/3-0-0 " match.
+  const rest = trimmed
+    .slice(prefixMatch[0].length)
+    .replace(/\s+/g, "")
+    .toUpperCase();
+  return `${prefix}::${rest}`;
+}
+
 export const drugNormalizer: Reconciler = (text, _source, ctx) => {
   if (!text.trim()) return text;
 
   const locale = ctx.language;
   const lines = text.split("\n");
 
+  // Cross-line dedup: two entries with the same (prefix + dose)
+  // fingerprint are duplicates — keep the first occurrence.
+  const seen = new Set<string>();
+
   const correctedLines = lines.map((line) => {
     const entries = splitEntries(line);
-    const corrected = entries.map((e) => normalizeEntry(e, locale));
-    return corrected.join(",");
+    const kept: string[] = [];
+    for (const entry of entries) {
+      const normalized = normalizeEntry(entry, locale);
+      const fp = fingerprintEntry(normalized);
+      if (fp) {
+        if (seen.has(fp)) continue; // drop exact duplicate
+        seen.add(fp);
+      }
+      kept.push(normalized);
+    }
+    return kept.join(",");
   });
 
   return correctedLines.join("\n");
