@@ -104,6 +104,16 @@ function isExamNarrativeLabel(title: string): boolean {
 }
 
 /**
+ * True when the section title matches a Záver / Assessment heading.
+ * Mirrors `isZaverSection` (which works on TemplateSection.labels) for
+ * use in `runCriticAndReconcilers`, which only has the resolved title
+ * string.
+ */
+function isZaverTitle(title: string): boolean {
+  return ZAVER_LABELS.has(normalizeLabel(title));
+}
+
+/**
  * For structural vital sections (Pulz / TK / Výška / Hmotnosť / BMI /
  * EKG), every Arabic-digit run in the draft must also appear in the
  * raw source blob. When ANY digit token is missing, strip the section
@@ -419,6 +429,12 @@ export async function runCriticAndReconcilers(args: {
 
   if (config.critic) {
     try {
+      // Route Záver's critic to Sonnet — ICD anatomy and comorbidity
+      // inference benefit from the stronger reasoning tier (e.g. picking
+      // I21.2 lateral over I21.9 unspecified when aVL/I elevation is
+      // documented, or E89.0 from "st.p. strumektómii + Euthyrox").
+      // Every other section stays on Haiku.
+      const criticModel = isZaverTitle(config.title) ? "sonnet" : "haiku";
       const result = await criticPass({
         draft: draftContent,
         source,
@@ -427,10 +443,11 @@ export async function runCriticAndReconcilers(args: {
         sectionContext: config.context,
         language,
         usage,
+        model: criticModel,
       });
       if (result.changed) {
         logger.debug(
-          `[pipeline] critic modified "${config.title}" — ${result.diffSummary}`,
+          `[pipeline] critic (${criticModel}) modified "${config.title}" — ${result.diffSummary}`,
         );
       }
       content = result.content;
