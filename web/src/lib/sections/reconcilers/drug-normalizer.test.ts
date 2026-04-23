@@ -117,4 +117,33 @@ describe("drug-normalizer", () => {
     const tritaceCount = (out.match(/tritace/gi) ?? []).length;
     expect(tritaceCount).toBe(1);
   });
+
+  it("collapses brand + generic of the SAME active ingredient (TRITACE ↔ Ramipril)", () => {
+    // Real-world pattern: patient reports 'TRITACE' in speech, discharge
+    // letter has 'Ramipril Actavis'. Both map to 'ramipril' in the CSV.
+    // Dedup at the active-ingredient level keeps the first form only.
+    const input = "TRITACE 1/3-0-0, Ramipril Actavis 1/3-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    // Expect the first entry (TRITACE) to survive, the second to drop.
+    expect(out).toContain("TRITACE");
+    expect(out).not.toContain("Ramipril Actavis");
+  });
+
+  it("keeps brands with the SAME active ingredient when doses differ", () => {
+    // Different strengths of the same ingredient is legitimate — the
+    // patient might take one in the morning and another in the evening.
+    const input = "TRITACE 5 mg 1-0-0, Ramipril Actavis 10 mg 0-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toContain("TRITACE");
+    expect(out).toContain("Ramipril Actavis");
+  });
+
+  it("falls back to brand-prefix dedup when active ingredient unknown", () => {
+    // A made-up brand the CSV doesn't know — must still exact-dedup.
+    const input = "Zqxwvbrt 1-0-1, Zqxwvbrt 1-0-1, Zqxwvbrt 2-0-0";
+    const out = drugNormalizer(input, src, ctx);
+    const count = (out.match(/Zqxwvbrt/gi) ?? []).length;
+    // Two distinct dose-schedule entries → 2 kept; 3 would be a dedup miss.
+    expect(count).toBe(2);
+  });
 });

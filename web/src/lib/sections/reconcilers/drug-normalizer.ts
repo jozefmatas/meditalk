@@ -15,6 +15,7 @@
 import type { Reconciler } from "./index";
 import {
   correctMedicationBaseName,
+  getActiveIngredient,
   isValidMedication,
 } from "../../lookup/medications";
 
@@ -91,28 +92,42 @@ function normalizeEntry(
 }
 
 /**
- * Fingerprint for dedup: brand prefix (uppercase) + stripped dose
- * schedule, joined. Identical fingerprints → duplicate entry.
+ * Fingerprint for dedup: active ingredient (when known) or brand prefix
+ * (when not), plus the stripped dose schedule. Identical fingerprints
+ * → duplicate entry.
  *
- * We fingerprint on prefix + dose rather than the whole entry because:
- * - Whitespace / punctuation drift shouldn't prevent dedup.
- * - Entries with different dose schedules are NOT duplicates (e.g.
- *   a drug the patient takes twice daily at different strengths).
+ * Using the active ingredient as the dedup key means "TRITACE 5 mg"
+ * and "Ramipril Actavis 5 mg" collapse to one entry — they're the
+ * same drug. Falls back to the brand prefix when the medication isn't
+ * in the CSV (unknown brand / multi-ingredient / international name).
+ *
+ * Entries with different dose schedules are NOT duplicates — legitimate
+ * when a patient takes two strengths at different times.
  */
-function fingerprintEntry(entry: string): string | null {
+function fingerprintEntry(
+  entry: string,
+  locale: import("../section-agent").Language,
+): string | null {
   const trimmed = entry.trim();
   if (!trimmed) return null;
   const prefixMatch = trimmed.match(PREFIX_RE);
   if (!prefixMatch) return null;
-  const prefix = prefixMatch[1].trim().toUpperCase();
+  const prefix = prefixMatch[1].trim();
   if (prefix.length < 3) return null;
-  // Extract a dose-schedule signature (e.g. "1/3-0-0", "1-0-1", "200 mg")
-  // and fold to uppercase+no-whitespace so "1/3-0-0" and " 1/3-0-0 " match.
+
+  // Prefer active ingredient (generic name) so brand-level variants
+  // collapse; fall back to the brand prefix for unknown meds.
+  const ingredient = getActiveIngredient(prefix, locale);
+  const key = (ingredient ?? prefix).toUpperCase();
+
+  // Dose-schedule signature (e.g. "1/3-0-0", "1-0-1", "200 mg")
+  // folded to uppercase + no-whitespace so "1/3-0-0" and " 1/3-0-0 "
+  // match on the same key.
   const rest = trimmed
     .slice(prefixMatch[0].length)
     .replace(/\s+/g, "")
     .toUpperCase();
-  return `${prefix}::${rest}`;
+  return `${key}::${rest}`;
 }
 
 export const drugNormalizer: Reconciler = (text, _source, ctx) => {
@@ -130,9 +145,9 @@ export const drugNormalizer: Reconciler = (text, _source, ctx) => {
     const kept: string[] = [];
     for (const entry of entries) {
       const normalized = normalizeEntry(entry, locale);
-      const fp = fingerprintEntry(normalized);
+      const fp = fingerprintEntry(normalized, locale);
       if (fp) {
-        if (seen.has(fp)) continue; // drop exact duplicate
+        if (seen.has(fp)) continue; // drop duplicate (same ingredient + dose)
         seen.add(fp);
       }
       kept.push(normalized);

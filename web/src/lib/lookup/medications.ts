@@ -106,6 +106,42 @@ export function isValidMedication(name: string, locale = "en"): boolean {
 }
 
 /**
+ * Look up the active (INN / generic) ingredient for a medication brand
+ * name. Used by the drug-normalizer for generic-level deduplication —
+ * so "TRITACE" and "Ramipril Actavis" both resolve to "ramipril" and
+ * the LA dedup collapses them.
+ *
+ * CSV entries store the full strength-qualified name ("TRITACE 5",
+ * "Ramipril Actavis 10 mg") so an exact lookup of just the brand
+ * ("TRITACE") misses. We try in order:
+ *   1. Exact case-insensitive match.
+ *   2. First entry whose name STARTS with the brand (same INN holds
+ *      across all strengths of one brand).
+ *
+ * Returns the active ingredient lowercased + trimmed, ready to use as
+ * a dedup fingerprint. Null when nothing matches.
+ */
+export function getActiveIngredient(
+  brand: string,
+  locale = "en",
+): string | null {
+  const { byName } = loadIndex(locale);
+  const key = brand.toLowerCase().trim();
+  if (!key) return null;
+
+  const exact = byName.get(key);
+  if (exact) return exact.activeIngredient.toLowerCase().trim();
+
+  const prefix = key + " ";
+  for (const [nameKey, entry] of byName) {
+    if (nameKey.startsWith(prefix)) {
+      return entry.activeIngredient.toLowerCase().trim();
+    }
+  }
+  return null;
+}
+
+/**
  * Search medications by name or active ingredient.
  * Prioritizes exact name matches, then name substring matches, then active ingredient matches.
  */
