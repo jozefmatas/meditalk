@@ -341,25 +341,42 @@ export function FilesContent({
 
   const handleContextSave = useCallback(
     (contexts: Record<string, string>) => {
+      // Optimistic UI update using the client's current view.
       const updatedFiles = files.map((f) =>
         f.id in contexts ? { ...f, context: contexts[f.id] || null } : f,
       );
       onFilesChange(updatedFiles);
-      // Persist immediately via PATCH — tracked so handleGenerate can await it.
-      const savePromise: Promise<void> = fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          metadata: {
-            files: updatedFiles.map(
-              ({ pending: _, isRecording: __, ...rest }) => rest,
-            ),
-          },
-        }),
-      })
-        .then(() => {})
-        .catch((err) => logger.error("Failed to persist file contexts:", err))
-        .finally(() => pendingContextSaves.delete(visitId));
+
+      // Persist by re-reading the server's CURRENT metadata and merging
+      // only the changed `context` field. Extraction may have completed
+      // between the dialog opening and Save — PATCH-ing with the client's
+      // stale files array would clobber the freshly-written
+      // `extracted_text` + `extraction_status`. Fetching-then-merging
+      // keeps extraction progress intact. Tracked so handleGenerate can
+      // await it.
+      const savePromise: Promise<void> = (async () => {
+        try {
+          const res = await fetch(`/api/encounters/${visitId}`);
+          if (!res.ok) throw new Error(`fetch visit ${res.status}`);
+          const payload = (await res.json()) as {
+            metadata?: { files?: FileMetadata[] };
+          };
+          const serverFiles = payload.metadata?.files ?? [];
+          const merged = serverFiles.map((f) =>
+            f.id in contexts ? { ...f, context: contexts[f.id] || null } : f,
+          );
+          const saveRes = await fetch(`/api/encounters/${visitId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ metadata: { files: merged } }),
+          });
+          if (!saveRes.ok) throw new Error(`patch ${saveRes.status}`);
+        } catch (err) {
+          logger.error("Failed to persist file contexts:", err);
+        } finally {
+          pendingContextSaves.delete(visitId);
+        }
+      })();
       pendingContextSaves.set(visitId, savePromise);
     },
     [files, onFilesChange, visitId],

@@ -27,10 +27,19 @@ import { criticPass } from "./critic";
 import type { RawSource } from "./section-agent";
 
 function mockTextResponse(text: string) {
+  // The critic now uses a forced tool call (submit_corrected_section)
+  // for its output. Mimic Anthropic's tool_use response shape.
   return {
-    content: [{ type: "text", text }],
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_test_1",
+        name: "submit_corrected_section",
+        input: { corrected: text },
+      },
+    ],
     usage: { input_tokens: 40, output_tokens: 15 },
-    stop_reason: "end_turn",
+    stop_reason: "tool_use",
   };
 }
 

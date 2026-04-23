@@ -244,9 +244,26 @@ export function isAbsenceDescription(text: string): boolean {
     return true;
   }
 
+  // Analytical essays Haiku writes instead of returning empty — e.g.
+  // "The draft contains content that belongs to Echocardiography, not
+  // EKG. The section contract specifies ... The raw source contains
+  // no EKG reading. ... Since no EKG findings exist in the source to
+  // satisfy the contract, the output is:". These are English reasoning
+  // artefacts that escape the other patterns because they don't start
+  // with "empty"/"zero" and don't use Slovak absence phrasing.
+  if (
+    /^(the\s+draft\s+(contains|does\s+not)|the\s+section\s+contract|the\s+raw\s+source\s+(contains\s+no|does\s+not)|the\s+image\s+file\s+shows|since\s+no\s+\w+\s+(exist|findings|content|reading|data)|no\s+\w+\s+(exist|findings|content|reading)\s+in\s+the\s+source|based\s+on\s+the\s+(source|contract|instructions))/i.test(
+      head,
+    )
+  ) {
+    return true;
+  }
+
   // Raised cap: EA leaks have produced 400+ char "reasoning essays" about
-  // why the section is empty — we still want those caught.
-  if (t.length > 600) return false;
+  // why the section is empty — we still want those caught. Raised to
+  // 1500 to cover the multi-paragraph analytical essays Haiku produces
+  // for exam sections when they should be empty.
+  if (t.length > 1500) return false;
 
   // 1. Whole response wrapped in parentheses — "(empty)", "(No weight found)",
   //    "(prázdne - výška nie je uvedená)", etc.
@@ -265,6 +282,17 @@ export function isAbsenceDescription(text: string): boolean {
   if (
     t.length < 250 &&
     /\bnie\s+(je|s[uú])\s+(v\s+zdroj|v\s+surov|v\s+dostupn|uved|dostupn|explicitne|k\s+dispoz|možn)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  // 3b. "X sa v zdrojovom materiáli nenachádza" / "sa nenachádza v zdroji"
+  //     variants — same absence signal as (3) but phrased with "nenachádza".
+  if (
+    t.length < 250 &&
+    /\bnenach[áa]dza\b[^.]*\b(v\s+)?(zdroj|surov|poskytnut|dostupn|materi[aá]l)/i.test(
       t,
     )
   ) {

@@ -18,6 +18,7 @@ import {
 } from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
+import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -383,6 +384,7 @@ export async function POST(request: NextRequest) {
           f.extracted_text && !(transcriptText && f.source === "recording"),
       )
       .map((f) => ({
+        id: f.id,
         name: f.name,
         type: f.type,
         text: f.extracted_text!,
@@ -453,8 +455,10 @@ export async function POST(request: NextRequest) {
 
     // Single raw-source bundle — every section-agent reads from this.
     // `context` is the doctor's per-file instruction (upload dialog) —
-    // surfaces to the LLM as "Doctor's focus for this file: …" header.
-    const source: RawSource = {
+    // restrictive phrasing ("iba X", "only Y") is honoured via a
+    // pre-filter pass below that extracts matching passages only;
+    // permissive phrasing surfaces to the LLM as a focus hint header.
+    const rawSource: RawSource = {
       transcript: transcriptText?.trim() || undefined,
       doctorNotes: doctorNotes?.trim() || undefined,
       files: fileTexts.map((f) => ({
@@ -463,6 +467,26 @@ export async function POST(request: NextRequest) {
         context: f.context,
       })),
     };
+
+    // Run file-focus filter ONCE before the suggester + pipeline fan out.
+    // Seed the cache from visit metadata so unchanged (file.text,
+    // directive) tuples short-circuit — saves a Haiku call per regen.
+    const fileFocusCache = (((visit.metadata ?? {}) as Record<string, unknown>)
+      .file_focus_cache ??
+      {}) as import("@/lib/sections/file-focus").FileFocusCache;
+    let updatedFileFocusCache: typeof fileFocusCache | null = null;
+    const source = await applyFileFocusDirectives(
+      rawSource,
+      language,
+      { userId, visitId },
+      {
+        fileIds: fileTexts.map((f) => f.id),
+        cache: fileFocusCache,
+        onCacheUpdate: (next) => {
+          updatedFileFocusCache = next;
+        },
+      },
+    );
 
     logger.debug(
       `[generate] Starting section-agent pipeline (transcript: ${transcriptText?.length ?? 0} chars, files: ${fileTexts.length}, doctorNotes: ${doctorNotes?.length ?? 0} chars)`,
@@ -574,6 +598,12 @@ export async function POST(request: NextRequest) {
           template_id: template.id,
           generation_pending: null,
           recording_session: null,
+          // Per-section content map — the /api/adjust route reuses this
+          // as the baseline so unchanged sections don't re-render.
+          section_contents: sectionContentsMap,
+          ...(updatedFileFocusCache
+            ? { file_focus_cache: updatedFileFocusCache }
+            : {}),
           ...(transcriptText ? { transcript: transcriptText } : {}),
           ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
           ...(clinicalAnalysis ? { clinical_analysis: clinicalAnalysis } : {}),

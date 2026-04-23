@@ -829,15 +829,18 @@ export function useEncounterGeneration({
         // Re-generate via SSE (same as handleGenerate but no retry logic)
         const ctx = { completedEvent: null as Record<string, unknown> | null };
 
-        const res = await fetch("/api/generate", {
+        // Adjust route — incremental re-render. Sends ONLY the delta
+        // (the new dictation). Previously this posted to /api/generate
+        // with mergedNotes, which inflated doctor_notes to 17K+ chars
+        // and forced a full 17-section re-render every time.
+        void audioRecoveryPath; // server pulls files from visit metadata
+        const res = await fetch("/api/adjust", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             visitId,
             templateId: capturedTemplateId,
-            doctorNotes: mergedNotes || undefined,
-            transcriptText: finalTranscript || undefined,
-            audioPath: audioRecoveryPath || undefined,
+            adjustmentTranscript: finalTranscript || undefined,
           }),
         });
 

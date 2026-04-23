@@ -52,8 +52,8 @@ function scoreContains(
   caseSensitive = false,
   meta: { kind: Expectation["kind"]; reason: string },
 ): ScoreResult {
-  const hay = caseSensitive ? html : html.toLowerCase();
-  const needle = caseSensitive ? value : value.toLowerCase();
+  const hay = caseSensitive ? html : foldText(html);
+  const needle = caseSensitive ? value : foldText(value);
   const ok = hay.includes(needle);
   return ok
     ? { ok: true, kind: meta.kind, reason: meta.reason }
@@ -71,8 +71,8 @@ function scoreNotContains(
   caseSensitive = false,
   meta: { kind: Expectation["kind"]; reason: string },
 ): ScoreResult {
-  const hay = caseSensitive ? html : html.toLowerCase();
-  const needle = caseSensitive ? value : value.toLowerCase();
+  const hay = caseSensitive ? html : foldText(html);
+  const needle = caseSensitive ? value : foldText(value);
   const present = hay.includes(needle);
   return present
     ? {
@@ -103,10 +103,10 @@ function scoreSectionContains(
       detail: `section "${expectation.section}" not found in the note`,
     };
   }
-  const hay = expectation.caseSensitive ? section : section.toLowerCase();
+  const hay = expectation.caseSensitive ? section : foldText(section);
   const needle = expectation.caseSensitive
     ? expectation.value
-    : expectation.value.toLowerCase();
+    : foldText(expectation.value);
   return hay.includes(needle)
     ? { ok: true, kind: expectation.kind, reason: expectation.reason }
     : {
@@ -133,10 +133,10 @@ function scoreSectionNotContains(
     // the value isn't in a section that doesn't exist.
     return { ok: true, kind: expectation.kind, reason: expectation.reason };
   }
-  const hay = expectation.caseSensitive ? section : section.toLowerCase();
+  const hay = expectation.caseSensitive ? section : foldText(section);
   const needle = expectation.caseSensitive
     ? expectation.value
-    : expectation.value.toLowerCase();
+    : foldText(expectation.value);
   return hay.includes(needle)
     ? {
         ok: false,
@@ -196,7 +196,10 @@ function scoreIcdInZaver(
   code: string,
   meta: { kind: Expectation["kind"]; reason: string },
 ): ScoreResult {
-  const zaver = findSectionContent(html, "Záver") ?? findSectionContent(html, "Zaver") ?? findSectionContent(html, "Závěr");
+  const zaver =
+    findSectionContent(html, "Záver") ??
+    findSectionContent(html, "Zaver") ??
+    findSectionContent(html, "Závěr");
   if (zaver === null) {
     return {
       ok: false,
@@ -223,7 +226,10 @@ function scoreIcdNotInZaver(
   code: string,
   meta: { kind: Expectation["kind"]; reason: string },
 ): ScoreResult {
-  const zaver = findSectionContent(html, "Záver") ?? findSectionContent(html, "Zaver") ?? findSectionContent(html, "Závěr");
+  const zaver =
+    findSectionContent(html, "Záver") ??
+    findSectionContent(html, "Zaver") ??
+    findSectionContent(html, "Závěr");
   if (zaver === null) {
     return { ok: true, kind: meta.kind, reason: meta.reason };
   }
@@ -262,10 +268,7 @@ function findSectionContent(html: string, label: string): string | null {
     // Section body starts after this heading and ends before the next
     // heading of level <= this one.
     const bodyStart = match.index + match[0].length;
-    const stopRe = new RegExp(
-      `<h([1-${level}])[^>]*>`,
-      "gi",
-    );
+    const stopRe = new RegExp(`<h([1-${level}])[^>]*>`, "gi");
     stopRe.lastIndex = bodyStart;
     const stop = stopRe.exec(html);
     const bodyEnd = stop ? stop.index : html.length;
@@ -283,17 +286,34 @@ function decodeEntities(s: string): string {
 }
 
 function normalize(s: string): string {
-  return s
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    // Tolerate trailing colon/punctuation on section labels ("LA:", "LA: ").
-    .replace(/[:\s]+$/, "");
+  return (
+    s
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim()
+      // Tolerate trailing colon/punctuation on section labels ("LA:", "LA: ").
+      .replace(/[:\s]+$/, "")
+  );
 }
 
 function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Lowercase + diacritic-stripped. Slovak clinical text has heavy
+ * diacritic use ("bolesť", "štítna", "príležitostne") that doctors
+ * sometimes strip in dictation; assertions should match both forms.
+ */
+function foldText(s: string): string {
+  return s
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function truncate(s: string, n: number): string {

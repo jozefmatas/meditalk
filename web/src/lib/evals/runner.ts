@@ -11,7 +11,11 @@
  * going through the full test stack or the HTTP route.
  */
 import { createClient } from "@supabase/supabase-js";
-import { generateNote, findZaverSection, runCriticAndReconcilers } from "../sections/pipeline";
+import {
+  generateNote,
+  findZaverSection,
+  runCriticAndReconcilers,
+} from "../sections/pipeline";
 import { suggestIcdCodes } from "../sections/suggest-icd";
 import { formatZaverFromSuggestions } from "../sections/format-zaver";
 import { buildTemplateHtml, flattenSectionIds } from "../templates/html";
@@ -46,7 +50,9 @@ async function loadTemplate(templateId: string): Promise<Template> {
     .eq("id", templateId)
     .single();
   if (error || !data) {
-    throw new Error(`Template ${templateId} not found: ${error?.message ?? "unknown"}`);
+    throw new Error(
+      `Template ${templateId} not found: ${error?.message ?? "unknown"}`,
+    );
   }
   return {
     id: data.id,
@@ -67,7 +73,10 @@ async function loadTemplate(templateId: string): Promise<Template> {
 async function generateForFixture(fixture: EvalFixture): Promise<string> {
   const template = await loadTemplate(fixture.templateId);
   const allIds = flattenSectionIds(template);
-  const sectionLabels = buildSectionLabelsFromTemplate(template, fixture.language);
+  const sectionLabels = buildSectionLabelsFromTemplate(
+    template,
+    fixture.language,
+  );
   void allIds; // reserved for future per-section assertions
 
   const sectionContentsMap: Record<string, string> = {};
@@ -88,7 +97,10 @@ async function generateForFixture(fixture: EvalFixture): Promise<string> {
     suggesterPromise,
   ]);
 
-  const zaver = findZaverSection(template, fixture.language as "sk" | "cs" | "en");
+  const zaver = findZaverSection(
+    template,
+    fixture.language as "sk" | "cs" | "en",
+  );
   if (zaver) {
     const draft = formatZaverFromSuggestions(suggestedIcdCodes);
     const finalZaver = draft
@@ -195,8 +207,11 @@ export function printSuiteReport(result: EvalSuiteResult): void {
       console.log(`${indent}- ${s.reason}`);
       if (s.detail) console.log(`${indent}  ${s.detail}`);
     }
-    if (failCount === 0) {
-      // Optionally: print the note on full pass for sanity. Skip by default.
+    void failCount;
+    if (process.env.EVAL_VERBOSE === "1") {
+      console.log(`\n    --- Generated note (${f.fixtureId}) ---`);
+      console.log(f.generatedNote);
+      console.log(`    --- end ---\n`);
     }
   }
 

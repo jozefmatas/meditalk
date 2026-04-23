@@ -15,6 +15,7 @@ import {
   runCriticAndReconcilers,
 } from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
+import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
 
     const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
     const uploadedFiles = (visitMeta.files ?? []) as {
+      id: string;
       name: string;
       type: string;
       extracted_text?: string | null;
@@ -101,6 +103,7 @@ export async function POST(request: NextRequest) {
     const fileTexts = uploadedFiles
       .filter((f) => f.extracted_text)
       .map((f) => ({
+        id: f.id,
         name: f.name,
         text: f.extracted_text!,
         context: f.context || undefined,
@@ -126,11 +129,30 @@ export async function POST(request: NextRequest) {
     const allIds = flattenSectionIds(template);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
-    const source: RawSource = {
+    const rawSource: RawSource = {
       transcript: transcriptText,
       doctorNotes: doctorNotes?.trim() || undefined,
       files: fileTexts,
     };
+
+    // Run file-focus filter ONCE before the suggester + pipeline fan out.
+    // Cache-aware: unchanged files with unchanged directives re-use the
+    // prior filtered output from visit.metadata.file_focus_cache.
+    const fileFocusCache = (visitMeta.file_focus_cache ??
+      {}) as import("@/lib/sections/file-focus").FileFocusCache;
+    let updatedFileFocusCache: typeof fileFocusCache | null = null;
+    const source = await applyFileFocusDirectives(
+      rawSource,
+      language,
+      { userId, visitId },
+      {
+        fileIds: fileTexts.map((f) => f.id),
+        cache: fileFocusCache,
+        onCacheUpdate: (next) => {
+          updatedFileFocusCache = next;
+        },
+      },
+    );
 
     const readable = createSSEStream(async ({ sendEvent, safeClose }) => {
       sendEvent({
@@ -226,6 +248,10 @@ export async function POST(request: NextRequest) {
             template_id: template.id,
             generation_pending: null,
             recording_session: null,
+            section_contents: sectionContentsMap,
+            ...(updatedFileFocusCache
+              ? { file_focus_cache: updatedFileFocusCache }
+              : {}),
             ...(doctorNotes ? { doctor_notes: doctorNotes } : {}),
             ...(clinicalAnalysis
               ? { clinical_analysis: clinicalAnalysis }

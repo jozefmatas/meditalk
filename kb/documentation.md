@@ -1,8 +1,15 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-23_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
+
+## What's new (2026-04-23)
+
+- **`POST /api/adjust`** — new endpoint for mid-visit incremental updates. Accepts only the delta (`{visitId, templateId, adjustmentTranscript, newFileIds?}`). A router Haiku decides which sections to re-render; unchanged sections keep their content from `visit.metadata.section_contents`. See [prompt-pipeline.md](prompt-pipeline.md) for details.
+- **File context dialog** — Actual / Past radio. "Actual" = whole file used; "Past" = user must type what to distill (Haiku pre-filters). See [data-extraction.md](data-extraction.md).
+- **Critic via tool-use** — section critic now uses `tool_choice: submit_corrected_section`, eliminating essay / meta-commentary leaks structurally.
+- **Eval harness on 3 real doctor-corrected fixtures** (`npm run eval`): Mordavská, Kovačiková, Gozora.
 
 ---
 

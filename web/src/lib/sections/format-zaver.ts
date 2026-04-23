@@ -17,11 +17,16 @@ interface FormatOptions {
 }
 
 /**
- * Build the Záver line from suggester output.
+ * Build the Záver content from suggester output.
+ *
+ * Each code goes on its own line (separated by `\n`), which
+ * `buildTemplateHtml.renderContent` wraps in individual `<p>` tags —
+ * giving one visual line per code in the rendered note, no bullets.
  *
  *   Primary first: `R07.4 Bolesť v hrudníku (diferenciálna dg.: NSTEMI)`
- *   Secondaries comma-joined: `I10 Primárna [esenciálna] …, K57.3 Divertikulóza …`
- *   Final period.
+ *   Secondaries on subsequent lines:
+ *     `I10 Primárna [esenciálna] …`
+ *     `K57.3 Divertikulóza …`
  *
  * Empty input (or all-low-confidence) → empty string so the Záver
  * section is hidden by the skipEmpty HTML renderer.
@@ -39,6 +44,5 @@ export function formatZaverFromSuggestions(
     ? `${primary.code} ${primary.description} (diferenciálna dg.: ${primary.differential})`
     : `${primary.code} ${primary.description}`;
   const secondaries = chosen.slice(1).map((c) => `${c.code} ${c.description}`);
-  const line = [primaryStr, ...secondaries].join(", ");
-  return line.endsWith(".") ? line : `${line}.`;
+  return [primaryStr, ...secondaries].join("\n");
 }

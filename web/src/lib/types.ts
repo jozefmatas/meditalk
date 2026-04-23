@@ -94,7 +94,13 @@ export interface FileMetadata {
   extraction_status?: ExtractionStatus | null;
   extraction_started_at?: string | null;
   extracted_at?: string | null;
-  /** Optional doctor directive for this file (e.g. "Focus on liver markers") */
+  /**
+   * Doctor's distillation directive for this file.
+   * - Empty / missing → "Actual" mode: pipeline uses the WHOLE file as
+   *   today's data (fresh ambulance vitals, ER readings, etc.).
+   * - Non-empty → "Past" mode: pipeline runs a Haiku pre-filter and
+   *   uses ONLY the passages matching the directive.
+   */
   context?: string | null;
 }
 

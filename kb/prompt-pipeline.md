@@ -1,10 +1,26 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-22 (three-stage Haiku pipeline: render → critic (opt-in) → reconcilers. Fact-layer experiment + source-preprocessor removed. Older milestones in commit history.)_
+_Last updated: 2026-04-23 (file-focus filter + /api/adjust route with router Haiku + critic via tool-use + Slovak number-word grounding. Critic enabled on every leaf section.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
-Read this before touching anything in [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts), [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts), [web/src/lib/sections/](../web/src/lib/sections/), or [web/src/lib/lookup/](../web/src/lib/lookup/).
+Read this before touching anything in [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts), [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts), [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts), [web/src/lib/sections/](../web/src/lib/sections/), or [web/src/lib/lookup/](../web/src/lib/lookup/).
+
+---
+
+## New this session (2026-04-23)
+
+- **`/api/adjust`** — incremental re-render endpoint. Client sends only the delta (new transcript / new file ids). A Haiku "router" (`sections/adjust-router.ts`) classifies which leaf sections the delta touches; `generateNote` re-renders only those via the new `leafIdFilter` option; untouched sections keep their prior content from `visit.metadata.section_contents` (persisted on every generate). Vital-group atomicity: if any one of Krvný tlak / Pulz / Výška / Hmotnosť / BMI / EKG / Celkové vyšetrenie is flagged, the whole group re-renders.
+- **File-focus filter** — `sections/file-focus.ts`. When the user types a distillation directive in the per-file context dialog ("Past" mode), a Haiku extraction pass pre-filters the file to just the matching passages BEFORE any section agent or ICD suggester sees it. Cached in `visit.metadata.file_focus_cache` keyed on `(fileId, textHash, directive)` so unchanged files skip re-filtering on regenerate/adjust.
+- **Critic via tool-use** — `sections/critic.ts` now forces `tool_choice: submit_corrected_section`. Haiku returns a tool call with a single string field — no text channel for essay / meta-commentary leaks. Replaces the prompt-only "no reasoning essays" rule that Haiku ignored.
+- **Critic enabled on every leaf section** via `scripts/enable-critic-everywhere.mjs` (214 sections across 9 templates). Záver keeps its own critic call from the route.
+- **Slovak number-word grounding** — `stripUngroundedVitalValue` accepts "sto tridsaťpäť" as backing for "135" in the draft, via `toSlovakNumberForms(n)` (0–999). Removes false-positive stripping of legit speech→digit translations when the doctor dictates vitals.
+- **Template guardrails added** via migrations: objective-exam grounding HARD RULE (`add-objective-grounding-rule.mjs`), clinical-voice 3rd-person (`add-voice-guardrail.mjs`), capitalization + Slovak gender agreement (`add-grammar-guardrails.mjs`).
+- **Section contract tightenings**: TO opener + echo integration + no-age-invention (`tighten-to-contract.mjs`), LA chronic+acute meds with strict discontinued-filter (`expand-la-contract.mjs`), Pulz single-snapshot no-timeline (`tighten-pulz-contract.mjs`), Výška/Hmotnosť/BMI empty-unless-source (`harden-vitals-contracts.mjs`), Celkové vyšetrenie no-boilerplate (`harden-celkove-contract.mjs`), EA denial-example cleanup (`strip-contract-denial-examples.mjs`).
+- **Záver formatting** — `formatZaverFromSuggestions` now emits each ICD on its own line (newline-separated) instead of comma-joined. `renderContent` wraps each line in its own `<p>` for clean reading.
+- **Eval harness**: 3 real doctor-corrected fixtures (`mordavska-nstemi`, `kovacikova-real`, `gozora-stemi`). Diacritic-fold matching, `EVAL_VERBOSE=1` dumps full notes.
+- **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type what to distill (required). Backing data stays a single `context` string (no new role field).
+- **ICD panel dedup** — server suggester dedups by code; UI also dedups to defend against persisted duplicates.
 
 ---
 

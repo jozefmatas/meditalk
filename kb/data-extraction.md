@@ -1,8 +1,17 @@
 # MediTalk Data Extraction
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-23_
 
 How raw clinical data (audio, files, doctor notes) gets into the system before the generation pipeline takes over. For the pipeline itself, see [prompt-pipeline.md](prompt-pipeline.md).
+
+## New this session — file-focus filter + Actual/Past UX
+
+- **File context dialog** ([`file-context-dialog.tsx`](../web/src/components/encounters/file-context-dialog.tsx)) now shows an **Actual / Past radio** per uploaded file.
+  - **Actual** (default): file represents today's data (ambulance readings, fresh results). Whole file text feeds the pipeline. No `context` stored.
+  - **Past**: file is historical. User MUST type what to distill from it (required to save). The typed directive is stored as `FileMetadata.context`.
+- **File-focus pre-filter** — [`sections/file-focus.ts`](../web/src/lib/sections/file-focus.ts). When a file has a non-empty `context`, a Haiku extraction pass runs BEFORE any section agent or the ICD suggester reads the source. Returns only the verbatim passages that match the directive.
+- **Cache** — `visit.metadata.file_focus_cache: { [fileId]: { textHash, directive, output } }`. Unchanged `(fileId, textHash, directive)` tuples short-circuit the Haiku call. Wired into `/api/generate`, `/api/regenerate`, `/api/adjust`.
+- **Race fix in `handleContextSave`** — when the user saves the dialog, the client now re-fetches the server's current `metadata.files` before patching, merges only the `context` field, and only then PATCHes. Prevents stale client snapshots from overwriting a just-completed `extracted_text` / `extraction_status: completed`.
 
 ---
 
