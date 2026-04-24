@@ -12,10 +12,32 @@ function anthropic() {
   return _anthropic;
 }
 
+type SectionKind =
+  | "default"
+  | "history-narrative"
+  | "vital-numeric"
+  | "exam-narrative"
+  | "medication-list"
+  | "conclusion";
+
+const VALID_KINDS: readonly SectionKind[] = [
+  "default",
+  "history-narrative",
+  "vital-numeric",
+  "exam-narrative",
+  "medication-list",
+  "conclusion",
+] as const;
+
+function isSectionKind(x: unknown): x is SectionKind {
+  return typeof x === "string" && (VALID_KINDS as readonly string[]).includes(x);
+}
+
 interface AnalyzedSection {
   label: string;
+  kind: SectionKind;
   context: string;
-  subsections?: { label: string; context: string }[];
+  subsections?: { label: string; kind: SectionKind; context: string }[];
 }
 
 export interface AnalysisResult {
@@ -36,9 +58,16 @@ export interface AnalysisResult {
 const ANALYSIS_PROMPT = `You are analyzing a medical document/note to extract two things:
 
 1. **STRUCTURE**: Identify the document's section structure (headers and subheaders). For each section, provide:
-   - "label": The section header name as it appears (e.g. "Anamnéza", "Objektívny nález", "Assessment")
+   - "label": The section header name as it appears (e.g. "Anamnéza", "Objektívny nález", "Assessment").
+   - "kind": Classify the section's nature — drives downstream rendering behaviour:
+       • "default"           — narrative prose (RA / SA / PA / EA / Ab / family-social history).
+       • "history-narrative" — HPI / current-illness synthesis ("Terajšie ochorenie", "Nynejší onemocnenie", "History of present illness").
+       • "vital-numeric"     — single-value vitals (Výška / Hmotnosť / BMI / TK / Pulz / EKG / SF).
+       • "exam-narrative"    — general physical exam ("Celkové vyšetrenie", "Fyzikálne vyšetrenie", "Celkový stav").
+       • "medication-list"   — current medications ("LA", "Lieková anamnéza", "Medications").
+       • "conclusion"        — assessment / diagnostic summary ("Záver", "Assessment", "Conclusion", "Diagnosis").
    - "context": A short description (1-2 sentences) of what kind of content belongs in this section, based on what you see in the document. This will guide an AI that fills in the section later.
-   - "subsections": If the section has clear sub-sections (sub-headers), list them with label + context. Omit if none.
+   - "subsections": If the section has clear sub-sections (sub-headers), list them with label + kind + context. Omit if none.
 
 2. **WRITING STYLE**: Analyze the writing style and produce a bullet-point style guide. Each bullet should cover one aspect:
    - Tone (formal/informal, clinical/conversational)
@@ -51,26 +80,55 @@ const ANALYSIS_PROMPT = `You are analyzing a medical document/note to extract tw
    - Detail level (terse/minimal vs. thorough/verbose)
    - Any distinctive patterns (recurring phrases, signature formatting quirks)
 
-Return valid JSON with this exact structure:
-{
-  "sections": [
-    {
-      "label": "Section Name",
-      "context": "Description of what goes here",
-      "subsections": [
-        { "label": "Sub-section Name", "context": "Description" }
-      ]
-    }
-  ],
-  "styleGuide": "- Tone: ...\\n- Structure: ...\\n- Abbreviations: ...\\n- Person: ...\\n- Detail level: ...\\n- Distinctive: ..."
-}
+# Rules
+- Section labels stay in the ORIGINAL LANGUAGE of the document.
+- Context descriptions are in English (internal AI guidance).
+- styleGuide is in English as a bullet-point list (one "- Category: description" per line).
+- If the document has no clear section structure, infer logical sections from the content.
+- Respond by calling the \`submit_template_analysis\` tool — no free text.`;
 
-IMPORTANT:
-- The section labels should be in the ORIGINAL LANGUAGE of the document.
-- The context descriptions should be in English (they are internal AI guidance).
-- The styleGuide should be in English as a bullet-point list (one "- Category: description" per line).
-- If the document has no clear section structure (just flowing text), infer logical sections based on the content organization.
-- Return ONLY valid JSON, no markdown or explanation.`;
+const ANALYSIS_TOOL_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string", description: "Original-language header." },
+          kind: {
+            type: "string",
+            enum: VALID_KINDS,
+            description: "Section classification (see prompt).",
+          },
+          context: {
+            type: "string",
+            description: "English description of what belongs here.",
+          },
+          subsections: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                kind: { type: "string", enum: VALID_KINDS },
+                context: { type: "string" },
+              },
+              required: ["label", "kind", "context"],
+            },
+          },
+        },
+        required: ["label", "kind", "context"],
+      },
+    },
+    styleGuide: {
+      type: "string",
+      description:
+        "English bullet-point list, one '- Category: description' per line.",
+    },
+  },
+  required: ["sections", "styleGuide"],
+};
 
 export async function POST(request: NextRequest) {
   const supabase = supabaseAdmin();
@@ -160,32 +218,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Step 2: Analyze the extracted text with Claude
+    // Step 2: Analyze the extracted text with Claude.
+    // Forced tool-use — the model's response is always a structured
+    // payload; no free-text + regex parsing.
     const response = await anthropic().messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 4096,
+      system: ANALYSIS_PROMPT,
       messages: [
         {
           role: "user",
-          content: `${ANALYSIS_PROMPT}\n\nHere is the medical document text to analyze:\n\n---\n${extractedText}\n---`,
+          content: `# Medical document to analyze\n\n---\n${extractedText}\n---`,
         },
       ],
+      tools: [
+        {
+          name: "submit_template_analysis",
+          description:
+            "Submit the structured template analysis — section tree (with kind taxonomy) and a bullet-list style guide.",
+          input_schema: ANALYSIS_TOOL_SCHEMA,
+        },
+      ],
+      tool_choice: { type: "tool", name: "submit_template_analysis" },
     });
 
-    const responseText =
-      response.content[0].type === "text" ? response.content[0].text : "";
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    let rawAnalysis: unknown = null;
+    for (const block of response.content) {
+      if (block.type === "tool_use" && block.name === "submit_template_analysis") {
+        rawAnalysis = block.input;
+        break;
+      }
+    }
+
+    const analysis = coerceAnalysis(rawAnalysis);
+    if (!analysis) {
       return NextResponse.json(
         { error: "Failed to parse analysis" },
         { status: 500 },
       );
     }
-
-    const analysis = JSON.parse(jsonMatch[0]) as {
-      sections: AnalyzedSection[];
-      styleGuide: string;
-    };
 
     const { scrubbed, redactions } = scrubPhi(extractedText);
 
@@ -215,4 +286,56 @@ export async function POST(request: NextRequest) {
         );
     }
   }
+}
+
+// ─── Tolerant coercion ──────────────────────────────────────────────
+//
+// Drops malformed entries (missing required fields, unknown kind) but
+// preserves the rest so admins get partial results they can edit.
+
+function coerceAnalysis(
+  raw: unknown,
+): { sections: AnalyzedSection[]; styleGuide: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+
+  const styleGuide =
+    typeof obj.styleGuide === "string" ? obj.styleGuide.trim() : "";
+  const rawSections = Array.isArray(obj.sections) ? obj.sections : [];
+
+  const sections: AnalyzedSection[] = [];
+  for (const s of rawSections) {
+    if (!s || typeof s !== "object") continue;
+    const so = s as Record<string, unknown>;
+    const label = typeof so.label === "string" ? so.label.trim() : "";
+    const context = typeof so.context === "string" ? so.context.trim() : "";
+    if (!label) continue;
+    const kind: SectionKind = isSectionKind(so.kind) ? so.kind : "default";
+
+    const subsRaw = Array.isArray(so.subsections) ? so.subsections : [];
+    const subsections: { label: string; kind: SectionKind; context: string }[] = [];
+    for (const sub of subsRaw) {
+      if (!sub || typeof sub !== "object") continue;
+      const subo = sub as Record<string, unknown>;
+      const subLabel =
+        typeof subo.label === "string" ? subo.label.trim() : "";
+      if (!subLabel) continue;
+      const subKind: SectionKind = isSectionKind(subo.kind)
+        ? subo.kind
+        : "default";
+      const subContext =
+        typeof subo.context === "string" ? subo.context.trim() : "";
+      subsections.push({ label: subLabel, kind: subKind, context: subContext });
+    }
+
+    sections.push({
+      label,
+      kind,
+      context,
+      ...(subsections.length ? { subsections } : {}),
+    });
+  }
+
+  if (sections.length === 0 && !styleGuide) return null;
+  return { sections, styleGuide };
 }

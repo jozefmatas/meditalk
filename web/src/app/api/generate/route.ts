@@ -19,6 +19,7 @@ import {
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
+import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
@@ -503,6 +504,17 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
+        // Skeleton extractor runs in parallel with ICD suggester +
+        // section generation. The skeleton gives every section renderer
+        // and critic a shared encounter context (chief complaint,
+        // encounter type, providers, key dates, critical findings).
+        // Null on low-confidence or API failure → pipeline gracefully
+        // renders without a skeleton (today's behaviour).
+        const skeletonPromise = extractSkeleton(source, language, {
+          userId,
+          visitId,
+        });
+
         // ICD suggester + section generation run in parallel. The
         // pipeline emits raw drafts via onSection as each section
         // finishes, then — for critic-enabled sections — emits the
@@ -512,11 +524,17 @@ export async function POST(request: NextRequest) {
           visitId,
         });
 
+        // Await the skeleton before kicking off section rendering so
+        // every renderer has the skeleton in hand. Small serial gate
+        // (~1–2 s for Sonnet), but it unlocks cross-section consistency.
+        const skeleton = await skeletonPromise;
+
         const sectionsPromise = generateNote({
           template,
           source,
           language,
           usage: { userId, visitId },
+          skeleton,
           onSection: (section) => {
             sectionContentsMap[section.id] = section.content;
             sendEvent({
@@ -553,10 +571,12 @@ export async function POST(request: NextRequest) {
                   model: "haiku",
                   reconcilers: zaver.reconcilers,
                   critic: zaver.critic,
+                  kind: zaver.kind,
                 },
                 language,
                 usage: { userId, visitId },
                 templateSystemPrompt: template.systemPrompt,
+                skeleton,
               })
             : draftZaver;
 

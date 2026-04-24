@@ -17,6 +17,7 @@ import {
   runCriticAndReconcilers,
 } from "../sections/pipeline";
 import { suggestIcdCodes } from "../sections/suggest-icd";
+import { extractSkeleton } from "../sections/note-skeleton";
 import { formatZaverFromSuggestions } from "../sections/format-zaver";
 import { buildTemplateHtml, flattenSectionIds } from "../templates/html";
 import { buildSectionLabelsFromTemplate } from "../templates";
@@ -81,12 +82,17 @@ async function generateForFixture(fixture: EvalFixture): Promise<string> {
 
   const sectionContentsMap: Record<string, string> = {};
 
+  // Skeleton + ICD suggester kick off in parallel; skeleton must land
+  // before section rendering starts so renderers see it.
+  const skeletonPromise = extractSkeleton(fixture.source, fixture.language);
   const suggesterPromise = suggestIcdCodes(fixture.source, fixture.language);
+  const skeleton = await skeletonPromise;
 
   const sectionsPromise = generateNote({
     template,
     source: fixture.source,
     language: fixture.language,
+    skeleton,
     onSection: (section: RenderedSection) => {
       sectionContentsMap[section.id] = section.content;
     },
@@ -114,9 +120,11 @@ async function generateForFixture(fixture: EvalFixture): Promise<string> {
             model: "haiku",
             reconcilers: zaver.reconcilers,
             critic: zaver.critic,
+            kind: zaver.kind,
           },
           language: fixture.language as "sk" | "cs" | "en",
           templateSystemPrompt: template.systemPrompt,
+          skeleton,
         })
       : draft;
     sectionContentsMap[zaver.id] = finalZaver;

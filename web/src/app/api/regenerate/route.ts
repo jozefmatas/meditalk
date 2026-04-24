@@ -17,6 +17,7 @@ import {
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
+import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
 import type { SupportedLanguage } from "@/lib/types";
@@ -164,16 +165,26 @@ export async function POST(request: NextRequest) {
       try {
         const sectionContentsMap: Record<string, string> = {};
 
+        // Skeleton extractor in parallel with ICD suggester. See
+        // generate/route.ts for the full rationale.
+        const skeletonPromise = extractSkeleton(source, language, {
+          userId,
+          visitId,
+        });
+
         const suggesterPromise = suggestIcdCodes(source, language, {
           userId,
           visitId,
         });
+
+        const skeleton = await skeletonPromise;
 
         const sectionsPromise = generateNote({
           template,
           source,
           language,
           usage: { userId, visitId },
+          skeleton,
           onSection: (section) => {
             sectionContentsMap[section.id] = section.content;
             sendEvent({
@@ -205,10 +216,12 @@ export async function POST(request: NextRequest) {
                   model: "haiku",
                   reconcilers: zaver.reconcilers,
                   critic: zaver.critic,
+                  kind: zaver.kind,
                 },
                 language,
                 usage: { userId, visitId },
                 templateSystemPrompt: template.systemPrompt,
+                skeleton,
               })
             : draftZaver;
 

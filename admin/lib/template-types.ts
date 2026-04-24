@@ -1,3 +1,16 @@
+/**
+ * Declarative section classification — mirror of `web/src/lib/templates/types.ts`.
+ * Drives per-section behaviour (voice-example suppression, digit-grounding,
+ * Haiku-vs-Sonnet critic, skip-render in the main loop).
+ */
+export type SectionKind =
+  | "default"
+  | "history-narrative"
+  | "vital-numeric"
+  | "exam-narrative"
+  | "medication-list"
+  | "conclusion";
+
 export interface TemplateSection {
   id: string;
   labels: Record<string, string>;
@@ -5,6 +18,11 @@ export interface TemplateSection {
   subsections?: TemplateSection[];
   /** Claude model tier for this section (haiku / sonnet / opus). Preserved on save. */
   model?: "haiku" | "sonnet" | "opus";
+  /**
+   * Declarative classification — when omitted, the generation pipeline
+   * falls back to label-matching and logs a warning per hit.
+   */
+  kind?: SectionKind;
   /** Named post-render reconcilers. Preserved on save. */
   reconcilers?: string[];
   /** Backup of prior context before a script rewrite. Preserved on save. */

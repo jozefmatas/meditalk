@@ -16,6 +16,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
 import { logger } from "../logger";
 import type { Language } from "./section-agent";
+import type { NoteSkeleton } from "./note-skeleton";
+import { formatSkeletonBlock } from "./note-skeleton";
 
 const MODEL_ID = "claude-haiku-4-5-20251001";
 
@@ -45,6 +47,13 @@ export interface AdjustRouterInput {
   newFileTexts?: Array<{ name: string; text: string }>;
   language?: Language;
   usage?: UsageContext;
+  /**
+   * Encounter skeleton from the initial generation. Passed as read-only
+   * context for routing decisions — helps the router connect a delta
+   * ("the cardiologist's name changed to Dr. X") back to the right
+   * section (TO) even when the section label isn't named explicitly.
+   */
+  skeleton?: NoteSkeleton | null;
 }
 
 /**
@@ -55,7 +64,8 @@ export interface AdjustRouterInput {
 export async function routeAdjustment(
   input: AdjustRouterInput,
 ): Promise<{ affectedSectionIds: string[]; reasoning?: string }> {
-  const { sections, adjustmentTranscript, newFileTexts, usage } = input;
+  const { sections, adjustmentTranscript, newFileTexts, usage, skeleton } =
+    input;
   const language = input.language ?? "sk";
   const allIds = sections.map((s) => s.id);
 
@@ -100,7 +110,14 @@ export async function routeAdjustment(
 # Sections available
 ${sectionList}`;
 
-  const userMessage = `# Delta to evaluate\n\n${deltaBody}`;
+  const userMessage = [
+    skeleton
+      ? `# Encounter context (read-only background)\n${formatSkeletonBlock(skeleton)}`
+      : "",
+    `# Delta to evaluate\n\n${deltaBody}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   try {
     const response = await client().messages.create({

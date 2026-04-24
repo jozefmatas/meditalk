@@ -14,6 +14,8 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
+import type { NoteSkeleton } from "./note-skeleton";
+import { formatSkeletonBlock } from "./note-skeleton";
 
 export type { UsageContext } from "../usage";
 
@@ -39,6 +41,13 @@ export interface SectionConfig {
   context: string;
   /** Model tier for this section. */
   model: "haiku" | "sonnet" | "opus";
+  /**
+   * Declarative classification of the section (from TemplateSection.kind,
+   * resolved with the legacy label-match fallback in pipeline.ts). The
+   * pipeline dispatches behavior — voice-example suppression,
+   * digit-grounding, critic model tier — off this single field.
+   */
+  kind?: import("../templates/types").SectionKind;
   /**
    * Ordered names of reconcilers to apply after the optional critic pass.
    * See `./reconcilers/index.ts`. Examples: `["drug-normalizer"]`,
@@ -92,6 +101,7 @@ export async function renderSection(
   usage?: UsageContext,
   templateSystemPrompt?: string,
   sectionExamples?: string[],
+  skeleton?: NoteSkeleton | null,
 ): Promise<RenderedSection> {
   const systemBlocks = buildSystemBlocks(
     section,
@@ -99,7 +109,7 @@ export async function renderSection(
     templateSystemPrompt,
     sectionExamples,
   );
-  const userMessage = buildUserMessage(source);
+  const userMessage = buildUserMessage(source, skeleton ?? null);
   const modelId = MODEL_IDS[section.model];
 
   const response = await client().messages.create({
@@ -316,8 +326,22 @@ ${section.context}`,
   return blocks;
 }
 
-function buildUserMessage(source: RawSource): string {
+function buildUserMessage(
+  source: RawSource,
+  skeleton: NoteSkeleton | null,
+): string {
   const parts: string[] = [];
+
+  // Shared encounter context (pre-computed skeleton). Placed BEFORE the
+  // raw source so the renderer treats it as a high-level hint. The
+  // framing below tells the model that source is still the truth when
+  // the two disagree.
+  if (skeleton) {
+    parts.push(
+      `# Shared encounter context (pre-computed hint — source is TRUTH when they conflict)\n${formatSkeletonBlock(skeleton)}`,
+    );
+  }
+
   if (source.transcript?.trim()) {
     parts.push(`# Transcript\n${source.transcript.trim()}`);
   }
