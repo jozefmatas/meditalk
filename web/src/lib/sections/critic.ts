@@ -22,6 +22,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { logUsage, type UsageContext } from "../usage";
 import type { Language, RawSource } from "./section-agent";
+import type { NoteSkeleton } from "./note-skeleton";
+import { formatSkeletonBlock } from "./note-skeleton";
 
 /** Model tier for the critic pass. Haiku is the default; Sonnet is used
  *  on sections that need multi-step clinical inference (Záver ICD
@@ -71,6 +73,14 @@ export interface CriticInput {
    * wins when source and voice conflict.
    */
   sectionExamples?: string[];
+  /**
+   * Shared encounter skeleton (chief complaint, encounter type, key
+   * dates, providers, critical findings). Same value the renderer saw.
+   * Propagated so the critic has the same cross-section context and
+   * doesn't strip skeleton-anchored facts as "invention". Source
+   * remains the source of truth when skeleton and source conflict.
+   */
+  skeleton?: NoteSkeleton | null;
 }
 
 export interface CriticResult {
@@ -329,6 +339,15 @@ You MUST respond by calling the \`submit_corrected_section\` tool with the corre
 
 function buildUserMessage(input: CriticInput, draft: string): string {
   const parts: string[] = [];
+
+  // Shared encounter skeleton (same one the renderer saw). Placed
+  // BEFORE the raw source so the auditor has the cross-section picture
+  // the renderer had. Source still wins when the two disagree.
+  if (input.skeleton) {
+    parts.push(
+      `# Shared encounter context (pre-computed hint — source is TRUTH when they conflict)\n${formatSkeletonBlock(input.skeleton)}`,
+    );
+  }
 
   const sourceBlock = buildSourceBlock(input.source);
   if (sourceBlock) parts.push(sourceBlock);

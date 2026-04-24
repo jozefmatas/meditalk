@@ -38,6 +38,7 @@ import {
 } from "@/lib/sections/file-focus";
 import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import { routeAdjustment } from "@/lib/sections/adjust-router";
+import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import type { RawSource, RenderedSection } from "@/lib/sections/section-agent";
 import type { TemplateSection } from "@/lib/templates/types";
 import { createSSEStream, sseResponse } from "@/lib/api/sse";
@@ -168,6 +169,14 @@ export async function POST(request: NextRequest) {
       },
     );
 
+    // Skeleton extractor runs once per adjust call, giving both the
+    // router and the downstream renderers shared encounter context.
+    const skeleton = await extractSkeleton(
+      source,
+      language === "cs" ? "cs" : language === "en" ? "en" : "sk",
+      { userId, visitId },
+    );
+
     // Router: which sections does the delta touch? Falls back to "all"
     // on error (returned by routeAdjustment itself).
     const leafSections = collectLeafSectionsForRouter(template, sectionLabels);
@@ -180,6 +189,7 @@ export async function POST(request: NextRequest) {
       newFileTexts,
       language: language === "cs" ? "cs" : language === "en" ? "en" : "sk",
       usage: { userId, visitId },
+      skeleton,
     });
     const affectedSet = new Set(affectedSectionIds);
 
@@ -222,6 +232,7 @@ export async function POST(request: NextRequest) {
           language,
           usage: { userId, visitId },
           leafIdFilter: affectedSet,
+          skeleton,
           onSection: (section: RenderedSection) => {
             sectionContentsMap[section.id] = section.content;
             sendEvent({
@@ -268,11 +279,13 @@ export async function POST(request: NextRequest) {
                   model: "haiku",
                   reconcilers: zaver.reconcilers,
                   critic: zaver.critic,
+                  kind: zaver.kind,
                 },
                 language:
                   language === "cs" ? "cs" : language === "en" ? "en" : "sk",
                 usage: { userId, visitId },
                 templateSystemPrompt: template.systemPrompt,
+                skeleton,
               })
             : draft;
 

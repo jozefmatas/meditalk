@@ -46,6 +46,7 @@ import { cn } from "@/lib/utils";
 import type {
   TemplateRow,
   TemplateSection,
+  SectionKind,
   Locale,
 } from "@/lib/template-types";
 import { PRIMARY_LOCALE } from "@/lib/template-types";
@@ -65,8 +66,9 @@ import { logger } from "@/lib/logger";
 
 interface AnalyzedSection {
   label: string;
+  kind: SectionKind;
   context: string;
-  subsections?: { label: string; context: string }[];
+  subsections?: { label: string; kind: SectionKind; context: string }[];
 }
 
 interface AnalysisResult {
@@ -244,6 +246,7 @@ function SectionRow({
   subIndex,
   onUpdateLabel,
   onUpdateContext,
+  onUpdateKind,
   onDelete,
   onAddSub,
 }: {
@@ -262,6 +265,11 @@ function SectionRow({
     topIndex: number,
     subIndex: number | undefined,
     value: string,
+  ) => void;
+  onUpdateKind: (
+    topIndex: number,
+    subIndex: number | undefined,
+    value: SectionKind,
   ) => void;
   onDelete: (topIndex: number, subIndex: number | undefined) => void;
   onAddSub?: () => void;
@@ -374,15 +382,60 @@ function SectionRow({
         </Button>
       </div>
 
-      {/* Context textarea (collapsible) */}
+      {/* Context textarea + kind select (collapsible) */}
       {showContext && (
-        <textarea
-          value={section.context ?? ""}
-          onChange={(e) => onUpdateContext(topIndex, subIndex, e.target.value)}
-          placeholder="AI context — What should go in this section? (e.g. 'Auscultation findings, murmurs, rhythm')"
-          rows={2}
-          className="ml-10 w-[calc(100%-2.5rem)] resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
+        <div className="ml-10 flex w-[calc(100%-2.5rem)] flex-col gap-1.5">
+          <textarea
+            value={section.context ?? ""}
+            onChange={(e) =>
+              onUpdateContext(topIndex, subIndex, e.target.value)
+            }
+            placeholder="AI context — What should go in this section? (e.g. 'Auscultation findings, murmurs, rhythm')"
+            rows={2}
+            className="resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
+          <div className="flex items-center gap-2">
+            <label
+              className="text-xs text-muted-foreground"
+              htmlFor={`kind-${section.id}`}
+            >
+              Kind
+            </label>
+            <select
+              id={`kind-${section.id}`}
+              value={section.kind ?? "default"}
+              onChange={(e) =>
+                onUpdateKind(
+                  topIndex,
+                  subIndex,
+                  e.target.value as SectionKind,
+                )
+              }
+              className="rounded-md border border-input bg-transparent px-2 py-1 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              title="Drives per-section pipeline behaviour (voice-example suppression, digit-grounding on vitals, critic model tier, Záver-is-populated-externally)."
+            >
+              <option value="default">
+                default — narrative prose (RA, SA, PA, EA, Ab…)
+              </option>
+              <option value="history-narrative">
+                history-narrative — HPI / TO synthesis
+              </option>
+              <option value="vital-numeric">
+                vital-numeric — TK / Pulz / Výška / BMI / EKG (digit-grounded)
+              </option>
+              <option value="exam-narrative">
+                exam-narrative — Celkové / Fyzikálne vyšetrenie
+              </option>
+              <option value="medication-list">
+                medication-list — LA (Haiku critic, drug-normalizer)
+              </option>
+              <option value="conclusion">
+                conclusion — Záver (populated from ICD suggester, not rendered
+                in loop)
+              </option>
+            </select>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -507,10 +560,12 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         id: generateSectionId(),
         labels: { [editLocale]: s.label },
         context: s.context,
+        kind: s.kind,
         subsections: s.subsections?.map((sub) => ({
           id: generateSectionId(),
           labels: { [editLocale]: sub.label },
           context: sub.context,
+          kind: sub.kind,
         })),
       }));
       setSections(newSections);
@@ -748,6 +803,18 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
         updateSectionField(prev, topIndex, subIndex, (s) => ({
           ...s,
           context: value || undefined,
+        })),
+      );
+    },
+    [],
+  );
+
+  const handleUpdateKind = useCallback(
+    (topIndex: number, subIndex: number | undefined, value: SectionKind) => {
+      setSections((prev) =>
+        updateSectionField(prev, topIndex, subIndex, (s) => ({
+          ...s,
+          kind: value,
         })),
       );
     },
@@ -1143,6 +1210,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
                         subIndex={undefined}
                         onUpdateLabel={handleUpdateLabel}
                         onUpdateContext={handleUpdateContext}
+                        onUpdateKind={handleUpdateKind}
                         onDelete={handleDelete}
                         onAddSub={() =>
                           setSections((prev) =>
@@ -1172,6 +1240,7 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
                                   subIndex={subIndex}
                                   onUpdateLabel={handleUpdateLabel}
                                   onUpdateContext={handleUpdateContext}
+                                  onUpdateKind={handleUpdateKind}
                                   onDelete={handleDelete}
                                 />
                               ))}
