@@ -156,9 +156,12 @@ describe("criticPass — prompt construction", () => {
       language: "sk",
     });
 
-    const system = mockCreate.mock.calls[0][0].system as string;
-    expect(system).toContain(contextText);
-    expect(system).toMatch(/audit a draft/i);
+    const system = mockCreate.mock.calls[0][0].system as Array<{
+      text: string;
+    }>;
+    const allText = system.map((b) => b.text).join("\n");
+    expect(allText).toContain(contextText);
+    expect(allText).toMatch(/audit a draft/i);
   });
 
   it("sets temperature=0 for determinism", async () => {
@@ -188,10 +191,13 @@ describe("criticPass — prompt construction", () => {
       language: "sk",
     });
 
-    const system = mockCreate.mock.calls[0][0].system as string;
+    const system = mockCreate.mock.calls[0][0].system as Array<{
+      text: string;
+    }>;
+    const allText = system.map((b) => b.text).join("\n");
     const userMessage = mockCreate.mock.calls[0][0].messages[0]
       .content as string;
-    expect(system).not.toMatch(/verified facts/i);
+    expect(allText).not.toMatch(/verified facts/i);
     expect(userMessage).not.toMatch(/# Facts/);
   });
 });

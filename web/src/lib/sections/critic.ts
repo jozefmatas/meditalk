@@ -57,6 +57,20 @@ export interface CriticInput {
   usage?: UsageContext;
   /** Model tier for this critic call. Defaults to haiku. */
   model?: CriticModel;
+  /**
+   * Template-wide guardrails — admin-editable worldview the author was
+   * required to follow. When present, the critic sees this so it
+   * preserves voice/conventions instead of stripping them as "invention".
+   * Same string the author saw (template.systemPrompt).
+   */
+  templateSystemPrompt?: string;
+  /**
+   * Voice examples the author was shown for THIS section (from the
+   * template's reference corpus). The critic uses these to recognise
+   * legitimate voice/structure — not as content to copy. Source still
+   * wins when source and voice conflict.
+   */
+  sectionExamples?: string[];
 }
 
 export interface CriticResult {
@@ -73,7 +87,7 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
     return { content: input.draft, changed: false, diffSummary: "empty" };
   }
 
-  const systemPrompt = buildSystemPrompt(input);
+  const systemBlocks = buildSystemBlocks(input);
   const userMessage = buildUserMessage(input, draft);
   const modelId = MODEL_IDS[input.model ?? "haiku"];
 
@@ -85,7 +99,7 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
     model: modelId,
     max_tokens: 2000,
     temperature: 0,
-    system: systemPrompt,
+    system: systemBlocks,
     messages: [{ role: "user", content: userMessage }],
     tools: [
       {
@@ -117,6 +131,10 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
       operation: "generate_section",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens:
+        response.usage.cache_creation_input_tokens ?? undefined,
+      cacheReadInputTokens:
+        response.usage.cache_read_input_tokens ?? undefined,
     });
   }
 
@@ -146,11 +164,73 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
 
 // ─── Prompt assembly ──────────────────────────────────────────────────
 
-function buildSystemPrompt(input: CriticInput): string {
-  const localeLabel = LANGUAGE_LABEL[input.language];
+/** Anthropic system-prompt block with optional cache breakpoint. */
+type SystemBlock =
+  | { type: "text"; text: string }
+  | { type: "text"; text: string; cache_control: { type: "ephemeral" } };
 
+/**
+ * Build the critic's system prompt as an array of blocks with explicit
+ * prompt-cache breakpoints. Layout:
+ *
+ *   block 1 — ROLE + all hard rules (cache_control: ephemeral)
+ *     Locale-specific but otherwise invariant across every critic call.
+ *     Bulk of input tokens live here (~3–4 KB of rule tables).
+ *
+ *   block 2 — TEMPLATE GUARDRAILS (cache_control: ephemeral)
+ *     Added only when the caller passes `templateSystemPrompt`. One
+ *     cache entry per unique template.systemPrompt. Gives the critic
+ *     voice/worldview awareness the author already had.
+ *
+ *   block 3 — PER-SECTION (uncached)
+ *     Voice examples + the section contract. Varies per section.
+ */
+export function buildSystemBlocks(input: CriticInput): SystemBlock[] {
+  const localeLabel = LANGUAGE_LABEL[input.language];
+  const blocks: SystemBlock[] = [];
+
+  // ── block 1: ROLE + all hard rules (cached) ──
+  blocks.push({
+    type: "text",
+    text: buildRuleBlock(localeLabel),
+    cache_control: { type: "ephemeral" },
+  });
+
+  // ── block 2: TEMPLATE GUARDRAILS (cached; only when present) ──
+  const guardrails = input.templateSystemPrompt?.trim();
+  if (guardrails) {
+    blocks.push({
+      type: "text",
+      text: `# Template-wide guardrails (the author was required to follow these — preserve this voice when the content is grounded in source; if voice and source conflict, source wins)\n${guardrails}`,
+      cache_control: { type: "ephemeral" },
+    });
+  }
+
+  // ── block 3: PER-SECTION (uncached) ──
+  blocks.push({ type: "text", text: buildPerSectionBlock(input) });
+
+  return blocks;
+}
+
+/** Per-section tail of the critic system prompt. Varies per call. */
+function buildPerSectionBlock(input: CriticInput): string {
+  const examplesBlock =
+    input.sectionExamples && input.sectionExamples.length > 0
+      ? `# Voice examples for "${input.sectionTitle}" (from the template's reference corpus — style references, NOT content to copy)\nRecognise these as the author's expected voice/structure. Do NOT strip the draft's adherence to this style as "invention". If the source contradicts the style, source wins.\n\n${input.sectionExamples
+          .map((ex, i) => `Example ${i + 1}:\n${ex}`)
+          .join("\n\n")}\n\n`
+      : "";
+
+  return `${examplesBlock}# Current section
+You are auditing "${input.sectionTitle}". Apply the rules above to THIS section's draft only.
+
+# Section contract (what THIS section OWNS and EXCLUDES)
+${input.sectionContext}`;
+}
+
+function buildRuleBlock(localeLabel: string): string {
   return `# Role
-You audit a draft "${input.sectionTitle}" section of a ${localeLabel} clinical note against the raw source. You RETURN the corrected section text — not a diff, not commentary.
+You audit a draft clinical-note section in ${localeLabel} against the raw source. You RETURN the corrected section text — not a diff, not commentary.
 
 # Check exactly two things
 1. INVENTION — any fact, number, name, drug, diagnosis, or wording in the draft that is NOT traceable to the raw source below. Remove it. Clinical-sounding sentences that look plausible but aren't grounded in this specific source ARE invention — do not be charitable.
@@ -244,10 +324,7 @@ If every clause in the draft is already grounded in the source AND the contract 
 If, after removing ungrounded content, nothing remains that satisfies the contract, pass an EMPTY STRING to the \`corrected\` field. Do NOT write reasoning, explanations, placeholders ("(empty)", "žiadne údaje"), or any text commentary — return an empty string and move on.
 
 # Output
-You MUST respond by calling the \`submit_corrected_section\` tool with the corrected section body in its \`corrected\` field. Plain ${localeLabel} text. NO markdown wrappers, NO headings, NO section labels — just the body text. If the section should be empty, pass "".
-
-# Section contract (what THIS section OWNS and EXCLUDES)
-${input.sectionContext}`;
+You MUST respond by calling the \`submit_corrected_section\` tool with the corrected section body in its \`corrected\` field. Plain ${localeLabel} text. NO markdown wrappers, NO headings, NO section labels — just the body text. If the section should be empty, pass "".`;
 }
 
 function buildUserMessage(input: CriticInput, draft: string): string {

@@ -36,14 +36,15 @@ describe("template.systemPrompt wiring", () => {
     expect(PIPELINE).toMatch(/templateSystemPrompt/);
   });
 
-  it("renderSection accepts templateSystemPrompt and passes it to buildSystemPrompt", () => {
+  it("renderSection accepts templateSystemPrompt and forwards it to the system-prompt builder", () => {
     expect(SECTION_AGENT).toMatch(/templateSystemPrompt\?: string/);
-    // Cross-line match without the `s` flag (ES2018+): replace newlines first.
+    // Cross-line match without the `s` flag: flatten newlines first.
     const flat = SECTION_AGENT.replace(/\n/g, " ");
-    expect(flat).toMatch(/buildSystemPrompt\([^)]*templateSystemPrompt/);
+    // After the prompt-cache refactor the builder is named buildSystemBlocks.
+    expect(flat).toMatch(/buildSystemBlocks\([^)]*templateSystemPrompt/);
   });
 
-  it("buildSystemPrompt injects Template-wide guardrails block", () => {
+  it("buildSystemBlocks injects Template-wide guardrails block", () => {
     expect(SECTION_AGENT).toMatch(/Template-wide guardrails/);
   });
 });

@@ -387,6 +387,8 @@ export async function generateNote(
           config,
           language: language4,
           usage,
+          templateSystemPrompt,
+          sectionExamples: examples,
         });
         if (corrected !== draft.content) {
           const updated: RenderedSection = {
@@ -467,8 +469,29 @@ export async function runCriticAndReconcilers(args: {
   config: SectionConfig;
   language: Language;
   usage?: UsageContext;
+  /**
+   * Template-wide guardrails. When provided, the critic gets the same
+   * voice/worldview the author was held to, so it doesn't strip
+   * template conventions as "invention". Byte-identical between author
+   * and critic → the Anthropic cache hits both.
+   */
+  templateSystemPrompt?: string;
+  /**
+   * Voice examples for THIS section (pre-selected from the template's
+   * reference corpus — same `string[]` the section-agent received).
+   * Lets the critic recognise legitimate voice instead of stripping it.
+   */
+  sectionExamples?: string[];
 }): Promise<string> {
-  const { draftContent, source, config, language, usage } = args;
+  const {
+    draftContent,
+    source,
+    config,
+    language,
+    usage,
+    templateSystemPrompt,
+    sectionExamples,
+  } = args;
   if (!draftContent.trim()) return draftContent;
 
   let content = draftContent;
@@ -496,6 +519,8 @@ export async function runCriticAndReconcilers(args: {
         language,
         usage,
         model: criticModel,
+        templateSystemPrompt,
+        sectionExamples,
       });
       if (result.changed) {
         logger.debug(
