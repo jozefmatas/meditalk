@@ -93,7 +93,7 @@ export async function renderSection(
   templateSystemPrompt?: string,
   sectionExamples?: string[],
 ): Promise<RenderedSection> {
-  const systemPrompt = buildSystemPrompt(
+  const systemBlocks = buildSystemBlocks(
     section,
     language,
     templateSystemPrompt,
@@ -109,7 +109,7 @@ export async function renderSection(
     // drift at default 1.0 is unacceptable when the same raw source should
     // produce the same note.
     temperature: 0,
-    system: systemPrompt,
+    system: systemBlocks,
     messages: [{ role: "user", content: userMessage }],
   });
 
@@ -122,6 +122,8 @@ export async function renderSection(
       operation: "generate_section",
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? undefined,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? undefined,
     });
   }
 
@@ -235,38 +237,83 @@ export function isAbsenceDescription(text: string): boolean {
 
 // ─── Prompt assembly ─────────────────────────────────────────────────
 
-function buildSystemPrompt(
+/**
+ * System-prompt block with optional `cache_control`. Matches the shape
+ * Anthropic's SDK accepts for the `system` array-form parameter.
+ */
+type SystemBlock =
+  | { type: "text"; text: string }
+  | { type: "text"; text: string; cache_control: { type: "ephemeral" } };
+
+/**
+ * Build the section-agent's system prompt as an array of blocks with
+ * explicit prompt-cache breakpoints. Layout:
+ *
+ *   block 1 — ROLE + CORE_RULES         (cache_control: ephemeral)
+ *     Varies only by language. ~3 possible cache entries globally.
+ *
+ *   block 2 — TEMPLATE GUARDRAILS       (cache_control: ephemeral)
+ *     Only added when the template has a non-empty systemPrompt. One
+ *     cache entry per unique template.systemPrompt.
+ *
+ *   block 3 — PER-SECTION (EXAMPLES + TASK + CONTRACT)  (uncached)
+ *     Voice examples differ per section, so this block is not worth
+ *     caching.
+ *
+ * Each subsequent call within the 5-minute cache TTL that uses the same
+ * language + same template re-uses blocks 1 and 2, paying the
+ * cache-read rate (0.1× input) instead of full rate.
+ */
+export function buildSystemBlocks(
   section: SectionConfig,
   language: Language,
   templateSystemPrompt?: string,
   sectionExamples?: string[],
-): string {
+): SystemBlock[] {
   const localeLabel = LANGUAGE_LABEL[language];
+  const blocks: SystemBlock[] = [];
 
-  const templateBlock = templateSystemPrompt?.trim()
-    ? `\n\n# Template-wide guardrails (apply to every section in this template)\n${templateSystemPrompt.trim()}`
-    : "";
-
-  const examplesBlock =
-    sectionExamples && sectionExamples.length > 0
-      ? `\n\n# Voice examples for "${section.title}" (senior-attending notes from this template's corpus)\nMimic the TONE and STRUCTURE of these examples. NEVER copy patient-specific facts, numbers, names, or dates from them — those belong to other patients. Use them only as style references for how this doctor writes this section.\n\n${sectionExamples
-          .map((ex, i) => `Example ${i + 1}:\n${ex}`)
-          .join("\n\n")}`
-      : "";
-
-  return `# Role
+  // ── block 1: ROLE + CORE RULES (cached) ──
+  blocks.push({
+    type: "text",
+    text: `# Role
 You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation. A separate critic pass will double-check your output against the source; focus on faithful transformation, not defensive omission.
 
 # Core rules (absolute)
 1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
 2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
-3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.${templateBlock}${examplesBlock}
+3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.`,
+    cache_control: { type: "ephemeral" },
+  });
 
-# Your task
+  // ── block 2: TEMPLATE GUARDRAILS (cached; only when present) ──
+  const templateGuardrails = templateSystemPrompt?.trim();
+  if (templateGuardrails) {
+    blocks.push({
+      type: "text",
+      text: `# Template-wide guardrails (apply to every section in this template)\n${templateGuardrails}`,
+      cache_control: { type: "ephemeral" },
+    });
+  }
+
+  // ── block 3: PER-SECTION (uncached) ──
+  const examplesText =
+    sectionExamples && sectionExamples.length > 0
+      ? `# Voice examples for "${section.title}" (senior-attending notes from this template's corpus)\nMimic the TONE and STRUCTURE of these examples. NEVER copy patient-specific facts, numbers, names, or dates from them — those belong to other patients. Use them only as style references for how this doctor writes this section.\n\n${sectionExamples
+          .map((ex, i) => `Example ${i + 1}:\n${ex}`)
+          .join("\n\n")}\n\n`
+      : "";
+
+  blocks.push({
+    type: "text",
+    text: `${examplesText}# Your task
 Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary. Follow the contract's format rules for this section (compact single paragraph vs. line-per-item vs. narrative prose).
 
 # Section contract (binding)
-${section.context}`;
+${section.context}`,
+  });
+
+  return blocks;
 }
 
 function buildUserMessage(source: RawSource): string {

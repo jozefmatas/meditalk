@@ -272,6 +272,7 @@ export async function POST(request: NextRequest) {
                 language:
                   language === "cs" ? "cs" : language === "en" ? "en" : "sk",
                 usage: { userId, visitId },
+                templateSystemPrompt: template.systemPrompt,
               })
             : draft;
 

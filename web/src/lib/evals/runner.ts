@@ -116,6 +116,7 @@ async function generateForFixture(fixture: EvalFixture): Promise<string> {
             critic: zaver.critic,
           },
           language: fixture.language as "sk" | "cs" | "en",
+          templateSystemPrompt: template.systemPrompt,
         })
       : draft;
     sectionContentsMap[zaver.id] = finalZaver;

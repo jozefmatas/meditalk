@@ -208,6 +208,7 @@ export async function POST(request: NextRequest) {
                 },
                 language,
                 usage: { userId, visitId },
+                templateSystemPrompt: template.systemPrompt,
               })
             : draftZaver;
 
