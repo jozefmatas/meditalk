@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-23 (Anthropic tool-use on critic / suggester / adjust-router / file-focus; section-agent stays on free-text prose output. Claims-with-evidence variant was tried and reverted — it atomised prose + dropped compact clinical shorthand).)_
+_Last updated: 2026-04-24 (Provider abstraction: 6 pipeline call sites now route through `web/src/lib/models/` with Anthropic defaults; env overrides route any call to Vertex Gemini 3.1. Anthropic tool-use on critic / suggester / adjust-router / file-focus / note-skeleton; section-agent stays on free-text prose.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -206,6 +206,7 @@ Per-section flags on the template:
 | [`web/src/lib/sections/format-zaver.ts`](../web/src/lib/sections/format-zaver.ts)                 | Deterministic formatter: `SuggestedIcdCode[]` → Záver line ("primary [differential], secondaries, …").                                                                                                                                                 |
 | [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)         | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                                                         |
 | [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts)       | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                                                  |
+| [`web/src/lib/models/`](../web/src/lib/models/)                                                   | Provider abstraction. `resolve(callSite, tier)` returns a Provider that wraps Anthropic or Vertex Gemini. Default routes preserve Anthropic; env overrides (`MODEL_ROUTE_<CALL>_<TIER>`) swap individual calls without code changes. See §3. |
 
 ### Routes
 
@@ -265,7 +266,52 @@ There is no shared "facts" layer; each section sees the full source independentl
 
 Every section carries `section.model: "haiku" | "sonnet" | "opus"` (defaults to `haiku`). Most sections (structured lists, vitals, allergies) work great on Haiku and finish in ~1–2s each. Narrative-heavy sections (TO/HPI, Záver, Plan) can be upgraded to Sonnet or Opus per-template if quality demands it.
 
-The critic always runs on Haiku — a cheap, fast audit. Model IDs live in [`section-agent.ts`](../web/src/lib/sections/section-agent.ts) and [`critic.ts`](../web/src/lib/sections/critic.ts) under `MODEL_IDS`.
+The critic always runs on Haiku — a cheap, fast audit.
+
+### Provider abstraction
+
+As of 2026-04-24 all six pipeline LLM call sites route through [`web/src/lib/models/`](../web/src/lib/models/) rather than instantiating the Anthropic SDK directly. The entry point is `resolve(callSite, tier) → Provider`; the provider handles SDK differences, forced tool-use, and prompt caching.
+
+Default routes are defined in [`registry.ts`](../web/src/lib/models/registry.ts) and reproduce the previous Anthropic behaviour byte-for-byte. Any route can be overridden at runtime via env var:
+
+```
+MODEL_ROUTE_<CALLSITE>_<TIER>=<json>
+```
+
+Examples:
+
+```bash
+# Try Gemini 3.1 Pro Thinking (MEDIUM) as the critic for sonnet-tier sections.
+export MODEL_ROUTE_CRITIC_SONNET='{"provider":"vertex-gemini","model":"gemini-3.1-pro","thinkingLevel":"MEDIUM"}'
+
+# Try Gemini 3.1 Flash-Lite for the cheap classifier calls.
+export MODEL_ROUTE_ADJUST_ROUTER_HAIKU='{"provider":"vertex-gemini","model":"gemini-3.1-flash-lite"}'
+export MODEL_ROUTE_FILE_FOCUS_HAIKU='{"provider":"vertex-gemini","model":"gemini-3.1-flash-lite"}'
+
+# Pin suggest-icd on Gemini 3.1 Pro + HIGH thinking for the ICD reasoning calls.
+export MODEL_ROUTE_SUGGEST_ICD_HAIKU='{"provider":"vertex-gemini","model":"gemini-3.1-pro","thinkingLevel":"HIGH"}'
+```
+
+Call site names use hyphens in code (`section-agent`, `suggest-icd`, `adjust-router`, `file-focus`, `note-skeleton`, `critic`) and underscores in env var names (`SECTION_AGENT`, `SUGGEST_ICD`, `ADJUST_ROUTER`, `FILE_FOCUS`, `NOTE_SKELETON`, `CRITIC`).
+
+The Gemini provider supports two auth modes (managed inside [`providers/vertex-gemini.ts`](../web/src/lib/models/providers/vertex-gemini.ts)):
+
+1. **Gemini Developer API** — set `GEMINI_API_KEY` in `.env.local`. Simplest path, no GCP project required. Same per-token pricing as Vertex. Used locally and for Jozef's initial experiments.
+2. **Vertex AI** — set `VERTEX_PROJECT_ID` (and optionally `VERTEX_LOCATION`, default `global`) plus Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` pointing at a service-account JSON, or `gcloud auth application-default login`). This is the production path.
+
+`GEMINI_API_KEY` wins when both are set. Unset it in production to switch to Vertex. Credentials are read lazily — projects with neither set still build and run against the Anthropic defaults.
+
+Available models (confirmed via `GET /v1beta/models` on the Gemini Developer API):
+- `gemini-3.1-pro` → `gemini-3.1-pro-preview` ✓ thinking (LOW/MEDIUM/HIGH), paid tier
+- `gemini-3.1-flash-lite` → `gemini-3.1-flash-lite-preview` ✓ thinking
+- `gemini-3.1-flash` → aliases to `gemini-3-flash-preview` (3.1 Flash doesn't exist yet)
+- `gemini-2.5-pro` / `gemini-2.5-flash` — no thinkingLevel support (pass undefined)
+
+Smoke test: [`web/scripts/smoke-gemini.ts`](../web/scripts/smoke-gemini.ts). Runs one free-text call + one forced tool-use call that mirrors the critic's contract. `MODEL=gemini-3.1-pro pnpm exec tsx scripts/smoke-gemini.ts`.
+
+Tool-use schemas are passed through `ToolSpec.schema` as standard JSON Schema. Anthropic receives them as `input_schema`; Gemini receives them as `parametersJsonSchema` on a `FunctionDeclaration`. No OpenAPI 3 schema translation is performed.
+
+Prompt caching: Anthropic cache blocks are marked with `cache: true` on `SystemBlock` and translate to `cache_control: { type: "ephemeral" }`. Gemini's implicit prefix caching kicks in automatically; explicit `cachedContents` resources are a phase-2 optimization.
 
 ---
 

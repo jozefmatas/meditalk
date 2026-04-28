@@ -10,7 +10,7 @@
  * Returns codes in WHO Slovak format. Validates every code against the
  * Slovak CSV before shipping — unknown codes are dropped.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { getIcdDescription } from "../lookup/icd";
 import { logger } from "../logger";
@@ -28,14 +28,6 @@ export interface SuggestedIcdCode {
    * Slovak phrasing from the source.
    */
   differential?: string;
-}
-
-const MODEL_ID = "claude-haiku-4-5-20251001";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
 }
 
 const LANGUAGE_LABEL: Record<Language, string> = {
@@ -141,97 +133,89 @@ Respond by calling \`submit_icd_candidates\` with \`{codes: [...]}\`. Each code 
   const userMessage = `# Raw source\n${sourceDump}`;
 
   try {
-    const response = await client().messages.create({
-      model: MODEL_ID,
-      max_tokens: 3000,
+    const provider = resolve("suggest-icd", "haiku");
+    const result = await provider.generate({
+      maxTokens: 3000,
       temperature: 0,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-      tools: [
-        {
-          name: "submit_icd_candidates",
-          description:
-            "Submit 10–15 candidate ICD-10 codes for the encounter, each paired with the verbatim source span that supports it.",
-          input_schema: {
-            type: "object",
-            properties: {
-              codes: {
-                type: "array",
-                description:
-                  "Ordered list of ICD-10 candidates. Primary first, chronic comorbidities next, states-post last.",
-                items: {
-                  type: "object",
-                  properties: {
-                    code: {
-                      type: "string",
-                      description:
-                        "WHO Slovak ICD-10 code: Letter + 2 digits optionally + `.digit` or `.digit-digit`. Reject ICD-10-CM codes with 3+ digits after the decimal.",
-                    },
-                    description: {
-                      type: "string",
-                      description:
-                        "Short description of the code (server overrides with canonical CSV text, but include for clarity).",
-                    },
-                    confidence: {
-                      type: "string",
-                      enum: ["high", "medium", "low"],
-                      description:
-                        "high = explicitly diagnosed; medium = strongly implied; low = plausible but uncertain.",
-                    },
-                    evidence: {
-                      type: "string",
-                      description:
-                        "ONE contiguous verbatim substring of the source (≥4 chars) that supports this diagnosis. NEVER concatenate with '…' / '...' — pick one span. For chronic comorbidities, cite the OA list entry verbatim. Required.",
-                    },
-                    differential: {
-                      type: "string",
-                      description:
-                        "Verbatim 'nemožno vylúčiť …' clause from the source. Only for symptom-code primaries awaiting work-up.",
-                    },
+      system: [{ text: systemPrompt }],
+      user: userMessage,
+      tool: {
+        name: "submit_icd_candidates",
+        description:
+          "Submit 10–15 candidate ICD-10 codes for the encounter, each paired with the verbatim source span that supports it.",
+        schema: {
+          type: "object",
+          properties: {
+            codes: {
+              type: "array",
+              description:
+                "Ordered list of ICD-10 candidates. Primary first, chronic comorbidities next, states-post last.",
+              items: {
+                type: "object",
+                properties: {
+                  code: {
+                    type: "string",
+                    description:
+                      "WHO Slovak ICD-10 code: Letter + 2 digits optionally + `.digit` or `.digit-digit`. Reject ICD-10-CM codes with 3+ digits after the decimal.",
                   },
-                  required: ["code", "description", "confidence", "evidence"],
+                  description: {
+                    type: "string",
+                    description:
+                      "Short description of the code (server overrides with canonical CSV text, but include for clarity).",
+                  },
+                  confidence: {
+                    type: "string",
+                    enum: ["high", "medium", "low"],
+                    description:
+                      "high = explicitly diagnosed; medium = strongly implied; low = plausible but uncertain.",
+                  },
+                  evidence: {
+                    type: "string",
+                    description:
+                      "ONE contiguous verbatim substring of the source (≥4 chars) that supports this diagnosis. NEVER concatenate with '…' / '...' — pick one span. For chronic comorbidities, cite the OA list entry verbatim. Required.",
+                  },
+                  differential: {
+                    type: "string",
+                    description:
+                      "Verbatim 'nemožno vylúčiť …' clause from the source. Only for symptom-code primaries awaiting work-up.",
+                  },
                 },
+                required: ["code", "description", "confidence", "evidence"],
               },
             },
-            required: ["codes"],
           },
+          required: ["codes"],
         },
-      ],
-      tool_choice: { type: "tool", name: "submit_icd_candidates" },
+      },
     });
 
     if (usage) {
       logUsage({
         userId: usage.userId,
         visitId: usage.visitId,
-        provider: "anthropic",
-        model: MODEL_ID,
+        provider: provider.name,
+        model: provider.model,
         operation: "clinical_analysis",
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
       });
     }
 
-    // Extract the forced tool call.
-    let rawCodes: Array<{
+    const rawCodes: Array<{
       code?: string;
       description?: string;
       confidence?: string;
       evidence?: string;
       differential?: string;
-    }> = [];
-    for (const block of response.content) {
-      if (
-        block.type === "tool_use" &&
-        block.name === "submit_icd_candidates"
-      ) {
-        const input = block.input as { codes?: unknown };
-        if (Array.isArray(input.codes)) {
-          rawCodes = input.codes as typeof rawCodes;
-        }
-        break;
-      }
-    }
+    }> = Array.isArray(result.toolInput?.codes)
+      ? (result.toolInput.codes as Array<{
+          code?: string;
+          description?: string;
+          confidence?: string;
+          evidence?: string;
+          differential?: string;
+        }>)
+      : [];
 
     // Build a source blob for evidence validation (same shape as the
     // section-agent's validation).

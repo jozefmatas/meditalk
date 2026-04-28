@@ -12,8 +12,8 @@
  * ICD suggester sees the source, so the downstream pipeline operates
  * on the already-filtered content.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
+import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { logger } from "../logger";
 import type { Language, RawSource } from "./section-agent";
@@ -34,14 +34,6 @@ export type FileFocusCache = Record<string, FileFocusCacheEntry>;
 
 function hashText(text: string): string {
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-const MODEL_ID = "claude-haiku-4-5-20251001";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
 }
 
 const LANGUAGE_LABEL: Record<Language, string> = {
@@ -84,79 +76,66 @@ ${directive}
 ${text}`;
 
   try {
-    const response = await client().messages.create({
-      model: MODEL_ID,
-      max_tokens: 4000,
+    const provider = resolve("file-focus", "haiku");
+    const result = await provider.generate({
+      maxTokens: 4000,
       temperature: 0,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-      tools: [
-        {
-          name: "submit_extracted_passages",
-          description:
-            "Submit the passages of the document that match the physician's directive, verbatim.",
-          input_schema: {
-            type: "object",
-            properties: {
-              passages: {
-                type: "array",
-                description:
-                  "Verbatim passages matching the directive, in original document order. Empty array when nothing matches.",
-                items: {
-                  type: "object",
-                  properties: {
-                    text: {
-                      type: "string",
-                      description:
-                        "ONE contiguous verbatim substring of the document (≥8 chars). NEVER concatenate multiple places with '…' or '...'. Server validates via substring match — concatenated spans will be dropped.",
-                    },
-                    match_reason: {
-                      type: "string",
-                      description:
-                        "Short rationale (e.g. 'matches echokg heading').",
-                    },
+      system: [{ text: systemPrompt }],
+      user: userMessage,
+      tool: {
+        name: "submit_extracted_passages",
+        description:
+          "Submit the passages of the document that match the physician's directive, verbatim.",
+        schema: {
+          type: "object",
+          properties: {
+            passages: {
+              type: "array",
+              description:
+                "Verbatim passages matching the directive, in original document order. Empty array when nothing matches.",
+              items: {
+                type: "object",
+                properties: {
+                  text: {
+                    type: "string",
+                    description:
+                      "ONE contiguous verbatim substring of the document (≥8 chars). NEVER concatenate multiple places with '…' or '...'. Server validates via substring match — concatenated spans will be dropped.",
                   },
-                  required: ["text"],
+                  match_reason: {
+                    type: "string",
+                    description:
+                      "Short rationale (e.g. 'matches echokg heading').",
+                  },
                 },
+                required: ["text"],
               },
             },
-            required: ["passages"],
           },
+          required: ["passages"],
         },
-      ],
-      tool_choice: { type: "tool", name: "submit_extracted_passages" },
+      },
     });
 
     if (usage) {
       logUsage({
         userId: usage.userId,
         visitId: usage.visitId,
-        provider: "anthropic",
-        model: MODEL_ID,
+        provider: provider.name,
+        model: provider.model,
         operation: "generate_section",
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
       });
     }
 
-    // Extract + validate each passage against the source text.
     const passages: Array<{ text: string }> = [];
-    for (const block of response.content) {
-      if (
-        block.type === "tool_use" &&
-        block.name === "submit_extracted_passages"
-      ) {
-        const input = block.input as { passages?: unknown };
-        if (Array.isArray(input.passages)) {
-          for (const p of input.passages) {
-            if (!p || typeof p !== "object") continue;
-            const obj = p as { text?: unknown };
-            if (typeof obj.text === "string" && obj.text.trim().length >= 8) {
-              passages.push({ text: obj.text });
-            }
-          }
+    if (Array.isArray(result.toolInput?.passages)) {
+      for (const p of result.toolInput.passages as unknown[]) {
+        if (!p || typeof p !== "object") continue;
+        const obj = p as { text?: unknown };
+        if (typeof obj.text === "string" && obj.text.trim().length >= 8) {
+          passages.push({ text: obj.text });
         }
-        break;
       }
     }
 

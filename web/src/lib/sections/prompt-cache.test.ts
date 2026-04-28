@@ -17,12 +17,10 @@ const SECTION: SectionConfig = {
 };
 
 describe("renderSection prompt-cache layout", () => {
-  it("block 1 (ROLE + CORE_RULES) carries cache_control", () => {
+  it("block 1 (ROLE + CORE_RULES) carries cache=true", () => {
     const blocks = buildRendererBlocks(SECTION, "sk");
     const first = blocks[0];
-    expect("cache_control" in first && first.cache_control).toEqual({
-      type: "ephemeral",
-    });
+    expect(first.cache).toBe(true);
     expect(first.text).toMatch(/# Role/);
     expect(first.text).toMatch(/# Core rules/);
   });
@@ -38,7 +36,7 @@ describe("renderSection prompt-cache layout", () => {
     );
     expect(withTpl).toHaveLength(3); // role + template + per-section
     const templateBlock = withTpl[1];
-    expect("cache_control" in templateBlock).toBe(true);
+    expect(templateBlock.cache).toBe(true);
     expect(templateBlock.text).toContain("Template guardrail");
   });
 
@@ -51,14 +49,11 @@ describe("renderSection prompt-cache layout", () => {
   });
 
   it("per-section block (last) is NOT cached — it carries the section contract", () => {
-    const blocks = buildRendererBlocks(
-      SECTION,
-      "sk",
-      "Template guardrail",
-      ["ex"],
-    );
+    const blocks = buildRendererBlocks(SECTION, "sk", "Template guardrail", [
+      "ex",
+    ]);
     const last = blocks[blocks.length - 1];
-    expect("cache_control" in last).toBe(false);
+    expect(last.cache).toBeUndefined();
     expect(last.text).toContain("Medications only");
   });
 
@@ -70,7 +65,7 @@ describe("renderSection prompt-cache layout", () => {
     const last = blocks[blocks.length - 1];
     expect(last.text).toContain("alpha example");
     expect(last.text).toContain("beta example");
-    expect("cache_control" in last).toBe(false);
+    expect(last.cache).toBeUndefined();
   });
 
   it("locale changes the role block (different cache keys)", () => {
@@ -90,12 +85,10 @@ const CRITIC_INPUT_BASE: CriticInput = {
 };
 
 describe("criticPass prompt-cache layout + template context", () => {
-  it("block 1 (rules) is cache_control=ephemeral", () => {
+  it("block 1 (rules) carries cache=true", () => {
     const blocks = buildCriticBlocks(CRITIC_INPUT_BASE);
     const first = blocks[0];
-    expect("cache_control" in first && first.cache_control).toEqual({
-      type: "ephemeral",
-    });
+    expect(first.cache).toBe(true);
     expect(first.text).toMatch(/# Role/);
   });
 
@@ -109,7 +102,7 @@ describe("criticPass prompt-cache layout + template context", () => {
     });
     expect(withTpl).toHaveLength(3);
     const tblock = withTpl[1];
-    expect("cache_control" in tblock).toBe(true);
+    expect(tblock.cache).toBe(true);
     expect(tblock.text).toContain("Clinical Slovak guardrail");
     expect(tblock.text).toMatch(/source wins/i);
   });
@@ -120,7 +113,7 @@ describe("criticPass prompt-cache layout + template context", () => {
       sectionExamples: ["LA example 1", "LA example 2"],
     });
     const last = blocks[blocks.length - 1];
-    expect("cache_control" in last).toBe(false);
+    expect(last.cache).toBeUndefined();
     expect(last.text).toContain("LA example 1");
     expect(last.text).toContain("LA example 2");
   });
@@ -136,7 +129,7 @@ describe("criticPass prompt-cache layout + template context", () => {
   it("section contract is in the per-section (uncached) block", () => {
     const blocks = buildCriticBlocks(CRITIC_INPUT_BASE);
     const last = blocks[blocks.length - 1];
-    expect("cache_control" in last).toBe(false);
+    expect(last.cache).toBeUndefined();
     expect(last.text).toContain("Medications only.");
   });
 

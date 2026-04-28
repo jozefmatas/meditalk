@@ -12,7 +12,7 @@
  * the common "(empty — …)" / essay-describing-absence leaks so they
  * don't ship as placeholder text.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { resolve, type SystemBlock } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import type { NoteSkeleton } from "./note-skeleton";
 import { formatSkeletonBlock } from "./note-skeleton";
@@ -76,18 +76,6 @@ export interface RenderedSection {
 
 export type Language = "sk" | "cs" | "en";
 
-const MODEL_IDS: Record<SectionConfig["model"], string> = {
-  haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-4-6",
-  opus: "claude-opus-4-6",
-};
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 4 });
-  return _client;
-}
-
 const LANGUAGE_LABEL: Record<Language, string> = {
   sk: "Slovak",
   cs: "Czech",
@@ -110,37 +98,33 @@ export async function renderSection(
     sectionExamples,
   );
   const userMessage = buildUserMessage(source, skeleton ?? null);
-  const modelId = MODEL_IDS[section.model];
+  const provider = resolve("section-agent", section.model);
 
-  const response = await client().messages.create({
-    model: modelId,
-    max_tokens: 2000,
-    // temperature=0 for deterministic clinical documentation. Run-to-run
-    // drift at default 1.0 is unacceptable when the same raw source should
-    // produce the same note.
+  // temperature=0 for deterministic clinical documentation. Run-to-run
+  // drift at default 1.0 is unacceptable when the same raw source should
+  // produce the same note.
+  const result = await provider.generate({
+    maxTokens: 2000,
     temperature: 0,
     system: systemBlocks,
-    messages: [{ role: "user", content: userMessage }],
+    user: userMessage,
   });
 
   if (usage) {
     logUsage({
       userId: usage.userId,
       visitId: usage.visitId,
-      provider: "anthropic",
-      model: modelId,
+      provider: provider.name,
+      model: provider.model,
       operation: "generate_section",
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? undefined,
-      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? undefined,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      cacheCreationInputTokens: result.usage.cacheCreationTokens,
+      cacheReadInputTokens: result.usage.cacheReadTokens,
     });
   }
 
-  let content = response.content
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-    .trim();
+  let content = (result.text ?? "").trim();
 
   if (isAbsenceDescription(content)) {
     content = "";
@@ -248,21 +232,13 @@ export function isAbsenceDescription(text: string): boolean {
 // ─── Prompt assembly ─────────────────────────────────────────────────
 
 /**
- * System-prompt block with optional `cache_control`. Matches the shape
- * Anthropic's SDK accepts for the `system` array-form parameter.
- */
-type SystemBlock =
-  | { type: "text"; text: string }
-  | { type: "text"; text: string; cache_control: { type: "ephemeral" } };
-
-/**
  * Build the section-agent's system prompt as an array of blocks with
  * explicit prompt-cache breakpoints. Layout:
  *
- *   block 1 — ROLE + CORE_RULES         (cache_control: ephemeral)
+ *   block 1 — ROLE + CORE_RULES         (cache: true)
  *     Varies only by language. ~3 possible cache entries globally.
  *
- *   block 2 — TEMPLATE GUARDRAILS       (cache_control: ephemeral)
+ *   block 2 — TEMPLATE GUARDRAILS       (cache: true)
  *     Only added when the template has a non-empty systemPrompt. One
  *     cache entry per unique template.systemPrompt.
  *
@@ -285,7 +261,6 @@ export function buildSystemBlocks(
 
   // ── block 1: ROLE + CORE RULES (cached) ──
   blocks.push({
-    type: "text",
     text: `# Role
 You render ONE section of a structured medical note for a ${localeLabel}-speaking doctor. Your work is verbatim transformation of the source, not authorship. Accuracy matters — this is real clinical documentation. A separate critic pass will double-check your output against the source; focus on faithful transformation, not defensive omission.
 
@@ -293,16 +268,15 @@ You render ONE section of a structured medical note for a ${localeLabel}-speakin
 1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
 2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
 3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.`,
-    cache_control: { type: "ephemeral" },
+    cache: true,
   });
 
   // ── block 2: TEMPLATE GUARDRAILS (cached; only when present) ──
   const templateGuardrails = templateSystemPrompt?.trim();
   if (templateGuardrails) {
     blocks.push({
-      type: "text",
       text: `# Template-wide guardrails (apply to every section in this template)\n${templateGuardrails}`,
-      cache_control: { type: "ephemeral" },
+      cache: true,
     });
   }
 
@@ -315,7 +289,6 @@ You render ONE section of a structured medical note for a ${localeLabel}-speakin
       : "";
 
   blocks.push({
-    type: "text",
     text: `${examplesText}# Your task
 Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary. Follow the contract's format rules for this section (compact single paragraph vs. line-per-item vs. narrative prose).
 

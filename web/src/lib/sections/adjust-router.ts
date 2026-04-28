@@ -12,20 +12,12 @@
  * risks a section reflecting stale content. The prompt biases the
  * model toward inclusion when the delta is ambiguous.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { logger } from "../logger";
 import type { Language } from "./section-agent";
 import type { NoteSkeleton } from "./note-skeleton";
 import { formatSkeletonBlock } from "./note-skeleton";
-
-const MODEL_ID = "claude-haiku-4-5-20251001";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
-}
 
 const LANGUAGE_LABEL: Record<Language, string> = {
   sk: "Slovak",
@@ -120,63 +112,54 @@ ${sectionList}`;
     .join("\n\n");
 
   try {
-    const response = await client().messages.create({
-      model: MODEL_ID,
-      max_tokens: 500,
+    const provider = resolve("adjust-router", "haiku");
+    const result = await provider.generate({
+      maxTokens: 500,
       temperature: 0,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-      tools: [
-        {
-          name: "select_affected_sections",
-          description:
-            "Select the subset of section ids whose content is affected by the adjustment delta.",
-          input_schema: {
-            type: "object",
-            properties: {
-              affected: {
-                type: "array",
-                description:
-                  "Section ids to re-render, copied VERBATIM from the list. Empty array when nothing relevant.",
-                items: { type: "string" },
-              },
-              reasoning: {
-                type: "string",
-                description: "One-line rationale for telemetry.",
-              },
+      system: [{ text: systemPrompt }],
+      user: userMessage,
+      tool: {
+        name: "select_affected_sections",
+        description:
+          "Select the subset of section ids whose content is affected by the adjustment delta.",
+        schema: {
+          type: "object",
+          properties: {
+            affected: {
+              type: "array",
+              description:
+                "Section ids to re-render, copied VERBATIM from the list. Empty array when nothing relevant.",
+              items: { type: "string" },
             },
-            required: ["affected"],
+            reasoning: {
+              type: "string",
+              description: "One-line rationale for telemetry.",
+            },
           },
+          required: ["affected"],
         },
-      ],
-      tool_choice: { type: "tool", name: "select_affected_sections" },
+      },
     });
 
     if (usage) {
       logUsage({
         userId: usage.userId,
         visitId: usage.visitId,
-        provider: "anthropic",
-        model: MODEL_ID,
+        provider: provider.name,
+        model: provider.model,
         operation: "clinical_analysis",
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
       });
     }
 
-    let affectedRaw: unknown[] = [];
-    let reasoning: string | undefined;
-    for (const block of response.content) {
-      if (
-        block.type === "tool_use" &&
-        block.name === "select_affected_sections"
-      ) {
-        const input = block.input as { affected?: unknown; reasoning?: unknown };
-        if (Array.isArray(input.affected)) affectedRaw = input.affected;
-        if (typeof input.reasoning === "string") reasoning = input.reasoning;
-        break;
-      }
-    }
+    const affectedRaw: unknown[] = Array.isArray(result.toolInput?.affected)
+      ? (result.toolInput.affected as unknown[])
+      : [];
+    const reasoning =
+      typeof result.toolInput?.reasoning === "string"
+        ? (result.toolInput.reasoning as string)
+        : undefined;
 
     const valid = new Set(allIds);
     const affectedSectionIds = affectedRaw
