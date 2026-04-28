@@ -9,11 +9,21 @@ const PRICING: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
   "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
   "text-embedding-ada-002": { input: 0.1, output: 0 },
+  // Gemini 3.1 — Vertex AI, per 1M tokens (≤200K context tier). Long-
+  // context traffic (>200K) is billed at a higher rate; the pipeline's
+  // prompts are well under that so the lower tier applies. Cache reads
+  // are priced separately via CACHE_READ_MULT below (Gemini's 90%
+  // discount matches Anthropic's 0.1× read multiplier exactly).
+  "gemini-3.1-pro-preview": { input: 2.0, output: 12.0 },
+  "gemini-3.1-flash-preview": { input: 0.5, output: 3.0 },
+  "gemini-3.1-flash-lite-preview": { input: 0.25, output: 1.5 },
+  "gemini-2.5-pro": { input: 1.25, output: 10.0 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
 };
 
 const SCRIBE_PER_HOUR = 0.4;
 
-type Provider = "anthropic" | "openai" | "elevenlabs";
+type Provider = "anthropic" | "vertex-gemini" | "openai" | "elevenlabs";
 type Operation =
   // Section-agent architecture (current)
   | "generate_section"

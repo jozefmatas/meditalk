@@ -19,7 +19,7 @@
  * sections (Vitals, BMI, Výška) don't need it and the extra call just
  * adds noise on single-value extractions.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { resolve, type SystemBlock } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import type { Language, RawSource } from "./section-agent";
 import type { NoteSkeleton } from "./note-skeleton";
@@ -29,17 +29,6 @@ import { formatSkeletonBlock } from "./note-skeleton";
  *  on sections that need multi-step clinical inference (Záver ICD
  *  anatomy, OA shorthand preservation, LA dose fidelity). */
 export type CriticModel = "haiku" | "sonnet";
-
-const MODEL_IDS: Record<CriticModel, string> = {
-  haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-4-6",
-};
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
-}
 
 const LANGUAGE_LABEL: Record<Language, string> = {
   sk: "Slovak",
@@ -99,71 +88,54 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
 
   const systemBlocks = buildSystemBlocks(input);
   const userMessage = buildUserMessage(input, draft);
-  const modelId = MODEL_IDS[input.model ?? "haiku"];
+  const tier = input.model ?? "haiku";
+  const provider = resolve("critic", tier);
 
   // Structured output via tool-use — forces the model to return the
   // corrected text inside a single string field. No essay-leak is
   // possible because the response body is a tool call, not free prose.
   // If the correct output is empty, the model passes an empty string.
-  const response = await client().messages.create({
-    model: modelId,
-    max_tokens: 2000,
+  const result = await provider.generate({
+    maxTokens: 2000,
     temperature: 0,
     system: systemBlocks,
-    messages: [{ role: "user", content: userMessage }],
-    tools: [
-      {
-        name: "submit_corrected_section",
-        description:
-          "Submit the corrected section text. Return an empty string when nothing survives the audit.",
-        input_schema: {
-          type: "object",
-          properties: {
-            corrected: {
-              type: "string",
-              description:
-                "The verbatim corrected section body that belongs in the note. Empty string when the section should be empty.",
-            },
+    user: userMessage,
+    tool: {
+      name: "submit_corrected_section",
+      description:
+        "Submit the corrected section text. Return an empty string when nothing survives the audit.",
+      schema: {
+        type: "object",
+        properties: {
+          corrected: {
+            type: "string",
+            description:
+              "The verbatim corrected section body that belongs in the note. Empty string when the section should be empty.",
           },
-          required: ["corrected"],
         },
+        required: ["corrected"],
       },
-    ],
-    tool_choice: { type: "tool", name: "submit_corrected_section" },
+    },
   });
 
   if (input.usage) {
     logUsage({
       userId: input.usage.userId,
       visitId: input.usage.visitId,
-      provider: "anthropic",
-      model: modelId,
+      provider: provider.name,
+      model: provider.model,
       operation: "generate_section",
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      cacheCreationInputTokens:
-        response.usage.cache_creation_input_tokens ?? undefined,
-      cacheReadInputTokens:
-        response.usage.cache_read_input_tokens ?? undefined,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+      cacheCreationInputTokens: result.usage.cacheCreationTokens,
+      cacheReadInputTokens: result.usage.cacheReadTokens,
     });
   }
 
-  // Extract the tool call's `corrected` field. tool_choice=tool forces
-  // Haiku to return exactly one tool_use block; text blocks (if any)
-  // are ignored.
-  let corrected = "";
-  for (const block of response.content) {
-    if (
-      block.type === "tool_use" &&
-      block.name === "submit_corrected_section"
-    ) {
-      const input = block.input as { corrected?: unknown };
-      if (typeof input?.corrected === "string") {
-        corrected = input.corrected.trim();
-      }
-      break;
-    }
-  }
+  const corrected =
+    typeof result.toolInput?.corrected === "string"
+      ? (result.toolInput.corrected as string).trim()
+      : "";
 
   const changed = corrected !== draft;
   const diffSummary = changed
@@ -174,20 +146,15 @@ export async function criticPass(input: CriticInput): Promise<CriticResult> {
 
 // ─── Prompt assembly ──────────────────────────────────────────────────
 
-/** Anthropic system-prompt block with optional cache breakpoint. */
-type SystemBlock =
-  | { type: "text"; text: string }
-  | { type: "text"; text: string; cache_control: { type: "ephemeral" } };
-
 /**
  * Build the critic's system prompt as an array of blocks with explicit
  * prompt-cache breakpoints. Layout:
  *
- *   block 1 — ROLE + all hard rules (cache_control: ephemeral)
+ *   block 1 — ROLE + all hard rules (cache: true)
  *     Locale-specific but otherwise invariant across every critic call.
  *     Bulk of input tokens live here (~3–4 KB of rule tables).
  *
- *   block 2 — TEMPLATE GUARDRAILS (cache_control: ephemeral)
+ *   block 2 — TEMPLATE GUARDRAILS (cache: true)
  *     Added only when the caller passes `templateSystemPrompt`. One
  *     cache entry per unique template.systemPrompt. Gives the critic
  *     voice/worldview awareness the author already had.
@@ -200,24 +167,19 @@ export function buildSystemBlocks(input: CriticInput): SystemBlock[] {
   const blocks: SystemBlock[] = [];
 
   // ── block 1: ROLE + all hard rules (cached) ──
-  blocks.push({
-    type: "text",
-    text: buildRuleBlock(localeLabel),
-    cache_control: { type: "ephemeral" },
-  });
+  blocks.push({ text: buildRuleBlock(localeLabel), cache: true });
 
   // ── block 2: TEMPLATE GUARDRAILS (cached; only when present) ──
   const guardrails = input.templateSystemPrompt?.trim();
   if (guardrails) {
     blocks.push({
-      type: "text",
       text: `# Template-wide guardrails (the author was required to follow these — preserve this voice when the content is grounded in source; if voice and source conflict, source wins)\n${guardrails}`,
-      cache_control: { type: "ephemeral" },
+      cache: true,
     });
   }
 
   // ── block 3: PER-SECTION (uncached) ──
-  blocks.push({ type: "text", text: buildPerSectionBlock(input) });
+  blocks.push({ text: buildPerSectionBlock(input) });
 
   return blocks;
 }

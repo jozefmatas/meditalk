@@ -21,18 +21,10 @@
  * exactly as it does today. Failures (network / model) also return
  * `null`.
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { logger } from "../logger";
 import type { Language, RawSource } from "./section-agent";
-
-const MODEL_ID = "claude-sonnet-4-6";
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic({ maxRetries: 2 });
-  return _client;
-}
 
 const LANGUAGE_LABEL: Record<Language, string> = {
   sk: "Slovak",
@@ -86,44 +78,33 @@ export async function extractSkeleton(
   const userMessage = `# Encounter source\n${sourceDump}`;
 
   try {
-    const response = await client().messages.create({
-      model: MODEL_ID,
-      max_tokens: 1500,
+    const provider = resolve("note-skeleton", "sonnet");
+    const result = await provider.generate({
+      maxTokens: 1500,
       temperature: 0,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
-      tools: [
-        {
-          name: "submit_skeleton",
-          description:
-            "Submit the structured skeleton of the clinical encounter. Every downstream section renderer sees this.",
-          input_schema: SKELETON_TOOL_SCHEMA,
-        },
-      ],
-      tool_choice: { type: "tool", name: "submit_skeleton" },
+      system: [{ text: systemPrompt }],
+      user: userMessage,
+      tool: {
+        name: "submit_skeleton",
+        description:
+          "Submit the structured skeleton of the clinical encounter. Every downstream section renderer sees this.",
+        schema: SKELETON_TOOL_SCHEMA,
+      },
     });
 
     if (usage) {
       logUsage({
         userId: usage.userId,
         visitId: usage.visitId,
-        provider: "anthropic",
-        model: MODEL_ID,
+        provider: provider.name,
+        model: provider.model,
         operation: "clinical_analysis",
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
       });
     }
 
-    let raw: unknown = null;
-    for (const block of response.content) {
-      if (block.type === "tool_use" && block.name === "submit_skeleton") {
-        raw = block.input;
-        break;
-      }
-    }
-
-    const parsed = coerceSkeleton(raw);
+    const parsed = coerceSkeleton(result.toolInput ?? null);
     if (!parsed) {
       logger.debug("[note-skeleton] coerce failed — skeleton ignored");
       return null;
@@ -161,9 +142,7 @@ export function formatSkeletonBlock(skeleton: NoteSkeleton): string {
     lines.push(`Key dates: ${dateList}`);
   }
   if (skeleton.criticalFindings.length > 0) {
-    lines.push(
-      `Critical findings: ${skeleton.criticalFindings.join("; ")}`,
-    );
+    lines.push(`Critical findings: ${skeleton.criticalFindings.join("; ")}`);
   }
   lines.push("");
   lines.push(`Summary: ${skeleton.clinicalSummary}`);
@@ -237,13 +216,7 @@ const SKELETON_TOOL_SCHEMA = {
     },
     encounterType: {
       type: "string",
-      enum: [
-        "acute",
-        "chronic-followup",
-        "transfer",
-        "preventive",
-        "consult",
-      ],
+      enum: ["acute", "chronic-followup", "transfer", "preventive", "consult"],
       description: "Encounter classification.",
     },
     keyDates: {
@@ -302,12 +275,10 @@ function coerceSkeleton(raw: unknown): NoteSkeleton | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
 
-  const chiefComplaint = typeof obj.chiefComplaint === "string"
-    ? obj.chiefComplaint.trim()
-    : "";
-  const clinicalSummary = typeof obj.clinicalSummary === "string"
-    ? obj.clinicalSummary.trim()
-    : "";
+  const chiefComplaint =
+    typeof obj.chiefComplaint === "string" ? obj.chiefComplaint.trim() : "";
+  const clinicalSummary =
+    typeof obj.clinicalSummary === "string" ? obj.clinicalSummary.trim() : "";
   if (!chiefComplaint || !clinicalSummary) return null;
 
   // Combined free-text cap — enforce server-side so a runaway summary
