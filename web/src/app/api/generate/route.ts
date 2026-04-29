@@ -188,6 +188,9 @@ export async function POST(request: NextRequest) {
         ...(result.clinicalAnalysis
           ? { clinicalAnalysis: result.clinicalAnalysis }
           : {}),
+        ...(result.suggestedTitle
+          ? { suggestedTitle: result.suggestedTitle }
+          : {}),
       }),
       afterPersist: async (result) => {
         lap("generation-done");

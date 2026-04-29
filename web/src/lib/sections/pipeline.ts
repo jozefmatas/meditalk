@@ -28,6 +28,7 @@ import type { SupportedLanguage } from "../types";
 import {
   renderSection,
   type Language,
+  type PassageCategory,
   type RawSource,
   type RenderedSection,
   type SectionConfig,
@@ -151,6 +152,57 @@ export const KIND_POLICY: Record<
     renderModel: "sonnet",
   },
 };
+
+// ─── Passage-category routing ────────────────────────────────────────
+//
+// When file-focus extraction classifies passages, each section kind
+// receives only the categories relevant to it. `default` gets
+// everything (no filter). Transcript and doctor notes are always
+// unfiltered — classification applies to file passages only.
+
+const ALL_CATEGORIES = new Set<PassageCategory>([
+  "medication",
+  "diagnosis",
+  "finding",
+  "procedure",
+  "vital",
+  "history",
+  "general",
+]);
+
+export const CATEGORY_ROUTING: Record<SectionKind, Set<PassageCategory>> = {
+  "medication-list": new Set(["medication", "general"]),
+  conclusion: new Set(["diagnosis", "finding", "general"]),
+  "exam-narrative": new Set(["finding", "vital", "general"]),
+  "history-narrative": new Set(["history", "finding", "diagnosis", "general"]),
+  "vital-numeric": new Set(["vital", "general"]),
+  default: ALL_CATEGORIES,
+};
+
+/**
+ * Build a kind-filtered copy of source for a specific section. File
+ * passages with `classifiedPassages` are filtered to only the
+ * categories relevant to the section's kind. Transcript and doctor
+ * notes are always included in full.
+ *
+ * When files lack `classifiedPassages` (no directive / old cache),
+ * the source is returned as-is — no filtering.
+ */
+export function filterSourceForKind(
+  source: RawSource,
+  kind: SectionKind,
+): RawSource {
+  if (!source.files?.some((f) => f.classifiedPassages?.length)) return source;
+
+  const allowed = CATEGORY_ROUTING[kind];
+  const filteredFiles = source.files!.map((f) => {
+    if (!f.classifiedPassages?.length) return f;
+    const kept = f.classifiedPassages.filter((p) => allowed.has(p.category));
+    return { ...f, text: kept.map((p) => p.text).join("\n\n") };
+  });
+
+  return { ...source, files: filteredFiles };
+}
 
 /**
  * Resolve a section's `kind`, using the legacy label sets as a
@@ -417,6 +469,12 @@ export async function generateNote(
       return;
     }
 
+    // Filter file passages by category for this section's kind.
+    // Both renderer AND critic see the same filtered source so the
+    // critic doesn't flag "missed" passages that were intentionally
+    // routed away from this section.
+    const sectionSource = filterSourceForKind(source, kind);
+
     const config: SectionConfig = {
       id: leaf.id,
       title,
@@ -439,7 +497,7 @@ export async function generateNote(
     let draft: RenderedSection;
     try {
       draft = await renderSection(
-        source,
+        sectionSource,
         config,
         language4,
         usage,
@@ -455,7 +513,7 @@ export async function generateNote(
 
     // Structural-vital guard: ungrounded digits → strip the section.
     if (policy.digitGrounding && draft.content.trim()) {
-      const grounded = stripUngroundedVitalValue(draft.content, source);
+      const grounded = stripUngroundedVitalValue(draft.content, sectionSource);
       if (grounded !== draft.content) draft = { ...draft, content: grounded };
     }
 
@@ -464,7 +522,7 @@ export async function generateNote(
       const finalContent = applyReconcilers(
         draft.content,
         config.reconcilers,
-        source,
+        sectionSource,
         language4,
       );
       const result: RenderedSection = { ...draft, content: finalContent };
@@ -484,7 +542,7 @@ export async function generateNote(
       try {
         const corrected = await runCriticAndReconcilers({
           draftContent: draft.content,
-          source,
+          source: sectionSource,
           config,
           language: language4,
           usage,
@@ -507,7 +565,7 @@ export async function generateNote(
           const finalContent = applyReconcilers(
             draft.content,
             config.reconcilers,
-            source,
+            sectionSource,
             language4,
           );
           if (finalContent !== draft.content) {

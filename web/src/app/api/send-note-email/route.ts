@@ -42,7 +42,12 @@ export async function POST(request: Request) {
     await dispatchNoteEmail({
       userId,
       visitId,
-      title: encounter.title || "Untitled",
+      title:
+        encounter.title ||
+        ({ sk: "Bez názvu", cs: "Bez názvu", en: "Untitled" }[
+          encounter.language as string
+        ] ??
+          "Untitled"),
       noteHtml: encounter.encounter_note,
       language: encounter.language || "sk",
     });

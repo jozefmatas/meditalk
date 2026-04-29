@@ -1,6 +1,6 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-29 (Phases 1–3 of pipeline-precision-upgrade: KIND_POLICY-driven model tiers (Sonnet render narrative, Haiku render structural, Haiku critic everywhere); Záver normalised to deterministic `formatConclusionContent` (canonical ICD descriptions, one per line, no LLM); Slovak identifiers renamed to English.)_
+_Last updated: 2026-04-29 (Phases 1–5 of pipeline-precision-upgrade: KIND_POLICY-driven model tiers; deterministic conclusion; passage classification + category routing for file content; note skeleton with `suggestedTitle` for auto-titling; eval harness expanded to 11 fixtures.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
@@ -17,7 +17,7 @@ Four of the five Haiku calls in the pipeline now use `tool_choice: { type: "tool
 - **`criticPass`** (`sections/critic.ts`) — forces `submit_corrected_section` returning `{corrected: string}`. The model has no text channel to leak essays, meta-commentary, or "The correct AA section is:" prefixes. Empty-section = pass `""`. Accepts an optional `model: "haiku" | "sonnet"` tier. **Haiku is the default for ALL sections** — driven by `KIND_POLICY[kind].criticModel` in `pipeline.ts`. Haiku provides sufficient grounding quality at lower cost and latency; Sonnet critic was rolled back after eval showed marginal gains didn't justify the cost across all sections.
 - **`suggestIcdCodes`** (`sections/suggest-icd.ts`) — forces `submit_icd_candidates` returning `{codes: [{code, description, confidence, evidence, differential?}]}`. Evidence is ONE contiguous verbatim substring (≥4 chars); concatenation with joiners is banned. Server validates CSV membership, evidence-in-source, and dedups by code.
 - **`routeAdjustment`** (`sections/adjust-router.ts`) — forces `select_affected_sections` returning `{affected: string[], reasoning?: string}`. Returns the subset of leaf section ids a mid-visit adjustment touches. No JSON regex parsing.
-- **`extractWithDirective`** (`sections/file-focus.ts`) — forces `submit_extracted_passages` returning `{passages: [{text, match_reason?}]}`. Each passage is a verbatim substring of the document; server validates and drops anything that can't be substring-matched in the original file. The directive is an **EXCLUSIVE filter** — only content matching the directive keywords is extracted, even within mixed-content sections. Medical-document synonym awareness expands common Slovak shorthand: DG → Záver/Dg./Diagnózy, LA → Odporúčanie (medication lines only)/Terapia/Lieková anamnéza, laby → Krvný obraz/Biochem, echo → Echokardiografia.
+- **`extractWithDirective`** (`sections/file-focus.ts`) — forces `submit_extracted_passages` returning `{passages: [{text, match_reason?, category?}]}`. Each passage is a verbatim substring of the document; server validates and drops anything that can't be substring-matched in the original file. The directive is an **EXCLUSIVE filter** — only content matching the directive keywords is extracted, even within mixed-content sections. Medical-document synonym awareness expands common Slovak shorthand: DG → Záver/Dg./Diagnózy, LA → Odporúčanie (medication lines only)/Terapia/Lieková anamnéza, laby → Krvný obraz/Biochem, echo → Echokardiografia. Each passage is classified into a `PassageCategory` (`medication`, `diagnosis`, `finding`, `procedure`, `vital`, `history`, `general`) — used downstream by `filterSourceForKind` to route only relevant passages to each section.
 
 ### What got removed
 
@@ -35,7 +35,7 @@ Four of the five Haiku calls in the pipeline now use `tool_choice: { type: "tool
 - **Critic enabled on every leaf** (214 sections) via `scripts/enable-critic-everywhere.mjs`. Conclusion sections go through the same critic path as all other sections.
 - **Template guardrails**: objective-exam grounding, clinical-voice 3rd-person, Slovak grammar rules (via scripts).
 - **Section contract tightenings**: TO, LA, Pulz, Výška/Hmotnosť/BMI, Celkové vyšetrenie, EA (via scripts).
-- **Eval harness**: 3 real doctor-corrected fixtures (`mordavska-nstemi`, `kovacikova-real`, `gozora-stemi`). Diacritic-fold matching, `EVAL_VERBOSE=1` dumps full notes.
+- **Eval harness**: 11 fixtures — 3 real doctor-corrected (`mordavska-nstemi`, `kovacikova-real`, `gozora-stemi`) + 8 synthetic edge-case (`med-only-file-icd-guard`, `brand-name-preservation`, `empty-transcript-file-only`, `no-diagnosis-empty-zaver`, `invented-vital-guard`, `conflicting-sources`, `cross-section-leak-guard`, `critic-med-preservation`). Diacritic-fold matching, `EVAL_VERBOSE=1` dumps full notes.
 - **UI: Actual / Past radio** in `file-context-dialog.tsx` — "Actual" = use whole file, "Past" = type a directive to distill.
 - **ICD panel dedup** — server + UI dedup by code.
 
@@ -124,10 +124,23 @@ The heaviest work is clinician review of prompt examples + template curation, no
 
 Per section: RENDER → CRITIC (opt-in) → RECONCILERS. Model tier is driven by `KIND_POLICY` in `pipeline.ts`: Sonnet renders narrative kinds (`history-narrative`, `exam-narrative`), Haiku renders structural kinds (`default`, `medication-list`, `vital-numeric`). Haiku critics everything. **Conclusion is deterministic** — `formatConclusionContent` maps ICD suggestions to canonical descriptions (one per line, no code numbers). No LLM call, no critic, no reconcilers for conclusion. Conclusion sections render last — after the ICD suggester resolves.
 
+**Passage classification** — file-focus extraction tags each passage with a `PassageCategory` (`medication`, `diagnosis`, `finding`, `procedure`, `vital`, `history`, `general`). `CATEGORY_ROUTING` in `pipeline.ts` maps `SectionKind` → allowed categories, and `filterSourceForKind` creates a kind-filtered copy of `RawSource` before each section render. Transcript and doctorNotes are never filtered.
+
+**Note skeleton** — a parallel Sonnet call (`note-skeleton.ts`) extracts encounter structure: `chiefComplaint`, `encounterType`, `keyDates`, `providers`, `criticalFindings`, `confidence`, `suggestedTitle`. The `suggestedTitle` (3–6 words, locale-aware, no PHI) is sent in the SSE `complete` event for client-side auto-titling.
+
 ```
               INPUTS
                |
   transcript + files[{text, context?}] + doctorNotes
+               |
+  Stage 0      file-focus filter (per file)           sections/file-focus.ts
+               -> extractWithDirective: Haiku extracts relevant passages
+               -> each passage classified into PassageCategory
+               -> classifiedPassages[] stored in RawSource.files[]
+               -> cached in visit.metadata.file_focus_cache
+               |
+  Stage 0b     note skeleton (parallel w/ Stage 1)    sections/note-skeleton.ts
+               -> Sonnet, tool-use: encounter structure + suggestedTitle
                |
   Stage 1      scrubPhi                              pure TS (regex)
                -> patient name (when known), rodné číslo, phone, email,
@@ -138,16 +151,23 @@ Per section: RENDER → CRITIC (opt-in) → RECONCILERS. Model tier is driven by
                |    -> Haiku, 10–15 CSV-validated ICD candidates
                |    -> ranked by relevance, primary first
                |    -> optional `differential` on symptom-code primary
+               |    -> file passages filtered via ICD_RELEVANT set
+               |       (excludes medication + procedure categories)
                |
                |  generateNote(template, source)              sections/pipeline.ts
                |    -> walks template leaves in order
-               |    -> non-conclusion leaves render via LLM (parallel with ICD)
-               |    -> conclusion leaves render DETERMINISTICALLY after ICD resolves
                |    -> per non-conclusion leaf:
+               |        filterSourceForKind(source, kind)     sections/pipeline.ts
+               |          * CATEGORY_ROUTING maps kind → allowed categories
+               |          * medication-list → medication + general only
+               |          * vital-numeric → vital + general only
+               |          * history-narrative → history + finding + diagnosis + general
+               |          * default / exam-narrative → all categories
+               |          * transcript + doctorNotes always unfiltered
                |        renderSection (Haiku or Sonnet per KIND_POLICY)
                |                                              sections/section-agent.ts
                |          * system prompt: role + worldview + corpus examples + contract
-               |          * user message: source (transcript, doctorNotes, files)
+               |          * user message: kind-filtered source
                |          * emits raw draft via onSection (UI streams)
                |
                |        if section.critic === true (opt-in):
@@ -172,6 +192,9 @@ Per section: RENDER → CRITIC (opt-in) → RECONCILERS. Model tier is driven by
   Stage 3      buildTemplateHtml                    templates/html.ts
                -> concat sections in template hierarchy -> final HTML
                -> skipEmpty drops blank subsections
+               |
+  Stage 4      suggestedTitle from skeleton          pipeline/session.ts
+               -> sent in SSE complete event for client auto-titling
 ```
 
 Clinical knowledge lives in three places:
@@ -193,24 +216,24 @@ Per-section flags on the template:
 
 ### Pipeline
 
-| File                                                                                        | Role                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File                                                                                        | Role                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)                   | Orchestrator. `KIND_POLICY` maps section kinds to render/critic models + flags. Walks template leaves: non-conclusion first (LLM render → critic → reconcilers), conclusion last (deterministic `formatConclusionContent` — ICD descriptions, one per line). `findConclusionSection`, `resolveKind`, `formatConclusionContent`, `runCriticAndReconcilers` exported. |
-| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)         | `renderSection` — one Anthropic call per section. System prompt: role + template worldview + corpus examples + section contract. User message: source with `# File: … (Doctor's focus: …)` when set. `isAbsenceDescription` safety net also lives here. |
-| [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                       | `criticPass` — second Haiku call per opt-in section. Input: source + draft + section.context. Output: corrected draft text. Preserves voice / ordering / connective tissue; removes invention; adds missed facts.                                       |
-| [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)             | One-shot Haiku call: source → 10–15 CSV-validated ICD-10 candidates (ranked). Output feeds: (1) the right-side "Navrhované kódy" panel, (2) `formatConclusionContent` for deterministic conclusion (descriptions only). |
-| [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)   | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                                                          |
-| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts) | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                                                   |
-| [`web/src/lib/models/`](../web/src/lib/models/)                                             | Provider abstraction. `resolve(callSite, tier)` returns a Provider that wraps Anthropic or Vertex Gemini. Default routes preserve Anthropic; env overrides (`MODEL_ROUTE_<CALL>_<TIER>`) swap individual calls without code changes. See §3.            |
+| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)         | `renderSection` — one Anthropic call per section. System prompt: role + template worldview + corpus examples + section contract. User message: source with `# File: … (Doctor's focus: …)` when set. `isAbsenceDescription` safety net also lives here.                                                                                                             |
+| [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                       | `criticPass` — second Haiku call per opt-in section. Input: source + draft + section.context. Output: corrected draft text. Preserves voice / ordering / connective tissue; removes invention; adds missed facts.                                                                                                                                                   |
+| [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)             | One-shot Haiku call: source → 10–15 CSV-validated ICD-10 candidates (ranked). Output feeds: (1) the right-side "Navrhované kódy" panel, (2) `formatConclusionContent` for deterministic conclusion (descriptions only).                                                                                                                                             |
+| [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)   | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                                                                                                                                                                      |
+| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts) | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                                                                                                                                                               |
+| [`web/src/lib/models/`](../web/src/lib/models/)                                             | Provider abstraction. `resolve(callSite, tier)` returns a Provider that wraps Anthropic or Vertex Gemini. Default routes preserve Anthropic; env overrides (`MODEL_ROUTE_<CALL>_<TIER>`) swap individual calls without code changes. See §3.                                                                                                                        |
 
 ### Pipeline Modules (shared orchestration)
 
-| File                                                                                  | Role                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`web/src/lib/pipeline/resolve-source.ts`](../web/src/lib/pipeline/resolve-source.ts) | Source pre-processing: audio recovery (download + transcribe + concat), stuck extraction recovery, extraction polling, inline extraction fallback, PHI scrubbing, file-text assembly, transcript merge.                                                     |
+| File                                                                                  | Role                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/lib/pipeline/resolve-source.ts`](../web/src/lib/pipeline/resolve-source.ts) | Source pre-processing: audio recovery (download + transcribe + concat), stuck extraction recovery, extraction polling, inline extraction fallback, PHI scrubbing, file-text assembly, transcript merge.                                                                                             |
 | [`web/src/lib/pipeline/session.ts`](../web/src/lib/pipeline/session.ts)               | Shared orchestration core for both `/api/generate` and `/api/adjust`. Owns: file-focus filter → skeleton ∥ ICD (parallel) → section loop (ICD promise passed to `generateNote` for conclusion context) → HTML assembly. When `leafIdFilter` is set (adjust mode), only filtered sections re-render. |
-| [`web/src/lib/pipeline/persist.ts`](../web/src/lib/pipeline/persist.ts)               | Shared persistence: column update (`encounter_note` + `status`) + metadata merge (`template_id`, `section_contents`, etc.) + lost-note logging on failure.                                                                                                  |
-| [`web/src/lib/pipeline/adjust-helpers.ts`](../web/src/lib/pipeline/adjust-helpers.ts) | Adjust-specific utilities: `collectLeafSectionsForRouter()`, `isVitalOrExamLabel()`, `foldLabel()`, `expandVitalGroup()`.                                                                                                                                   |
+| [`web/src/lib/pipeline/persist.ts`](../web/src/lib/pipeline/persist.ts)               | Shared persistence: column update (`encounter_note` + `status`) + metadata merge (`template_id`, `section_contents`, etc.) + lost-note logging on failure.                                                                                                                                          |
+| [`web/src/lib/pipeline/adjust-helpers.ts`](../web/src/lib/pipeline/adjust-helpers.ts) | Adjust-specific utilities: `collectLeafSectionsForRouter()`, `isVitalOrExamLabel()`, `foldLabel()`, `expandVitalGroup()`.                                                                                                                                                                           |
 
 ### Routes (thin shells)
 
@@ -270,14 +293,14 @@ There is no shared "facts" layer; each section sees the full source independentl
 
 Model selection is driven by `KIND_POLICY` in `pipeline.ts`, keyed on `SectionKind`:
 
-| Kind               | Render model | Critic model | Notes                                      |
-| ------------------ | ------------ | ------------ | ------------------------------------------ |
-| `default`          | Haiku        | Haiku        | Structural sections, allergies, etc.       |
-| `history-narrative` | Sonnet       | Haiku        | HPI/TO — narrative quality matters         |
-| `exam-narrative`   | Sonnet       | Haiku        | Physical exam — voice examples suppressed  |
-| `vital-numeric`    | Haiku        | Haiku        | Digit-grounded, voice examples suppressed  |
-| `medication-list`  | Haiku        | Haiku        | Structural list                            |
-| `conclusion`       | _(deterministic)_ | _(none)_  | `formatConclusionContent` — ICD descriptions, one per line, no LLM |
+| Kind                | Render model      | Critic model | Notes                                                              |
+| ------------------- | ----------------- | ------------ | ------------------------------------------------------------------ |
+| `default`           | Haiku             | Haiku        | Structural sections, allergies, etc.                               |
+| `history-narrative` | Sonnet            | Haiku        | HPI/TO — narrative quality matters                                 |
+| `exam-narrative`    | Sonnet            | Haiku        | Physical exam — voice examples suppressed                          |
+| `vital-numeric`     | Haiku             | Haiku        | Digit-grounded, voice examples suppressed                          |
+| `medication-list`   | Haiku             | Haiku        | Structural list                                                    |
+| `conclusion`        | _(deterministic)_ | _(none)_     | `formatConclusionContent` — ICD descriptions, one per line, no LLM |
 
 Each non-conclusion section can also carry `section.model: "haiku" | "sonnet" | "opus"` as a per-section override (takes precedence over `KIND_POLICY.renderModel`). The critic always runs on Haiku — cheap, fast, sufficient grounding quality. Conclusion sections bypass the LLM entirely.
 
@@ -366,10 +389,10 @@ type Reconciler = (
 
 Registered in [`sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts). Attached to sections via `section.reconcilers: string[]` — set by [`web/scripts/enable-reconcilers.mjs`](../web/scripts/enable-reconcilers.mjs) (idempotent, label-matched).
 
-| Name              | Runs on                  | Behaviour                                                                                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `drug-normalizer` | LA / medication sections | Extracts the leading drug-name prefix from each line or comma-separated entry, short-circuits through `ABBREVIATION_ALIASES` (e.g. `ANP → ANOPYRIN`), then fuzzy-corrects against the medication CSV if no alias hit. Preserves dose/frequency verbatim. **Does NOT expand generic/INN names to branded variants** — e.g. "Ramipril" stays "Ramipril", not "Ramipril Actavis" (guard: skip correction when corrected name starts with input + manufacturer suffix). |
-| `icd-validator`   | _(no sections — conclusion is deterministic now)_ | Code-boundary splitter (not comma-based). Per code: CSV hit → canonical description; 1-2 decimal digit miss with valid root → downgrade; ICD-10-CM shape (≥3 decimal digits) + no CSV → drop. Also dedupes redundant parentheticals. **Note:** with deterministic conclusion, this reconciler is effectively unused — it remains registered but no template sections attach it. |
+| Name              | Runs on                                           | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `drug-normalizer` | LA / medication sections                          | Extracts the leading drug-name prefix from each line or comma-separated entry, short-circuits through `ABBREVIATION_ALIASES` (e.g. `ANP → ANOPYRIN`), then fuzzy-corrects against the medication CSV if no alias hit. Preserves dose/frequency verbatim. **Does NOT expand generic/INN names to branded variants** — e.g. "Ramipril" stays "Ramipril", not "Ramipril Actavis" (guard: skip correction when corrected name starts with input + manufacturer suffix). |
+| `icd-validator`   | _(no sections — conclusion is deterministic now)_ | Code-boundary splitter (not comma-based). Per code: CSV hit → canonical description; 1-2 decimal digit miss with valid root → downgrade; ICD-10-CM shape (≥3 decimal digits) + no CSV → drop. Also dedupes redundant parentheticals. **Note:** with deterministic conclusion, this reconciler is effectively unused — it remains registered but no template sections attach it.                                                                                     |
 
 **Absence stripper** is built into `renderSection` (and applied on critic output via `runCriticAndReconcilers`), not a registered reconciler. Catches "V surových zdrojoch…", "(empty)", "ZERO CHARACTERS", cleanup-pass meta-commentary essays, "Žiadne údaje…", "The current output contains no …". See `isAbsenceDescription` in `section-agent.ts`.
 
@@ -387,7 +410,7 @@ The critic pass does NOT see the corpus — it audits against source only.
 
 ### ICD suggester
 
-[`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) runs ONCE per generation, in parallel with section rendering. Source-only input (no facts, no sections).
+[`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) runs ONCE per generation, in parallel with section rendering. Source-only input (no facts, no sections). When the source has classified file passages, only `ICD_RELEVANT` categories (`diagnosis`, `finding`, `vital`, `history`, `general`) are passed — `medication` and `procedure` passages are excluded to prevent ICD hallucination from drug names (e.g. Metformin → E11).
 
 The prompt anchors the model against common specificity traps (mitral vs aortic, paroxysmal vs persistent AF, 1st vs 2nd degree AV block, post-surgical vs drug-induced hypothyroidism, active cataract vs post-IOL status-post) so it picks the code the source actually implies.
 
@@ -424,23 +447,23 @@ The `/api/regenerate` route was deleted. Regeneration is now handled by `/api/ge
 
 ## 9. What's Intentionally NOT in the Pipeline Anymore
 
-| Removed                                                                 | What it did                                                    | Why it's gone                                                                                                                                                     |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sonnet clinical-analysis Pass 1                                         | Inferred specialty, matched concepts, suggested ICD candidates | Non-deterministic; replaced by deterministic section contracts + reconcilers.                                                                                     |
-| Haiku fact-extraction Pass 1.5                                          | 15-category structured facts with source evidence              | Sections now read raw source directly, nothing is pre-filtered out.                                                                                               |
-| Fact validator / resolver / timeline                                    | Drop ungrounded / self-corrected / time-conflicting facts      | No facts → no fact pipeline.                                                                                                                                      |
-| Diagnosis resolver + synonym table                                      | Deterministic ICD resolution from diagnosis facts              | Conclusion section now receives ICD suggestions as structured context from the suggester.                                                                         |
-| ICD certainty filter                                                    | Drop ICD candidates not lexically grounded in facts            | Reconciler-level concern, not a pipeline stage.                                                                                                                   |
-| EncounterModel                                                          | Single source of truth for bucketed facts / problems           | Replaced by: source + critic pass = all an agent needs.                                                                                                           |
-| Deterministic section renderers (medications, vitals, assessment, etc.) | Format structured slots without LLM                            | Each section is now an LLM call. If determinism is critical for a given section, add a reconciler.                                                                |
-| Specialty pack                                                          | Per-language, per-specialty prompt variants                    | Templates themselves are per-specialty; pack lives in the template's system prompt + each section's context.                                                      |
-| `generateFromTemplate` / `anthropic.ts`                                 | 1,200-line monolithic two-pass generation                      | Replaced by ~300 lines across `pipeline.ts` + `section-agent.ts` + `critic.ts`.                                                                                   |
-| Source preprocessor (`source-preprocessor.ts`)                          | Regex pass over source emitting `<STRUCTURED_FACTS>` XML tags  | The critic pass handles the same "make sure nothing was missed" job with broader coverage and no regex maintenance.                                               |
-| Sonnet fact extraction (Phase 1 experiment)                             | Tool-use extraction of verified `ClinicalFact[]` with quotes   | Was architecturally interesting but added 30–60s of latency and complexity. The critic pass delivers the same quality guarantee faster using only source + draft. |
-| Per-section `factTypes` opt-in (Phase 2b experiment)                    | Section renders from filtered facts instead of raw source      | Rolled back together with fact extraction — the critic pass covers the same failure modes.                                                                        |
-| `formatZaverFromSuggestions` (`format-zaver.ts`)                        | Deterministic formatter: ICD codes → comma-separated Záver line | Replaced by `formatConclusionContent` in `pipeline.ts` — canonical ICD descriptions one per line, no code numbers. Still deterministic but cleaner format. |
-| `shouldRerunZaver` (`adjust-helpers.ts`)                                | Decide whether adjust mode should re-run the Záver section     | Conclusion renders in the normal section loop; adjust router includes it in `leafIdFilter` when diagnosis-affecting sections change.                              |
-| Sonnet critic (most sections)                                           | Sonnet 4.6 critic for narrative sections, Haiku only for LA    | Rolled back to Haiku everywhere. Eval showed marginal gains didn't justify cost. `KIND_POLICY.criticModel` drives selection.                                     |
+| Removed                                                                 | What it did                                                     | Why it's gone                                                                                                                                                     |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sonnet clinical-analysis Pass 1                                         | Inferred specialty, matched concepts, suggested ICD candidates  | Non-deterministic; replaced by deterministic section contracts + reconcilers.                                                                                     |
+| Haiku fact-extraction Pass 1.5                                          | 15-category structured facts with source evidence               | Sections now read raw source directly, nothing is pre-filtered out.                                                                                               |
+| Fact validator / resolver / timeline                                    | Drop ungrounded / self-corrected / time-conflicting facts       | No facts → no fact pipeline.                                                                                                                                      |
+| Diagnosis resolver + synonym table                                      | Deterministic ICD resolution from diagnosis facts               | Conclusion section now receives ICD suggestions as structured context from the suggester.                                                                         |
+| ICD certainty filter                                                    | Drop ICD candidates not lexically grounded in facts             | Reconciler-level concern, not a pipeline stage.                                                                                                                   |
+| EncounterModel                                                          | Single source of truth for bucketed facts / problems            | Replaced by: source + critic pass = all an agent needs.                                                                                                           |
+| Deterministic section renderers (medications, vitals, assessment, etc.) | Format structured slots without LLM                             | Each section is now an LLM call. If determinism is critical for a given section, add a reconciler.                                                                |
+| Specialty pack                                                          | Per-language, per-specialty prompt variants                     | Templates themselves are per-specialty; pack lives in the template's system prompt + each section's context.                                                      |
+| `generateFromTemplate` / `anthropic.ts`                                 | 1,200-line monolithic two-pass generation                       | Replaced by ~300 lines across `pipeline.ts` + `section-agent.ts` + `critic.ts`.                                                                                   |
+| Source preprocessor (`source-preprocessor.ts`)                          | Regex pass over source emitting `<STRUCTURED_FACTS>` XML tags   | The critic pass handles the same "make sure nothing was missed" job with broader coverage and no regex maintenance.                                               |
+| Sonnet fact extraction (Phase 1 experiment)                             | Tool-use extraction of verified `ClinicalFact[]` with quotes    | Was architecturally interesting but added 30–60s of latency and complexity. The critic pass delivers the same quality guarantee faster using only source + draft. |
+| Per-section `factTypes` opt-in (Phase 2b experiment)                    | Section renders from filtered facts instead of raw source       | Rolled back together with fact extraction — the critic pass covers the same failure modes.                                                                        |
+| `formatZaverFromSuggestions` (`format-zaver.ts`)                        | Deterministic formatter: ICD codes → comma-separated Záver line | Replaced by `formatConclusionContent` in `pipeline.ts` — canonical ICD descriptions one per line, no code numbers. Still deterministic but cleaner format.        |
+| `shouldRerunZaver` (`adjust-helpers.ts`)                                | Decide whether adjust mode should re-run the Záver section      | Conclusion renders in the normal section loop; adjust router includes it in `leafIdFilter` when diagnosis-affecting sections change.                              |
+| Sonnet critic (most sections)                                           | Sonnet 4.6 critic for narrative sections, Haiku only for LA     | Rolled back to Haiku everywhere. Eval showed marginal gains didn't justify cost. `KIND_POLICY.criticModel` drives selection.                                      |
 
 See the commit history if you need to understand why a specific piece was removed.
 

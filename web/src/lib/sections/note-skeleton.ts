@@ -56,6 +56,8 @@ export interface NoteSkeleton {
   criticalFindings: string[];
   /** Self-rated confidence. Low → caller treats result as null. */
   confidence: "high" | "medium" | "low";
+  /** Short encounter title in the source locale (3–6 words). Used as auto-title. */
+  suggestedTitle?: string;
 }
 
 /** Combined cap so the skeleton fits under the cached template prefix. */
@@ -197,6 +199,9 @@ Short bullet-style facts that matter across sections — e.g. "EF ~50 % with RCX
 - \`medium\`: most fields grounded; a couple are the most natural read but not 100%.
 - \`low\`: the source is too sparse or ambiguous to extract a reliable skeleton. When you emit \`low\`, the downstream pipeline DISCARDS the skeleton entirely — pick it only when partial data would actively mislead the note.
 
+# Suggested title
+A short encounter title (3–6 words) in ${localeLabel}. Describes the clinical reason for the visit — e.g. "Bolesť na hrudníku, susp. NSTEMI", "Kontrola po PCI", "Predoperačné kardiologické vyšetrenie". Must NOT contain the patient's name or date of birth.
+
 # Output
 Respond by calling \`submit_skeleton\` with the populated fields. No text commentary.`;
 }
@@ -258,6 +263,11 @@ const SKELETON_TOOL_SCHEMA = {
       description:
         "Self-rated confidence. Low → the pipeline discards the skeleton.",
     },
+    suggestedTitle: {
+      type: "string",
+      description:
+        "Short encounter title (3–6 words) in the SAME LANGUAGE as the source transcript. Describes the clinical reason for the visit — e.g. 'Bolesť na hrudníku, susp. NSTEMI' or 'Kontrola po PCI'. Must NOT contain patient name or date of birth.",
+    },
   },
   required: [
     "chiefComplaint",
@@ -268,6 +278,7 @@ const SKELETON_TOOL_SCHEMA = {
     "providers",
     "criticalFindings",
     "confidence",
+    "suggestedTitle",
   ],
 };
 
@@ -310,6 +321,11 @@ function coerceSkeleton(raw: unknown): NoteSkeleton | null {
     s.slice(0, 120),
   );
 
+  const suggestedTitle =
+    typeof obj.suggestedTitle === "string" && obj.suggestedTitle.trim()
+      ? obj.suggestedTitle.trim().slice(0, 80)
+      : undefined;
+
   return {
     chiefComplaint,
     clinicalSummary,
@@ -319,6 +335,7 @@ function coerceSkeleton(raw: unknown): NoteSkeleton | null {
     providers,
     criticalFindings,
     confidence,
+    suggestedTitle,
   };
 }
 

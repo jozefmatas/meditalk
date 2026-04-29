@@ -19,6 +19,27 @@ import { formatSkeletonBlock } from "./note-skeleton";
 
 export type { UsageContext } from "../usage";
 
+/**
+ * Clinical category for a file passage, assigned during file-focus
+ * extraction. Used by the pipeline to route passages to the sections
+ * that care about them (e.g. medication passages → LA, diagnosis
+ * passages → ICD suggester) instead of flooding every section with
+ * every passage.
+ */
+export type PassageCategory =
+  | "medication"
+  | "diagnosis"
+  | "finding"
+  | "procedure"
+  | "vital"
+  | "history"
+  | "general";
+
+export interface ClassifiedPassage {
+  text: string;
+  category: PassageCategory;
+}
+
 export interface RawSource {
   transcript?: string;
   doctorNotes?: string;
@@ -28,8 +49,17 @@ export interface RawSource {
    * markers, ignore old diagnosis") — surfaces to the LLM alongside the
    * file's text. When present, the pipeline has already filtered the
    * file via the file-focus extractor before the agent sees it.
+   *
+   * `classifiedPassages` is populated by the file-focus extractor when
+   * a directive is present. Each passage carries a `category` tag; the
+   * pipeline uses it to route passages to relevant sections only.
    */
-  files?: Array<{ name: string; text: string; context?: string }>;
+  files?: Array<{
+    name: string;
+    text: string;
+    context?: string;
+    classifiedPassages?: ClassifiedPassage[];
+  }>;
 }
 
 export interface SectionConfig {

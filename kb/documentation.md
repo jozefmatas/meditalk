@@ -1,6 +1,6 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-28_
+_Last updated: 2026-04-29_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
@@ -11,7 +11,9 @@ This document provides a comprehensive overview of how MediTalk works from end t
 - **`POST /api/adjust`** — incremental mid-visit updates. Router Haiku decides which sections to re-render; unchanged sections keep content from `visit.metadata.section_contents`.
 - **File context dialog** — Actual / Past radio. "Actual" = whole file used; "Past" = user must type what to distill (Haiku pre-filters). See [data-extraction.md](data-extraction.md).
 - **Critic via tool-use** — section critic now uses `tool_choice: submit_corrected_section`, eliminating essay / meta-commentary leaks structurally.
-- **Eval harness on 3 real doctor-corrected fixtures** (`npm run eval`): Mordavská, Kovačiková, Gozora.
+- **Eval harness expanded to 11 fixtures** (`npm run eval`): 3 real doctor-corrected + 8 synthetic edge-case (ICD hallucination, brand name preservation, empty transcript, no diagnosis, phantom vitals, conflicting sources, cross-section leak, critic med preservation).
+- **Passage classification + category routing** — file-focus extraction classifies passages into clinical categories; `CATEGORY_ROUTING` filters only relevant passages to each section kind.
+- **Note skeleton** — parallel Sonnet call extracts encounter structure including `suggestedTitle` (3–6 word locale-aware auto-title, no PHI).
 
 ---
 
@@ -171,15 +173,17 @@ This is the core engine. For the full canonical reference, see [prompt-pipeline.
 
 ### Pipeline stages:
 
-| Stage                               | Engine                    | Purpose                                                                                                                                                                                                                                    |
-| ----------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Stage 1** — PHI Scrub             | Pure TypeScript           | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                                          |
-| **Stage 2a** — ICD suggester        | Claude Haiku              | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §2b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                                                  |
-| **Stage 2b** — Section-agent loop   | Claude (Haiku by default) | Walks template leaves in order, skipping the Záver leaf (fed by 2a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.                                |
-| **Stage 2c** — Critic pass (opt-in) | Claude Haiku              | For sections with `critic: true` (HPI/TO, OA, Záver), a second Haiku call audits the draft against the source: removes invention, adds missed facts, preserves voice. Runs in parallel in the background; emits an update via `onSection`. |
-| **Stage 2d** — Reconcilers          | Pure TypeScript           | Post-critic transforms per section: `drug-normalizer` (alias map + fuzzy match against medication CSV), `icd-validator` (canonical swap + CM rejection + duplicate-parenthetical guard).                                                   |
-| **Stage 3** — Záver injection       | Pure TS + Haiku           | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Passed through the critic (if enabled on Záver) + `icd-validator` reconciler.                 |
-| **Stage 4** — HTML assembly         | Pure TypeScript           | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                                                |
+| Stage                                  | Engine                    | Purpose                                                                                                                                                                                                                                    |
+| -------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Stage 1** — PHI Scrub                | Pure TypeScript           | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                                          |
+| **Stage 1.5** — Passage classification | Claude Haiku              | File-focus extraction classifies each passage into a `PassageCategory` (medication, diagnosis, finding, procedure, vital, history, general). `CATEGORY_ROUTING` filters only relevant passages per section kind.                           |
+| **Stage 1.5b** — Note skeleton         | Claude Sonnet             | Parallel call extracting encounter structure: chiefComplaint, encounterType, keyDates, providers, criticalFindings, confidence, `suggestedTitle` (3–6 word auto-title in source locale).                                                   |
+| **Stage 2a** — ICD suggester           | Claude Haiku              | One-shot call producing 10–15 CSV-validated ICD-10 candidates. File passages filtered to ICD-relevant categories only (no medications/procedures). Output feeds both the panel AND the Záver section.                                      |
+| **Stage 2b** — Section-agent loop      | Claude (Haiku by default) | Walks template leaves in order, skipping the Záver leaf (fed by 2a). Source filtered by `filterSourceForKind` per section kind. Each section-agent call: role + worldview + corpus + contract.                                             |
+| **Stage 2c** — Critic pass (opt-in)    | Claude Haiku              | For sections with `critic: true` (HPI/TO, OA, Záver), a second Haiku call audits the draft against the source: removes invention, adds missed facts, preserves voice. Runs in parallel in the background; emits an update via `onSection`. |
+| **Stage 2d** — Reconcilers             | Pure TypeScript           | Post-critic transforms per section: `drug-normalizer` (alias map + fuzzy match against medication CSV), `icd-validator` (canonical swap + CM rejection + duplicate-parenthetical guard).                                                   |
+| **Stage 3** — Záver injection          | Pure TS + Haiku           | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Passed through the critic (if enabled on Záver) + `icd-validator` reconciler.                 |
+| **Stage 4** — HTML assembly            | Pure TypeScript           | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                                                |
 
 Clinical knowledge lives in three places: `template.styleExamples` (reference-notes corpus, few-shot), `template.systemPrompt` (template-wide worldview), and `section.context` (per-section contract — also fed verbatim to the critic pass). Per-section flags on the template: `model`, `critic`, `reconcilers`.
 
@@ -189,7 +193,7 @@ Clinical knowledge lives in three places: `template.styleExamples` (reference-no
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                                                                                |
 | `section`         | Each time a section's state changes. First emit = raw draft; second emit (for critic-enabled sections) = corrected text. UI replaces by id. |
-| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes`                                                          |
+| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes`, `suggestedTitle` (auto-title from skeleton)             |
 | `error`           | On failure                                                                                                                                  |
 
 ### Persistence:
@@ -484,7 +488,7 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ## 18. Testing
 
-- **570+ tests** across utilities, hooks, pipeline modules, and parsers
+- **739+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
 - A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections

@@ -85,10 +85,37 @@ async function main(): Promise<void> {
     await import("../src/lib/evals/fixtures/kovacikova-real");
   const { gozoraStemi } =
     await import("../src/lib/evals/fixtures/gozora-stemi");
+
+  // Phase 5: expanded fixtures covering diverse error types.
+  const { medOnlyFileIcdGuard } =
+    await import("../src/lib/evals/fixtures/med-only-file-icd-guard");
+  const { brandNamePreservation } =
+    await import("../src/lib/evals/fixtures/brand-name-preservation");
+  const { emptyTranscriptFileOnly } =
+    await import("../src/lib/evals/fixtures/empty-transcript-file-only");
+  const { noDiagnosisEmptyZaver } =
+    await import("../src/lib/evals/fixtures/no-diagnosis-empty-zaver");
+  const { inventedVitalGuard } =
+    await import("../src/lib/evals/fixtures/invented-vital-guard");
+  const { conflictingSources } =
+    await import("../src/lib/evals/fixtures/conflicting-sources");
+  const { crossSectionLeakGuard } =
+    await import("../src/lib/evals/fixtures/cross-section-leak-guard");
+  const { criticMedPreservation } =
+    await import("../src/lib/evals/fixtures/critic-med-preservation");
+
   const ALL_FIXTURES: Array<import("../src/lib/evals/types").EvalFixture> = [
     mordavskaNstemi,
     kovacikovaReal,
     gozoraStemi,
+    medOnlyFileIcdGuard,
+    brandNamePreservation,
+    emptyTranscriptFileOnly,
+    noDiagnosisEmptyZaver,
+    inventedVitalGuard,
+    conflictingSources,
+    crossSectionLeakGuard,
+    criticMedPreservation,
   ];
 
   const filter = process.argv.slice(2).find((a) => !a.startsWith("--"));

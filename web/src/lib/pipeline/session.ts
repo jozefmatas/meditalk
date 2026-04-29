@@ -48,6 +48,8 @@ export interface PipelineSessionResult {
   templateId: string;
   clinicalAnalysis?: { suggestedIcdCodes: SuggestedIcdCode[] };
   updatedFileFocusCache?: FileFocusCache;
+  /** Auto-generated title from skeleton's chief complaint. */
+  suggestedTitle?: string;
 }
 
 // ── Implementation ────────────────────────────────────────────────
@@ -153,11 +155,15 @@ export async function runPipelineSession(
   const clinicalAnalysis =
     suggestedIcdCodes.length > 0 ? { suggestedIcdCodes } : undefined;
 
+  // ── 6. Auto-title from skeleton ─────────────────────────────────
+  const suggestedTitle = skeleton?.suggestedTitle || undefined;
+
   return {
     generatedNote,
     sectionContents: sectionContentsMap,
     templateId: template.id,
     clinicalAnalysis,
     updatedFileFocusCache,
+    suggestedTitle,
   };
 }

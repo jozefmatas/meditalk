@@ -14,7 +14,7 @@ import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { getIcdDescription } from "../lookup/icd";
 import { logger } from "../logger";
-import type { Language, RawSource } from "./section-agent";
+import type { Language, PassageCategory, RawSource } from "./section-agent";
 
 export interface SuggestedIcdCode {
   code: string;
@@ -47,10 +47,37 @@ export async function suggestIcdCodes(
   language: Language = "sk",
   usage?: UsageContext,
 ): Promise<SuggestedIcdCode[]> {
+  // When files carry classified passages, filter out medication-only
+  // and procedure-only content so the ICD suggester doesn't hallucinate
+  // diagnoses from drug names (e.g. "Ramipril" → I10 Hypertension).
+  const ICD_RELEVANT: Set<PassageCategory> = new Set([
+    "diagnosis",
+    "finding",
+    "history",
+    "vital",
+    "general",
+  ]);
+
+  const fileBlocks: string[] = [];
+  for (const f of source.files ?? []) {
+    let fileText: string;
+    if (f.classifiedPassages?.length) {
+      const kept = f.classifiedPassages.filter((p) =>
+        ICD_RELEVANT.has(p.category),
+      );
+      fileText = kept.map((p) => p.text).join("\n\n");
+    } else {
+      fileText = f.text;
+    }
+    if (fileText.trim()) {
+      fileBlocks.push(`# File: ${f.name}\n${fileText.trim()}`);
+    }
+  }
+
   const sourceDump = [
     source.transcript ? `# Transcript\n${source.transcript.trim()}` : "",
     source.doctorNotes ? `# Doctor notes\n${source.doctorNotes.trim()}` : "",
-    ...(source.files ?? []).map((f) => `# File: ${f.name}\n${f.text.trim()}`),
+    ...fileBlocks,
   ]
     .filter(Boolean)
     .join("\n\n");

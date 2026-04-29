@@ -8,27 +8,52 @@
  *
  * When a directive is present we run a single Haiku extraction pass
  * per file: the model reads the document + directive and returns the
- * verbatim matching passages. Runs ONCE before any section agent or
- * ICD suggester sees the source, so the downstream pipeline operates
- * on the already-filtered content.
+ * verbatim matching passages, each tagged with a clinical category.
+ * Runs ONCE before any section agent or ICD suggester sees the source,
+ * so the downstream pipeline operates on the already-filtered content.
+ *
+ * The `category` tag on each passage enables per-section routing:
+ * the LA section sees only "medication" passages, the ICD suggester
+ * skips "medication"-only passages, etc. See `CATEGORY_ROUTING` in
+ * `pipeline.ts` for the routing matrix.
  */
 import { createHash } from "node:crypto";
 import { resolve } from "../models";
 import { logUsage, type UsageContext } from "../usage";
 import { logger } from "../logger";
-import type { Language, RawSource } from "./section-agent";
+import type {
+  ClassifiedPassage,
+  Language,
+  PassageCategory,
+  RawSource,
+} from "./section-agent";
+
+const VALID_CATEGORIES = new Set<PassageCategory>([
+  "medication",
+  "diagnosis",
+  "finding",
+  "procedure",
+  "vital",
+  "history",
+  "general",
+]);
 
 /**
  * Per-visit cache shape stored under `visit.metadata.file_focus_cache`:
- *   { [fileId]: { textHash: string; directive: string; output: string } }
+ *   { [fileId]: { textHash, directive, output, classifiedPassages? } }
  *
  * Cache hit when: same fileId, same extracted_text hash, same directive.
  * Prevents re-running the extraction Haiku call on every regenerate.
+ *
+ * `classifiedPassages` is present for caches created after the passage
+ * classification feature. Older entries lack it — the pipeline falls
+ * back to the flat `output` string (all categories go everywhere).
  */
 export interface FileFocusCacheEntry {
   textHash: string;
   directive: string;
   output: string;
+  classifiedPassages?: ClassifiedPassage[];
 }
 export type FileFocusCache = Record<string, FileFocusCacheEntry>;
 
@@ -42,11 +67,19 @@ const LANGUAGE_LABEL: Record<Language, string> = {
   en: "English",
 };
 
+export interface ExtractionResult {
+  /** Flat text: all valid passages joined by `\n\n`. */
+  text: string;
+  /** Passages with clinical category tags for per-section routing. */
+  classifiedPassages: ClassifiedPassage[];
+}
+
 /**
  * Extract only the sections of `text` that match `directive`. Returns
- * the verbatim matched text (headings preserved). Empty string when
- * nothing matches. Falls back to the original text on API error so
- * generation isn't blocked by the filter.
+ * the verbatim matched text (headings preserved) plus per-passage
+ * clinical category tags. Empty result when nothing matches. Falls back
+ * to the original text (uncategorised) on API error so generation isn't
+ * blocked by the filter.
  */
 export async function extractWithDirective(params: {
   text: string;
@@ -54,7 +87,7 @@ export async function extractWithDirective(params: {
   fileName: string;
   language?: Language;
   usage?: UsageContext;
-}): Promise<string> {
+}): Promise<ExtractionResult> {
   const { text, directive, fileName, usage } = params;
   const language = params.language ?? "sk";
 
@@ -72,7 +105,17 @@ The physician has restricted which parts of the document should feed the clinica
   - "LA" / "lieky" / "medikácia" / "terapia" → also match "Odporúčanie" (ONLY medication lines within it — drug name + dose + frequency), "medik.", "R:" (prescription lines), "Terapia", "Lieková anamnéza", "Medications". CRITICAL: include the FULL medication lines with drug name + dose (mg) + frequency (e.g. "1-0-1") — never strip dosing information. EXCLUDE diet, lifestyle, and management recommendations from Odporúčanie.
   - "laby" / "laboratórium" / "lab" → also match "Krvný obraz", "Biochem", "Výsledky laboratórnych testov"
   - "echo" / "echokg" → also match "Echokardiografia", "ECHOKG"
-- Return an empty array when nothing matches.`;
+- Return an empty array when nothing matches.
+
+# Category classification
+Tag each passage with ONE clinical category:
+- "medication" — drug names, dosages, frequency schedules, prescriptions, therapy lines
+- "diagnosis" — diagnostic conclusions, ICD codes, Záver/Assessment text, "Dg:" entries
+- "finding" — exam results, imaging findings, lab values, echo measurements
+- "vital" — height, weight, BMI, blood pressure, heart rate, temperature
+- "procedure" — surgeries, DRG codes, interventions performed
+- "history" — anamnesis, prior conditions ("st.p."), epidemiological/social/family history
+- "general" — content that doesn't fit above (headings, administrative text, mixed)`;
 
   const userMessage = `# Directive
 ${directive}
@@ -90,7 +133,7 @@ ${text}`;
       tool: {
         name: "submit_extracted_passages",
         description:
-          "Submit the passages of the document that match the physician's directive, verbatim.",
+          "Submit the passages of the document that match the physician's directive, verbatim and categorised.",
         schema: {
           type: "object",
           properties: {
@@ -106,13 +149,27 @@ ${text}`;
                     description:
                       "ONE contiguous verbatim substring of the document (≥8 chars). NEVER concatenate multiple places with '…' or '...'. Server validates via substring match — concatenated spans will be dropped.",
                   },
+                  category: {
+                    type: "string",
+                    enum: [
+                      "medication",
+                      "diagnosis",
+                      "finding",
+                      "procedure",
+                      "vital",
+                      "history",
+                      "general",
+                    ],
+                    description:
+                      "Clinical category of this passage: medication (drugs/doses), diagnosis (Záver/Dg entries), finding (exam/lab/imaging results), vital (height/weight/BP/HR), procedure (surgeries/interventions), history (anamnesis/prior conditions), general (other).",
+                  },
                   match_reason: {
                     type: "string",
                     description:
                       "Short rationale (e.g. 'matches echokg heading').",
                   },
                 },
-                required: ["text"],
+                required: ["text", "category"],
               },
             },
           },
@@ -133,24 +190,32 @@ ${text}`;
       });
     }
 
-    const passages: Array<{ text: string }> = [];
+    const passages: Array<{ text: string; category?: string }> = [];
     if (Array.isArray(result.toolInput?.passages)) {
       for (const p of result.toolInput.passages as unknown[]) {
         if (!p || typeof p !== "object") continue;
-        const obj = p as { text?: unknown };
+        const obj = p as { text?: unknown; category?: unknown };
         if (typeof obj.text === "string" && obj.text.trim().length >= 8) {
-          passages.push({ text: obj.text });
+          passages.push({
+            text: obj.text,
+            category:
+              typeof obj.category === "string" ? obj.category : undefined,
+          });
         }
       }
     }
 
     const sourceFolded = text.toLowerCase();
-    const valid: string[] = [];
+    const classifiedPassages: ClassifiedPassage[] = [];
     for (const p of passages) {
       const span = p.text.trim();
       // Substring match in source (case-insensitive, preserves diacritics).
       if (sourceFolded.includes(span.toLowerCase())) {
-        valid.push(span);
+        const category: PassageCategory =
+          p.category && VALID_CATEGORIES.has(p.category as PassageCategory)
+            ? (p.category as PassageCategory)
+            : "general";
+        classifiedPassages.push({ text: span, category });
       } else {
         logger.debug(
           `[file-focus] dropped ungrounded passage (${span.length}ch) from ${fileName}`,
@@ -158,16 +223,16 @@ ${text}`;
       }
     }
 
-    const extracted = valid.join("\n\n");
+    const extracted = classifiedPassages.map((p) => p.text).join("\n\n");
 
     logger.debug(
-      `[file-focus] "${fileName}" directive="${directive.slice(0, 60)}" — ${text.length}ch → ${extracted.length}ch (${valid.length}/${passages.length} passages kept)`,
+      `[file-focus] "${fileName}" directive="${directive.slice(0, 60)}" — ${text.length}ch → ${extracted.length}ch (${classifiedPassages.length}/${passages.length} passages kept)`,
     );
-    return extracted;
+    return { text: extracted, classifiedPassages };
   } catch (err) {
     logger.error(`[file-focus] extraction failed for ${fileName}:`, err);
     // Fall through — return original text so generation isn't blocked.
-    return text;
+    return { text, classifiedPassages: [] };
   }
 }
 
@@ -178,7 +243,8 @@ ${text}`;
  *   - directive EMPTY   ("Actual" mode) → use the whole file as-is,
  *                                         treating it as today's data.
  *   - directive PRESENT ("Past" mode)   → Haiku extracts ONLY the
- *                                         passages matching the directive.
+ *                                         passages matching the directive,
+ *                                         each tagged with a clinical category.
  *
  * Runs the filter calls in parallel per file. Call this ONCE per
  * encounter before any section agent or ICD suggester reads the source,
@@ -221,14 +287,18 @@ export async function applyFileFocusDirectives(
         const entry = cache[fileId];
         if (entry.textHash === textHash && entry.directive === directive) {
           logger.debug(`[file-focus] cache HIT for "${f.name}" (${fileId})`);
-          return { ...f, text: entry.output };
+          return {
+            ...f,
+            text: entry.output,
+            classifiedPassages: entry.classifiedPassages,
+          };
         }
       }
 
       logger.debug(
         `[file-focus] filtering "${f.name}": directive="${directive.slice(0, 80)}"`,
       );
-      const extracted = await extractWithDirective({
+      const result = await extractWithDirective({
         text: f.text,
         directive,
         fileName: f.name,
@@ -237,10 +307,19 @@ export async function applyFileFocusDirectives(
       });
 
       if (fileId) {
-        cache[fileId] = { textHash, directive, output: extracted };
+        cache[fileId] = {
+          textHash,
+          directive,
+          output: result.text,
+          classifiedPassages: result.classifiedPassages,
+        };
         cacheTouched = true;
       }
-      return { ...f, text: extracted };
+      return {
+        ...f,
+        text: result.text,
+        classifiedPassages: result.classifiedPassages,
+      };
     }),
   );
 
