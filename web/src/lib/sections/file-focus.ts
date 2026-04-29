@@ -60,13 +60,18 @@ export async function extractWithDirective(params: {
 
   const systemPrompt = `You extract verbatim passages from a ${LANGUAGE_LABEL[language]}-language medical document per the uploading physician's directive.
 
-The physician has restricted which parts of the document should feed the clinical note. Your job: read the document, decide which passages match the directive, and return them as a list — each passage VERBATIM from the source.
+The physician has restricted which parts of the document should feed the clinical note. Your job: read the document, decide which passages match the directive, and return ONLY matching passages — each VERBATIM from the source. Everything NOT mentioned in the directive must be EXCLUDED. The directive is an EXCLUSIVE filter.
 
 # Rules
 - Every \`text\` you return MUST be a verbatim substring of the document. Fake passages get DROPPED by server-side substring validation.
-- Preserve headings and their bodies together as a single passage when they belong together.
-- If the directive is broad ("echokg a záver"), err on the side of INCLUSION — pull every passage whose heading or content plausibly matches either keyword.
+- EXCLUSIVE: extract ONLY content matching the directive. Content NOT matching ANY directive keyword must be excluded, even if it appears in the same section. When a document section mixes relevant and irrelevant content (e.g. "Odporúčanie" contains both medication lines AND diet/lifestyle recommendations), extract ONLY the relevant lines — NOT the whole section.
+- If the directive is broad ("echokg a záver"), err on the side of INCLUSION within those topics — but still exclude content that doesn't match any keyword.
 - Match loosely on section headings: "echokg" / "echo" / "ECHOKG" / "echokardiografia" all match. "záver" / "Záver" / "Diagnostický záver" / "Summary" all match.
+- Medical-document synonym awareness — doctors use shorthand in directives. Expand these:
+  - "DG" / "diagnózy" / "diagnóza" → also match "Záver", "Dg.:", "Diagnózy:", "Assessment", "Diagnostický záver"
+  - "LA" / "lieky" / "medikácia" / "terapia" → also match "Odporúčanie" (ONLY medication lines within it — drug name + dose + frequency), "medik.", "R:" (prescription lines), "Terapia", "Lieková anamnéza", "Medications". CRITICAL: include the FULL medication lines with drug name + dose (mg) + frequency (e.g. "1-0-1") — never strip dosing information. EXCLUDE diet, lifestyle, and management recommendations from Odporúčanie.
+  - "laby" / "laboratórium" / "lab" → also match "Krvný obraz", "Biochem", "Výsledky laboratórnych testov"
+  - "echo" / "echokg" → also match "Echokardiografia", "ECHOKG"
 - Return an empty array when nothing matches.`;
 
   const userMessage = `# Directive

@@ -326,19 +326,34 @@ export function correctMedicationBaseName(
   // Try substring match — but return only the base name portion
   const substringMatches = searchMedications(baseName, 1, locale);
   if (substringMatches.length > 0) {
-    return {
-      correctedBaseName: extractBaseName(substringMatches[0].name),
-      entry: substringMatches[0],
-    };
+    const corrected = extractBaseName(substringMatches[0].name);
+    const correctedLower = corrected.toLowerCase();
+    const baseLower = baseName.toLowerCase();
+    // Don't "correct" a valid generic/INN name to a branded variant with
+    // manufacturer suffix. E.g. "Ramipril" should NOT become "Ramipril
+    // Actavis" just because the CSV indexes "Ramipril Actavis 10 mg".
+    // The input is a valid prefix — the match is a substring hit, not a
+    // genuine typo correction.
+    if (
+      correctedLower !== baseLower &&
+      !correctedLower.startsWith(baseLower + " ")
+    ) {
+      return { correctedBaseName: corrected, entry: substringMatches[0] };
+    }
   }
 
   // Fuzzy match with higher threshold (0.7) for auto-correction
   const fuzzyMatches = fuzzySearchMedications(baseName, 1, locale, 0.7);
   if (fuzzyMatches.length > 0) {
-    return {
-      correctedBaseName: extractBaseName(fuzzyMatches[0].name),
-      entry: fuzzyMatches[0],
-    };
+    const corrected = extractBaseName(fuzzyMatches[0].name);
+    const correctedLower = corrected.toLowerCase();
+    const baseLower = baseName.toLowerCase();
+    if (
+      correctedLower !== baseLower &&
+      !correctedLower.startsWith(baseLower + " ")
+    ) {
+      return { correctedBaseName: corrected, entry: fuzzyMatches[0] };
+    }
   }
 
   return null;

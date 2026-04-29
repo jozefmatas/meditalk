@@ -184,4 +184,21 @@ describe("drug-normalizer", () => {
     const count = (out.match(/Ramipril Actavis/gi) ?? []).length;
     expect(count).toBe(1);
   });
+
+  it("does NOT expand a bare generic name to a branded variant with manufacturer", () => {
+    // LLM writes "Ramipril 5 mg 1-0-1" (valid generic/INN name).
+    // The normalizer must NOT "correct" it to "Ramipril Actavis 5 mg 1-0-1"
+    // just because the CSV indexes "Ramipril Actavis 10 mg".
+    const input = "Ramipril 5 mg 1-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toBe("Ramipril 5 mg 1-0-1");
+    expect(out).not.toContain("Actavis");
+  });
+
+  it("does NOT expand Silodosin to Silodosin Stada", () => {
+    const input = "Silodosin 8 mg 0-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toBe("Silodosin 8 mg 0-0-1");
+    expect(out).not.toContain("Stada");
+  });
 });
