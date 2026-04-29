@@ -93,19 +93,20 @@ function escapeHtml(text: string): string {
 /**
  * Format a single line of text for embedding in HTML.
  * - Converts markdown **bold** to <strong> tags
- * - Preserves existing <strong>/<em> tags (from editor round-trip)
+ * - Preserves existing <strong>/<em>/<br> tags (from editor round-trip)
  * - Escapes all other HTML entities
  */
 function formatInlineText(text: string): string {
   // Convert markdown **bold** to placeholders (before escaping)
   let result = text.replace(/\*\*(.+?)\*\*/g, "\x00S\x00$1\x00/S\x00");
 
-  // Preserve existing <strong> and <em> tags as placeholders
+  // Preserve existing <strong>, <em>, and <br> tags as placeholders
   result = result
     .replace(/<strong>/gi, "\x00S\x00")
     .replace(/<\/strong>/gi, "\x00/S\x00")
     .replace(/<em>/gi, "\x00E\x00")
-    .replace(/<\/em>/gi, "\x00/E\x00");
+    .replace(/<\/em>/gi, "\x00/E\x00")
+    .replace(/<br\s*\/?>/gi, "\x00BR\x00");
 
   // Escape all remaining HTML
   result = escapeHtml(result);
@@ -115,7 +116,8 @@ function formatInlineText(text: string): string {
     .replace(/\x00S\x00/g, "<strong>")
     .replace(/\x00\/S\x00/g, "</strong>")
     .replace(/\x00E\x00/g, "<em>")
-    .replace(/\x00\/E\x00/g, "</em>");
+    .replace(/\x00\/E\x00/g, "</em>")
+    .replace(/\x00BR\x00/g, "<br>");
 }
 
 /**

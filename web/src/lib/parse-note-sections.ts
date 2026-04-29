@@ -109,13 +109,12 @@ export function allSectionsToPlainText(sections: NoteSection[]): string {
 }
 
 /**
- * Extract inline content from HTML, preserving formatting tags (<strong>, <em>).
- * Strips structural tags (<p>, <br>) and decodes entities.
+ * Extract inline content from HTML, preserving formatting tags (<strong>, <em>, <br>).
+ * Strips structural tags (<p>) and decodes entities.
  * If the plain-text result is a NOT_STATED placeholder, returns empty string.
  */
 function htmlToInlineContent(html: string): string {
   const text = html
-    .replace(/<br\s*\/?>/gi, "\n")
     // Convert list items to "- " prefix (handles <li>text</li> and <li><p>text</p></li>)
     .replace(/<li[^>]*>(?:<p[^>]*>)?([\s\S]*?)(?:<\/p>)?<\/li>/gi, "- $1\n")
     // Strip list wrappers
@@ -123,8 +122,8 @@ function htmlToInlineContent(html: string): string {
     // Convert </p> to newlines, strip opening <p>
     .replace(/<\/p>/gi, "\n")
     .replace(/<p[^>]*>/gi, "")
-    // Strip all tags EXCEPT <strong>, </strong>, <em>, </em>
-    .replace(/<(?!\/?(?:strong|em)\b)[^>]+>/g, "")
+    // Strip all tags EXCEPT <strong>, </strong>, <em>, </em>, <br>
+    .replace(/<(?!\/?(?:strong|em)\b)(?!br\s*\/?>)[^>]+>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -132,8 +131,11 @@ function htmlToInlineContent(html: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // Check NOT_STATED against plain text (strip formatting tags for check)
-  const plainText = text.replace(/<\/?(?:strong|em)>/gi, "").trim();
+  // Check NOT_STATED against plain text (strip formatting + <br> tags for check)
+  const plainText = text
+    .replace(/<\/?(?:strong|em)>/gi, "")
+    .replace(/<br\s*\/?>/gi, "")
+    .trim();
   if (NOT_STATED_VALUES.has(plainText)) return "";
 
   return text;

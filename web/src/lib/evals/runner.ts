@@ -4,21 +4,16 @@
  * Loads fixtures, runs the real generation pipeline against each, scores
  * every expectation, and prints a pass/fail matrix. Mirrors what the
  * generate route does (extract sources → render sections → critic →
- * reconcilers → Záver suggester + critic + validator → HTML).
+ * reconcilers → conclusion via ICD context → HTML).
  *
  * Not a Vitest suite — this is a standalone script so we can run it ad
  * hoc (`npm run eval`) and during prompt / model iteration without
  * going through the full test stack or the HTTP route.
  */
 import { createClient } from "@supabase/supabase-js";
-import {
-  generateNote,
-  findZaverSection,
-  runCriticAndReconcilers,
-} from "../sections/pipeline";
+import { generateNote } from "../sections/pipeline";
 import { suggestIcdCodes } from "../sections/suggest-icd";
 import { extractSkeleton } from "../sections/note-skeleton";
-import { formatZaverFromSuggestions } from "../sections/format-zaver";
 import { buildTemplateHtml, flattenSectionIds } from "../templates/html";
 import { buildSectionLabelsFromTemplate } from "../templates";
 import type { Template, TemplateSection } from "../templates/types";
@@ -88,47 +83,18 @@ async function generateForFixture(fixture: EvalFixture): Promise<string> {
   const suggesterPromise = suggestIcdCodes(fixture.source, fixture.language);
   const skeleton = await skeletonPromise;
 
-  const sectionsPromise = generateNote({
+  // generateNote handles conclusion internally — it awaits the ICD
+  // suggestions promise before rendering conclusion sections.
+  await generateNote({
     template,
     source: fixture.source,
     language: fixture.language,
     skeleton,
+    icdSuggestionsPromise: suggesterPromise,
     onSection: (section: RenderedSection) => {
       sectionContentsMap[section.id] = section.content;
     },
   });
-
-  const [, suggestedIcdCodes] = await Promise.all([
-    sectionsPromise,
-    suggesterPromise,
-  ]);
-
-  const zaver = findZaverSection(
-    template,
-    fixture.language as "sk" | "cs" | "en",
-  );
-  if (zaver) {
-    const draft = formatZaverFromSuggestions(suggestedIcdCodes);
-    const finalZaver = draft
-      ? await runCriticAndReconcilers({
-          draftContent: draft,
-          source: fixture.source,
-          config: {
-            id: zaver.id,
-            title: zaver.title,
-            context: zaver.context,
-            model: "haiku",
-            reconcilers: zaver.reconcilers,
-            critic: zaver.critic,
-            kind: zaver.kind,
-          },
-          language: fixture.language as "sk" | "cs" | "en",
-          templateSystemPrompt: template.systemPrompt,
-          skeleton,
-        })
-      : draft;
-    sectionContentsMap[zaver.id] = finalZaver;
-  }
 
   return buildTemplateHtml(template, sectionContentsMap, sectionLabels, {
     skipEmpty: true,

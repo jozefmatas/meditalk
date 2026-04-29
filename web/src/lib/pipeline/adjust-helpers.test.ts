@@ -4,7 +4,6 @@ import {
   foldLabel,
   isVitalOrExamLabel,
   collectLeafSectionsForRouter,
-  shouldRerunZaver,
   expandVitalGroup,
 } from "./adjust-helpers";
 import type { Template } from "@/lib/templates/types";
@@ -129,73 +128,6 @@ describe("collectLeafSectionsForRouter", () => {
     ]);
     const result = collectLeafSectionsForRouter(template, {});
     expect(result[0].label).toBe("unknown");
-  });
-});
-
-// ── shouldRerunZaver ──────────────────────────────────────────────
-
-describe("shouldRerunZaver", () => {
-  const template = makeTemplate([
-    { id: "oa", labels: { sk: "Osobná anamnéza" } },
-    { id: "to", labels: { sk: "Terajšie ochorenie" } },
-    { id: "la", labels: { sk: "Lieky" } },
-    { id: "zaver", labels: { sk: "Záver" } },
-  ]);
-  const sectionLabels: Record<string, string> = {
-    oa: "Osobná anamnéza",
-    to: "Terajšie ochorenie",
-    la: "Lieky",
-    zaver: "Záver",
-  };
-
-  it("returns true when Záver itself is in affected set", () => {
-    expect(
-      shouldRerunZaver(
-        { id: "zaver" },
-        new Set(["zaver"]),
-        template,
-        sectionLabels,
-      ),
-    ).toBe(true);
-  });
-
-  it("returns true when OA is affected", () => {
-    expect(
-      shouldRerunZaver(
-        { id: "zaver" },
-        new Set(["oa"]),
-        template,
-        sectionLabels,
-      ),
-    ).toBe(true);
-  });
-
-  it("returns true when TO is affected", () => {
-    expect(
-      shouldRerunZaver(
-        { id: "zaver" },
-        new Set(["to"]),
-        template,
-        sectionLabels,
-      ),
-    ).toBe(true);
-  });
-
-  it("returns false when only non-diagnosis sections are affected", () => {
-    expect(
-      shouldRerunZaver(
-        { id: "zaver" },
-        new Set(["la"]),
-        template,
-        sectionLabels,
-      ),
-    ).toBe(false);
-  });
-
-  it("returns false when zaver is null", () => {
-    expect(
-      shouldRerunZaver(null, new Set(["oa"]), template, sectionLabels),
-    ).toBe(false);
   });
 });
 

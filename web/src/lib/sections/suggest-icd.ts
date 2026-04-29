@@ -2,10 +2,10 @@
  * ICD-10 suggestion pass — runs ONCE per generation.
  *
  * Produces 10–15 candidate codes for the encounter based on the raw
- * source. Output feeds BOTH the right-side "Navrhované kódy" panel
- * AND the Záver section (via `formatZaverFromSuggestions`), which
- * then goes through the per-section critic + icd-validator reconciler
- * for correction.
+ * source. Output feeds:
+ *   1. The right-side "Navrhované kódy" panel (UI).
+ *   2. The conclusion section as structured context (diagnoses list),
+ *      rendered by the normal section-agent like any other section.
  *
  * Returns codes in WHO Slovak format. Validates every code against the
  * Slovak CSV before shipping — unknown codes are dropped.

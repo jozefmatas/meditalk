@@ -4,21 +4,15 @@
  *
  * Owns the full pipeline sequence:
  *   file-focus filter → skeleton ∥ ICD (parallel) → section loop
- *   → Záver (format + critic + reconcilers) → HTML assembly.
+ *   (conclusion renders last, after ICD resolves) → HTML assembly.
  *
  * When `leafIdFilter` is set (adjust mode), only filtered sections
- * re-render; Záver is conditional on whether diagnosis-affecting
- * sections are in the filter.
+ * re-render; conclusion re-renders when it's in the filter set.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import {
-  generateNote,
-  findZaverSection,
-  runCriticAndReconcilers,
-} from "@/lib/sections/pipeline";
+import { generateNote } from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
 import type { SuggestedIcdCode } from "@/lib/sections/suggest-icd";
-import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import {
   applyFileFocusDirectives,
   type FileFocusCache,
@@ -29,7 +23,6 @@ import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import type { RawSource } from "@/lib/sections/section-agent";
 import type { Template } from "@/lib/templates/types";
 import type { SupportedLanguage } from "@/lib/types";
-import { shouldRerunZaver } from "./adjust-helpers";
 
 // ── Public types ──────────────────────────────────────────────────
 
@@ -119,16 +112,19 @@ export async function runPipelineSession(
   const skeleton = await skeletonPromise;
 
   // ── 4. Section rendering ────────────────────────────────────────
+  // ICD suggestions promise is passed into generateNote — conclusion
+  // sections await it internally while other sections render in parallel.
   const sectionContentsMap: Record<string, string> = {
     ...(priorSectionContents ?? {}),
   };
 
-  const sectionsPromise = generateNote({
+  await generateNote({
     template,
     source,
     language,
     usage: { userId, visitId },
     skeleton,
+    icdSuggestionsPromise: suggesterPromise,
     ...(leafIdFilter ? { leafIdFilter } : {}),
     onSection: (section) => {
       sectionContentsMap[section.id] = section.content;
@@ -141,55 +137,12 @@ export async function runPipelineSession(
     },
   });
 
-  const [, suggestedIcdCodes] = await Promise.all([
-    sectionsPromise,
-    suggesterPromise,
-  ]);
+  // Resolve ICD results for the clinical analysis response.
+  // The promise is already resolved (generateNote awaited it for
+  // conclusion sections), so this is instant.
+  const suggestedIcdCodes = await suggesterPromise;
 
-  // ── 5. Záver ────────────────────────────────────────────────────
-  const zaver = findZaverSection(
-    template,
-    language === "cs" ? "cs" : language === "en" ? "en" : "sk",
-  );
-
-  const runZaver = leafIdFilter
-    ? shouldRerunZaver(zaver, leafIdFilter, template, sectionLabels)
-    : !!zaver;
-
-  if (runZaver && zaver) {
-    const draftZaver = formatZaverFromSuggestions(suggestedIcdCodes);
-    const finalZaver = draftZaver
-      ? await runCriticAndReconcilers({
-          draftContent: draftZaver,
-          source,
-          config: {
-            id: zaver.id,
-            title: zaver.title,
-            context: zaver.context,
-            model: "haiku",
-            reconcilers: zaver.reconcilers,
-            critic: zaver.critic,
-            kind: zaver.kind,
-          },
-          language: language === "cs" ? "cs" : language === "en" ? "en" : "sk",
-          usage: { userId, visitId },
-          templateSystemPrompt: template.systemPrompt,
-          skeleton,
-        })
-      : draftZaver;
-
-    if (finalZaver !== undefined) {
-      sectionContentsMap[zaver.id] = finalZaver;
-      sendEvent({
-        type: "section",
-        id: zaver.id,
-        title: zaver.title,
-        content: finalZaver,
-      });
-    }
-  }
-
-  // ── 6. HTML assembly ────────────────────────────────────────────
+  // ── 5. HTML assembly ────────────────────────────────────────────
   const generatedNote = buildTemplateHtml(
     template,
     sectionContentsMap,

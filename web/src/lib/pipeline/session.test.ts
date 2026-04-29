@@ -6,16 +6,10 @@ import { runPipelineSession } from "./session";
 
 vi.mock("@/lib/sections/pipeline", () => ({
   generateNote: vi.fn(),
-  findZaverSection: vi.fn(),
-  runCriticAndReconcilers: vi.fn(),
 }));
 
 vi.mock("@/lib/sections/suggest-icd", () => ({
   suggestIcdCodes: vi.fn(),
-}));
-
-vi.mock("@/lib/sections/format-zaver", () => ({
-  formatZaverFromSuggestions: vi.fn(),
 }));
 
 vi.mock("@/lib/sections/file-focus", () => ({
@@ -35,10 +29,6 @@ vi.mock("@/lib/templates/html", () => ({
   flattenSectionIds: vi.fn(),
 }));
 
-vi.mock("./adjust-helpers", () => ({
-  shouldRerunZaver: vi.fn(),
-}));
-
 vi.mock("@/lib/logger", () => ({
   logger: {
     debug: vi.fn(),
@@ -48,30 +38,20 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-import {
-  generateNote,
-  findZaverSection,
-  runCriticAndReconcilers,
-} from "@/lib/sections/pipeline";
+import { generateNote } from "@/lib/sections/pipeline";
 import { suggestIcdCodes } from "@/lib/sections/suggest-icd";
-import { formatZaverFromSuggestions } from "@/lib/sections/format-zaver";
 import { applyFileFocusDirectives } from "@/lib/sections/file-focus";
 import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import { buildSectionLabelsFromTemplate } from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
-import { shouldRerunZaver } from "./adjust-helpers";
 
 const mockGenerateNote = vi.mocked(generateNote);
-const mockFindZaver = vi.mocked(findZaverSection);
-const mockCriticReconcilers = vi.mocked(runCriticAndReconcilers);
 const mockSuggestIcd = vi.mocked(suggestIcdCodes);
-const mockFormatZaver = vi.mocked(formatZaverFromSuggestions);
 const mockFileFocus = vi.mocked(applyFileFocusDirectives);
 const mockSkeleton = vi.mocked(extractSkeleton);
 const mockBuildLabels = vi.mocked(buildSectionLabelsFromTemplate);
 const mockBuildHtml = vi.mocked(buildTemplateHtml);
 const mockFlattenIds = vi.mocked(flattenSectionIds);
-const mockShouldRerunZaver = vi.mocked(shouldRerunZaver);
 
 const mockSupabase = {} as never;
 
@@ -94,10 +74,7 @@ beforeEach(() => {
   mockFileFocus.mockImplementation(async (source) => source);
   mockSkeleton.mockResolvedValue(null);
   mockSuggestIcd.mockResolvedValue([]);
-  mockFindZaver.mockReturnValue(null);
-  mockFormatZaver.mockReturnValue("");
   mockBuildHtml.mockReturnValue("<h2>OA</h2><p>Test</p>");
-  mockShouldRerunZaver.mockReturnValue(false);
 
   // generateNote: call onSection for each section
   mockGenerateNote.mockImplementation(async (input) => {
@@ -170,49 +147,10 @@ describe("runPipelineSession", () => {
     });
   });
 
-  it("runs Záver when no leafIdFilter and findZaverSection returns a section", async () => {
-    const zaverSection = {
-      id: "zaver",
-      title: "Záver",
-      context: "conclusion context",
-      critic: true,
-    };
-    mockFindZaver.mockReturnValue(zaverSection);
-    mockFormatZaver.mockReturnValue("I10 Hypertenzia");
-    mockCriticReconcilers.mockResolvedValue("I10 Hypertenzia (critic)");
-
-    const events: Record<string, unknown>[] = [];
-
-    const result = await runPipelineSession({
-      supabase: mockSupabase,
-      userId: "user-1",
-      visitId: "visit-1",
-      language: "sk",
-      rawSource: { transcript: "Test" },
-      fileIds: [],
-      visitMetadata: {},
-      template: baseTemplate,
-      sendEvent: (data) => events.push(data),
-    });
-
-    expect(mockCriticReconcilers).toHaveBeenCalled();
-    expect(result.sectionContents.zaver).toBe("I10 Hypertenzia (critic)");
-    const zaverEvents = events.filter(
-      (e) => e.type === "section" && e.id === "zaver",
-    );
-    expect(zaverEvents).toHaveLength(1);
-  });
-
-  it("uses shouldRerunZaver when leafIdFilter is set", async () => {
-    const zaverSection = {
-      id: "zaver",
-      title: "Záver",
-      context: "conclusion",
-    };
-    mockFindZaver.mockReturnValue(zaverSection);
-    mockShouldRerunZaver.mockReturnValue(false);
-
-    const events: Record<string, unknown>[] = [];
+  it("passes icdSuggestionsPromise to generateNote", async () => {
+    mockSuggestIcd.mockResolvedValue([
+      { code: "I10", description: "Hypertenzia", confidence: "high" },
+    ]);
 
     await runPipelineSession({
       supabase: mockSupabase,
@@ -223,17 +161,15 @@ describe("runPipelineSession", () => {
       fileIds: [],
       visitMetadata: {},
       template: baseTemplate,
-      sendEvent: (data) => events.push(data),
-      leafIdFilter: new Set(["oa"]),
+      sendEvent: vi.fn(),
     });
 
-    expect(mockShouldRerunZaver).toHaveBeenCalledWith(
-      zaverSection,
-      new Set(["oa"]),
-      baseTemplate,
-      { oa: "OA", to: "TO" },
+    // generateNote should receive icdSuggestionsPromise
+    expect(mockGenerateNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icdSuggestionsPromise: expect.any(Promise),
+      }),
     );
-    expect(mockCriticReconcilers).not.toHaveBeenCalled();
   });
 
   it("includes clinicalAnalysis when ICD codes are suggested", async () => {

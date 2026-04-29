@@ -90,6 +90,9 @@ export async function renderSection(
   templateSystemPrompt?: string,
   sectionExamples?: string[],
   skeleton?: NoteSkeleton | null,
+  /** Extra context appended to the user message (e.g. ICD suggestions
+   *  for the conclusion section). Not part of the system prompt. */
+  additionalContext?: string,
 ): Promise<RenderedSection> {
   const systemBlocks = buildSystemBlocks(
     section,
@@ -97,7 +100,11 @@ export async function renderSection(
     templateSystemPrompt,
     sectionExamples,
   );
-  const userMessage = buildUserMessage(source, skeleton ?? null);
+  const userMessage = buildUserMessage(
+    source,
+    skeleton ?? null,
+    additionalContext,
+  );
   const provider = resolve("section-agent", section.model);
 
   // temperature=0 for deterministic clinical documentation. Run-to-run
@@ -302,6 +309,7 @@ ${section.context}`,
 function buildUserMessage(
   source: RawSource,
   skeleton: NoteSkeleton | null,
+  additionalContext?: string,
 ): string {
   const parts: string[] = [];
 
@@ -329,5 +337,12 @@ function buildUserMessage(
       : `# File: ${file.name}`;
     parts.push(`${header}\n${file.text.trim()}`);
   }
+
+  // Additional context (e.g. ICD suggestions for conclusion). Appended
+  // after source so the model sees it alongside but separate from raw data.
+  if (additionalContext?.trim()) {
+    parts.push(additionalContext.trim());
+  }
+
   return parts.join("\n\n");
 }

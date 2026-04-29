@@ -25,9 +25,8 @@ import type { Language, RawSource } from "./section-agent";
 import type { NoteSkeleton } from "./note-skeleton";
 import { formatSkeletonBlock } from "./note-skeleton";
 
-/** Model tier for the critic pass. Haiku is the default; Sonnet is used
- *  on sections that need multi-step clinical inference (Záver ICD
- *  anatomy, OA shorthand preservation, LA dose fidelity). */
+/** Model tier for the critic pass. Haiku is the default everywhere —
+ *  verification is a simpler task than generation. */
 export type CriticModel = "haiku" | "sonnet";
 
 const LANGUAGE_LABEL: Record<Language, string> = {
@@ -285,9 +284,6 @@ Keep the author's voice, ordering, format, and connective tissue ("pred dvoma d�
 Keep negations and differential phrasing ("neguje", "bez edémov", "nemožno vylúčiť …") exactly as the author wrote them — BUT only when the source contains the corresponding negation / differential statement. Don't keep "neguje" clauses if nothing in the source reflects that denial.
 
 Correct; do NOT rewrite for aesthetic reasons.
-
-## Záver line formatting
-If the section is "Záver" (Conclusion / Diagnostic summary), each ICD code is its own line — the draft separates them with an actual newline character, not with commas. Preserve that line-per-code layout exactly. Do NOT collapse newlines into comma-joined prose. Do NOT add bullets, dashes, or numbering. Just code + description, one per line.
 
 # If already correct
 If every clause in the draft is already grounded in the source AND the contract is satisfied, return it UNCHANGED, byte-for-byte.

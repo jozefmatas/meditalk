@@ -235,7 +235,7 @@ describe("parseNoteToSectionMap", () => {
     expect(map.vitals).toBe("BP <strong>elevated</strong> at 150/90.");
   });
 
-  it("converts <br> and paragraph breaks to newlines while preserving formatting", () => {
+  it("preserves <br> tags and paragraph breaks while preserving formatting", () => {
     const html =
       "<h2>Subjective</h2><p><strong>Headache</strong> for 3 days.<br>Also reports <em>nausea</em>.</p>" +
       "<h2>Objective</h2><p>Normal.</p>" +
@@ -245,7 +245,7 @@ describe("parseNoteToSectionMap", () => {
     const map = parseNoteToSectionMap(html, simpleTemplate);
 
     expect(map.subjective).toBe(
-      "<strong>Headache</strong> for 3 days.\nAlso reports <em>nausea</em>.",
+      "<strong>Headache</strong> for 3 days.<br>Also reports <em>nausea</em>.",
     );
   });
 

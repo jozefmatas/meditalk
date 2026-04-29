@@ -63,40 +63,8 @@ const MEDICATION_LABELS = new Set([
   "liekova anamneza",
 ]);
 
-const ZAVER_LABELS = new Set([
-  "zaver",
-  "zavěr",
-  "assessment",
-  "conclusion",
-  "diagnosis",
-  "diagnostic assessment",
-  "conclusion and recommendation",
-  "zaver a odporucanie",
-  "zaver a doporuceni",
-  "zaver a odporucenie",
-]);
-
-/** Labels that should be rendered by Sonnet instead of Haiku. */
-const SONNET_LABELS = new Set([
-  // RA
-  "ra",
-  "fhx",
-  "family history",
-  "rodinna anamneza",
-  // OA
-  "oa",
-  "pmhx",
-  "past medical history",
-  "osobna anamneza",
-  "osobni anamneza",
-  // TO / HPI
-  "to",
-  "hpi",
-  "history of present illness",
-  "anamneza sucasneho ochorenia",
-  "anamneza soucasneho onemocneni",
-  ...ZAVER_LABELS,
-]);
+// ZAVER_LABELS + SONNET_LABELS removed — conclusion sections no longer
+// need icd-validator, and model tiers are driven by KIND_POLICY in code.
 
 const ENABLEMENTS = [
   {
@@ -105,19 +73,9 @@ const ENABLEMENTS = [
       labels.some((l) => MEDICATION_LABELS.has(normalizeLabel(l))),
     reconcilers: ["drug-normalizer"],
   },
-  {
-    label: "icd-validator on Záver sections",
-    matches: (labels) =>
-      labels.some((l) => ZAVER_LABELS.has(normalizeLabel(l))),
-    reconcilers: ["icd-validator"],
-  },
-  // Experiment: revert every section to Haiku. Reconcilers (drug-normalizer,
-  // icd-validator) stay — they constrain output regardless of model tier.
-  {
-    label: "Haiku model on every section",
-    matches: () => true,
-    model: "haiku",
-  },
+  // icd-validator on Záver: REMOVED — conclusion now renders prose via
+  // section-agent (no ICD codes in output). See normalize-conclusion-sections.mjs.
+
 ];
 
 function patchSection(section, report) {

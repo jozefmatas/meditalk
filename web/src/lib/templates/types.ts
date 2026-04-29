@@ -1,24 +1,20 @@
 /**
- * Declarative classification of what a section holds. Replaces the
- * hardcoded label-matching sets the pipeline used to carry (ZAVER_LABELS,
- * STRUCTURAL_VITAL_LABELS, EXAM_NARRATIVE_LABELS, LA_LABELS).
+ * Declarative classification of what a section holds.
  *
- * The `kind` drives per-section behaviour — voice-example suppression,
- * digit-grounding on vitals, the Haiku-vs-Sonnet critic choice, skipping
- * Záver in the render loop. Admin can author new section types without
- * any code change.
+ * The `kind` drives per-section behaviour — render model tier (Sonnet
+ * for narrative/conclusion, Haiku for structural/default), voice-example
+ * suppression, digit-grounding on vitals, critic model (always Haiku).
  *
  * Values:
- *   - "default"            — narrative prose (RA, SA, PA, EA, Ab, …).
- *   - "history-narrative"  — TO-style HPI synthesis.
+ *   - "default"            — narrative prose (RA, SA, PA, EA, Ab, …). Haiku render.
+ *   - "history-narrative"  — TO-style HPI synthesis. Sonnet render.
  *   - "vital-numeric"      — single-value vitals (Výška/Hmotnosť/BMI/TK/
- *                            Pulz/EKG); digit-grounded, voice examples off.
+ *                            Pulz/EKG); Haiku render, digit-grounded, voice examples off.
  *   - "exam-narrative"     — Celkové vyšetrenie / Fyzikálne vyšetrenie;
- *                            voice examples off to prevent boilerplate leak.
- *   - "medication-list"    — LA; Haiku critic (completeness over
- *                            strictness), drug-normalizer reconciler.
- *   - "conclusion"         — Záver; skipped in the generate loop, populated
- *                            from the ICD suggester in the route.
+ *                            Sonnet render, voice examples off.
+ *   - "medication-list"    — LA; Haiku render + critic, drug-normalizer.
+ *   - "conclusion"         — Záver; DETERMINISTIC (no LLM). Canonical ICD
+ *                            descriptions from suggester, one per line.
  */
 export type SectionKind =
   | "default"
@@ -46,9 +42,9 @@ export interface TemplateSection {
    */
   kind?: SectionKind;
   /**
-   * Claude model tier for this section's agent.
-   * Defaults to "haiku" when not set. Switch to "sonnet" / "opus" only
-   * for sections that demonstrably need it (narrative TO, nuanced Záver).
+   * Claude model tier override for this section's agent. When omitted,
+   * KIND_POLICY.renderModel determines the model (Sonnet for narrative/
+   * conclusion, Haiku for structural/default).
    */
   model?: "haiku" | "sonnet" | "opus";
   /**

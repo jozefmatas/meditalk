@@ -2,21 +2,22 @@
  * Section pipeline — the ONLY orchestrator for note generation.
  *
  * Per-section flow:
- *   1. RENDER — section-agent (Haiku) reads raw source, uses
- *      `section.context` as its prose contract. Draft streams to the
- *      UI as soon as it finishes.
- *   2. CRITIC (opt-in) — when `section.critic` is true, a second Haiku
- *      call audits the draft against the raw source: removes invention,
- *      adds missed facts, preserves the draft's voice. Runs in parallel
- *      with the next section's render. Emits the corrected content via
- *      `onSection` again — the UI replaces by id.
+ *   1. RENDER — section-agent reads raw source, uses `section.context`
+ *      as its prose contract. Model tier per section kind: Sonnet for
+ *      narrative, Haiku for structural/default. Draft streams to the UI
+ *      as soon as it finishes.
+ *   2. CRITIC (opt-in) — when `section.critic` is true, a Haiku call
+ *      audits the draft against the raw source: removes invention,
+ *      adds missed facts, preserves the draft's voice. Always Haiku.
+ *      Runs in parallel with the next section's render. Emits the
+ *      corrected content via `onSection` again — the UI replaces by id.
  *   3. RECONCILERS — deterministic post-render helpers (drug-normalizer,
  *      icd-validator) run after the critic (or after the draft, when
  *      the critic is disabled).
  *
- * Záver is NOT rendered in this loop — the generate/regenerate route
- * pipes Záver from the ICD suggester through `runCriticAndReconcilers`
- * below so it gets the same treatment.
+ * Conclusion (Záver) is DETERMINISTIC — no LLM call. It waits for the
+ * ICD suggester to resolve, then formats high/medium-confidence
+ * diagnoses as canonical descriptions (one per line, no ICD codes).
  */
 import type {
   SectionKind,
@@ -32,6 +33,7 @@ import {
   type SectionConfig,
   type UsageContext,
 } from "./section-agent";
+import type { SuggestedIcdCode } from "./suggest-icd";
 import { buildSectionExamplesMap } from "../templates/reference-notes";
 import { normalizeLabel } from "../parse-note-sections";
 import { criticPass, type CriticModel } from "./critic";
@@ -47,7 +49,7 @@ import { logger } from "@/lib/logger";
 // New code should NEVER rely on these — use `resolveKind()` +
 // `KIND_POLICY` instead.
 
-const LEGACY_ZAVER_LABELS = new Set([
+const CONCLUSION_LABELS = new Set([
   "zaver",
   "assessment",
   "conclusion",
@@ -85,7 +87,7 @@ const LEGACY_EXAM_NARRATIVE_LABELS = new Set([
   "physical exam",
 ]);
 
-const LEGACY_LA_LABELS = new Set<string>([
+const MEDICATION_LIST_LABELS = new Set<string>([
   "la",
   "liekova anamneza",
   "lekova anamneza",
@@ -104,50 +106,49 @@ export const KIND_POLICY: Record<
     skipVoiceExamples: boolean;
     /** Enforce that every Arabic digit in the draft appears in source. */
     digitGrounding: boolean;
-    /** Critic tier for this section. */
+    /** Critic tier — always Haiku (verification ≠ generation). */
     criticModel: CriticModel;
-    /** Skip rendering in the main loop (Záver — populated externally). */
-    skipRenderInMainLoop: boolean;
+    /** Default render model when template doesn't override. */
+    renderModel: "haiku" | "sonnet";
   }
 > = {
   default: {
     skipVoiceExamples: false,
     digitGrounding: false,
-    criticModel: "sonnet",
-    skipRenderInMainLoop: false,
+    criticModel: "haiku",
+    renderModel: "haiku",
   },
   "history-narrative": {
     skipVoiceExamples: false,
     digitGrounding: false,
-    criticModel: "sonnet",
-    skipRenderInMainLoop: false,
+    criticModel: "haiku",
+    renderModel: "sonnet",
   },
   "vital-numeric": {
     skipVoiceExamples: true,
     digitGrounding: true,
-    criticModel: "sonnet",
-    skipRenderInMainLoop: false,
+    criticModel: "haiku",
+    renderModel: "haiku",
   },
   "exam-narrative": {
     skipVoiceExamples: true,
     digitGrounding: false,
-    criticModel: "sonnet",
-    skipRenderInMainLoop: false,
+    criticModel: "haiku",
+    renderModel: "sonnet",
   },
   "medication-list": {
     skipVoiceExamples: false,
     digitGrounding: false,
-    // Haiku is more forgiving on med lists — Sonnet aggressively strips
-    // chronic home meds the OCR mentions but that aren't explicitly
-    // today's prescription (observed: Rytmonorm, Nolpaza).
     criticModel: "haiku",
-    skipRenderInMainLoop: false,
+    renderModel: "haiku",
   },
+  // Conclusion is deterministic (no LLM render). renderModel is unused
+  // but kept for type completeness. See formatConclusionContent().
   conclusion: {
     skipVoiceExamples: false,
     digitGrounding: false,
-    criticModel: "sonnet",
-    skipRenderInMainLoop: true,
+    criticModel: "haiku",
+    renderModel: "sonnet",
   },
 };
 
@@ -164,10 +165,10 @@ export function resolveKind(section: TemplateSection): SectionKind {
     labels.some((l) => typeof l === "string" && set.has(normalizeLabel(l)));
 
   let derived: SectionKind = "default";
-  if (hit(LEGACY_ZAVER_LABELS)) derived = "conclusion";
+  if (hit(CONCLUSION_LABELS)) derived = "conclusion";
   else if (hit(LEGACY_STRUCTURAL_VITAL_LABELS)) derived = "vital-numeric";
   else if (hit(LEGACY_EXAM_NARRATIVE_LABELS)) derived = "exam-narrative";
-  else if (hit(LEGACY_LA_LABELS)) derived = "medication-list";
+  else if (hit(MEDICATION_LIST_LABELS)) derived = "medication-list";
 
   logger.debug(
     `[pipeline] kind fallback: section id=${section.id} labels=${JSON.stringify(labels)} → ${derived}. Backfill via scripts/add-section-kind.mjs.`,
@@ -176,23 +177,20 @@ export function resolveKind(section: TemplateSection): SectionKind {
 }
 
 /**
- * Title-based kind resolution for the Záver path, which reaches
- * `runCriticAndReconcilers` without a TemplateSection in hand — only
- * the resolved title string. Accepts an explicit kind when known.
+ * Title-based kind resolution fallback for callers that reach
+ * `runCriticAndReconcilers` without a TemplateSection — only the
+ * resolved title string. Accepts an explicit kind when known.
  */
 function resolveKindFromTitle(title: string, kind?: SectionKind): SectionKind {
   if (kind) return kind;
   const key = normalizeLabel(title);
-  if (LEGACY_ZAVER_LABELS.has(key)) return "conclusion";
+  if (CONCLUSION_LABELS.has(key)) return "conclusion";
   if (LEGACY_STRUCTURAL_VITAL_LABELS.has(key)) return "vital-numeric";
   if (LEGACY_EXAM_NARRATIVE_LABELS.has(key)) return "exam-narrative";
-  if (LEGACY_LA_LABELS.has(key)) return "medication-list";
-  logger.debug(
-    `[pipeline] kind fallback (title-only): "${title}" → default`,
-  );
+  if (MEDICATION_LIST_LABELS.has(key)) return "medication-list";
+  logger.debug(`[pipeline] kind fallback (title-only): "${title}" → default`);
   return "default";
 }
-
 
 /**
  * Common Slovak medical transcription typos that slip past the
@@ -274,7 +272,7 @@ export function stripUngroundedVitalValue(
   return draft;
 }
 
-export function findZaverSection(
+export function findConclusionSection(
   template: Template,
   language: Language = "sk",
 ): {
@@ -342,6 +340,13 @@ export interface GenerateNoteInput {
    * without a skeleton (today's behaviour).
    */
   skeleton?: NoteSkeleton | null;
+  /**
+   * Promise resolving to ICD suggestions from the suggester. Conclusion
+   * sections await this before rendering so the section-agent receives
+   * pre-validated diagnoses as structured context. Other section kinds
+   * ignore it. When omitted, conclusion renders without ICD context.
+   */
+  icdSuggestionsPromise?: Promise<SuggestedIcdCode[]>;
 }
 
 export interface GenerateNoteResult {
@@ -360,6 +365,7 @@ export async function generateNote(
     usage,
     leafIdFilter,
     skeleton,
+    icdSuggestionsPromise,
   } = input;
   const language4 = normalizeLanguage(language);
   const allLeaves = collectLeafSections(template.sections);
@@ -383,43 +389,44 @@ export async function generateNote(
     );
   }
 
+  // Conclusion sections render last — they need ICD suggestions as
+  // context, which resolve in parallel with the other sections.
+  const nonConclusionLeaves = leaves.filter(
+    (l) => resolveKind(l) !== "conclusion",
+  );
+  const conclusionLeaves = leaves.filter(
+    (l) => resolveKind(l) === "conclusion",
+  );
+
   const final = new Map<string, RenderedSection>();
   const order: string[] = [];
   const criticPromises: Array<Promise<void>> = [];
 
-  for (const leaf of leaves) {
+  // Helper: render one leaf, emit draft, queue critic.
+  const renderLeaf = async (
+    leaf: TemplateSection,
+    additionalContext?: string,
+  ) => {
     const title = resolveLabel(leaf, language4);
     const kind = resolveKind(leaf);
     const policy = KIND_POLICY[kind];
 
-    if (policy.skipRenderInMainLoop) {
-      logger.debug(
-        `[pipeline] skipping section (${leaf.id}, kind=${kind}) — populated from external source (e.g. ICD suggester)`,
-      );
-      continue;
-    }
-
     const context = leaf.context?.trim();
     if (!context) {
       logger.debug(`[pipeline] skipping ${leaf.id} — no context configured`);
-      continue;
+      return;
     }
 
     const config: SectionConfig = {
       id: leaf.id,
       title,
       context,
-      model: leaf.model ?? "haiku",
+      model: leaf.model ?? policy.renderModel,
       reconcilers: leaf.reconcilers,
       critic: leaf.critic,
       kind,
     };
 
-    // Voice examples are suppressed for kinds where the few-shot
-    // "example" IS a concrete finding (vitals numbers, normal-exam
-    // boilerplate) — Haiku tends to mimic them even when today's
-    // source has no corresponding data. Policy is declarative on
-    // `kind`; the mapping lives in KIND_POLICY.
     const examples = policy.skipVoiceExamples
       ? undefined
       : sectionExamplesMap.get(leaf.id);
@@ -439,6 +446,7 @@ export async function generateNote(
         templateSystemPrompt,
         examples,
         skeleton,
+        additionalContext,
       );
     } catch (err) {
       logger.error(`[pipeline] section ${leaf.id} failed:`, err);
@@ -463,21 +471,17 @@ export async function generateNote(
       order.push(result.id);
       final.set(result.id, result);
       if (onSection) await onSection(result);
-      continue;
+      return;
     }
 
     // Critic enabled: emit the draft right away so the UI streams,
-    // then run the critic in the background. When it finishes, run
-    // reconcilers on the critic output and emit the updated section.
+    // then run the critic in the background.
     order.push(draft.id);
     final.set(draft.id, draft);
     if (onSection) await onSection(draft);
 
     const criticPromise = (async () => {
       try {
-        // runCriticAndReconcilers is the single authority: it runs the
-        // critic (when enabled), the structural-vital guard, and the
-        // reconcilers. Whatever it returns IS the final content.
         const corrected = await runCriticAndReconcilers({
           draftContent: draft.content,
           source,
@@ -499,9 +503,6 @@ export async function generateNote(
         }
       } catch (err) {
         logger.error(`[pipeline] critic (bg) failed for ${leaf.id}:`, err);
-        // Critic path failed — fall back to reconcilers-only on the
-        // draft so the UI isn't stuck with uncorrected content a
-        // deterministic reconciler could have fixed.
         try {
           const finalContent = applyReconcilers(
             draft.content,
@@ -526,6 +527,31 @@ export async function generateNote(
       }
     })();
     criticPromises.push(criticPromise);
+  };
+
+  // Render non-conclusion sections (runs in parallel with ICD suggester)
+  for (const leaf of nonConclusionLeaves) {
+    await renderLeaf(leaf);
+  }
+
+  // Conclusion is deterministic — format ICD suggestions, no LLM call.
+  if (conclusionLeaves.length > 0) {
+    let icdCodes: SuggestedIcdCode[] = [];
+    if (icdSuggestionsPromise) {
+      try {
+        icdCodes = await icdSuggestionsPromise;
+      } catch (err) {
+        logger.error("[pipeline] ICD suggester failed for conclusion:", err);
+      }
+    }
+    const content = formatConclusionContent(icdCodes);
+    for (const leaf of conclusionLeaves) {
+      const title = resolveLabel(leaf, language4);
+      const result: RenderedSection = { id: leaf.id, title, content };
+      order.push(result.id);
+      final.set(result.id, result);
+      if (onSection) await onSection(result);
+    }
   }
 
   await Promise.all(criticPromises);
@@ -537,9 +563,27 @@ export async function generateNote(
 }
 
 /**
+ * Deterministic conclusion formatter. Takes ICD suggestions from the
+ * suggester and returns canonical descriptions joined by `<br>`.
+ *
+ * Uses `<br>` (not `\n`) so both `contentToEditorHtml` and
+ * `renderContent` keep everything in a single `<p>` — producing
+ * shift+enter-style tight line breaks. Separate `<p>` tags create
+ * paragraph gaps that are impossible to remove in NIS (hospital
+ * information systems).
+ *
+ * Only high/medium confidence codes.
+ * No ICD code numbers — those live exclusively in the right-side panel.
+ */
+export function formatConclusionContent(codes: SuggestedIcdCode[]): string {
+  const relevant = codes.filter((c) => c.confidence !== "low");
+  if (relevant.length === 0) return "";
+  return relevant.map((c) => c.description).join("<br>");
+}
+
+/**
  * Run critic (if applicable) + reconcilers on a piece of section
- * content. Exported for the route to use on the Záver slot (fed by the
- * ICD suggester). Returns the final corrected content. Never throws —
+ * content. Returns the final corrected content. Never throws —
  * falls back to draft-plus-reconcilers on critic failure.
  */
 export async function runCriticAndReconcilers(args: {

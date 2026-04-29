@@ -2,7 +2,7 @@
  * Adjust-specific utilities — extracted from adjust/route.ts.
  *
  * Contains the vital-group expansion logic, label folding, and the
- * Záver re-run decision, plus the router's section collector.
+ * router's section collector.
  */
 import type { Template, TemplateSection } from "@/lib/templates/types";
 
@@ -78,34 +78,6 @@ export function collectLeafSectionsForRouter(
   };
   walk(template.sections);
   return out;
-}
-
-// ── Záver re-run decision ────────────────────────────────────────
-
-/**
- * Decide whether the Záver section should be re-run after an adjust.
- *
- * Re-runs when:
- * - The Záver section itself is in the affected set, OR
- * - Any diagnosis-affecting section (OA, TO, anamneza, HPI, PMH) is affected.
- */
-export function shouldRerunZaver(
-  zaver: { id: string } | null | undefined,
-  affectedSet: Set<string>,
-  template: Template,
-  sectionLabels: Record<string, string>,
-): boolean {
-  if (!zaver) return false;
-  if (affectedSet.has(zaver.id)) return true;
-
-  const leafSections = collectLeafSectionsForRouter(template, sectionLabels);
-  return leafSections.some(
-    (s) =>
-      affectedSet.has(s.id) &&
-      /^(oa|osobna|past\s+medical|pmh|to|terajsie|hpi|history|anamneza)/i.test(
-        s.id + " " + s.label,
-      ),
-  );
 }
 
 // ── Vital-group expansion ────────────────────────────────────────
