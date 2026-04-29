@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -8,6 +9,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Delete01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/shared/button";
 import { cn } from "@/lib/utils";
+import { SectionFeedbackRow } from "./section-feedback-row";
 
 interface SubsectionData {
   id: string;
@@ -27,6 +29,12 @@ interface NoteSectionCardProps {
   autoFocusId?: string | null;
   /** Called after auto-focus completes, so the parent can clear the state */
   onAutoFocused?: () => void;
+  /** Feedback rating for this section */
+  feedbackRating?: "up" | "down" | null;
+  /** Called when user clicks thumbs-up */
+  onThumbsUp?: () => void;
+  /** Called when user clicks thumbs-down */
+  onThumbsDown?: () => void;
 }
 
 /** Matches bullet-style list lines: - , • , – , — , *  (with optional leading whitespace) */
@@ -186,8 +194,13 @@ export function NoteSectionCard({
   onRemove,
   autoFocusId,
   onAutoFocused,
+  feedbackRating,
+  onThumbsUp,
+  onThumbsDown,
 }: NoteSectionCardProps) {
+  const tDetail = useTranslations("encounters.detail");
   const isReadOnly = !onContentChange;
+  const showFeedback = onThumbsUp && onThumbsDown;
 
   return (
     <div
@@ -241,6 +254,19 @@ export function NoteSectionCard({
             />
           </div>
         ))}
+
+        {showFeedback && (
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-foreground/65">
+              {tDetail("feedback.sectionLabel")}
+            </span>
+            <SectionFeedbackRow
+              rating={feedbackRating ?? null}
+              onThumbsUp={onThumbsUp}
+              onThumbsDown={onThumbsDown}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

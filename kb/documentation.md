@@ -4,7 +4,11 @@ _Last updated: 2026-04-29_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
-## What's new (2026-04-28)
+## What's new (2026-04-29)
+
+- **Doctor feedback loops (Phase 1+2)** — `section_feedback` table + RLS, `GET/POST /api/encounters/[id]/feedback` routes, per-section and global thumbs-up/down UI with category modal, sonner toast, mobile-responsive layout. 12 new tests.
+
+## Previous (2026-04-28)
 
 - **Pipeline consolidation** — 3 route handlers collapsed to 2 (`/api/generate` + `/api/adjust`); `/api/regenerate` deleted (absorbed into `/api/generate` cached mode). Shared orchestration extracted into `web/src/lib/pipeline/` (resolve-source, session, persist, adjust-helpers). 41 new tests.
 - **God hook decomposed** — the 1,436-line `use-encounter-generation.ts` split into 3 focused hooks: `use-doctor-notes.ts` (auto-save), `use-generation-stream.ts` (SSE streaming), `use-pre-generation.ts` (recording finalization + transcription). The coordinator hook composes them (~430 lines).
@@ -150,6 +154,7 @@ When the doctor hits **Generate**:
 - Doctor can:
   - **Edit sections inline** — changes saved via the editing hook
   - **Edit metadata** — title, patient name/ID, visit type
+  - **Rate sections** — thumbs-up/down per section and global; thumbs-down opens category modal (hallucination, missing-info, wrong-section, style, medical-accuracy, redundant, other) + optional detail text
   - **Regenerate** — full pipeline re-run, or fast reformat if only template changed
   - **Finalize** → status becomes `"finalized"`
   - **Export** — PDF or email dispatch via Resend
@@ -157,6 +162,9 @@ When the doctor hits **Generate**:
 **Key files:**
 
 - [web/src/components/encounters/hooks/use-section-editing.ts](web/src/components/encounters/hooks/use-section-editing.ts) — inline section editing
+- [web/src/components/encounters/hooks/use-feedback.ts](web/src/components/encounters/hooks/use-feedback.ts) — feedback submission + rating state
+- [web/src/components/encounters/section-feedback-row.tsx](web/src/components/encounters/section-feedback-row.tsx) — thumbs-up/down buttons
+- [web/src/components/encounters/feedback-modal.tsx](web/src/components/encounters/feedback-modal.tsx) — category picker modal for thumbs-down
 - [web/src/lib/email/send-note-email.ts](web/src/lib/email/send-note-email.ts) — email dispatch
 
 ---
@@ -354,6 +362,7 @@ All metadata writes go through atomic `merge_visit_metadata` RPC (JSONB `||` mer
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `templates`         | User-defined templates with i18n, style guide, usage tracking                                                                                                                                                                               |
 | `api_usage`         | Per-call token/cost log; aggregated via SQL RPCs (`aggregate_usage_by_user`, `aggregate_usage_by_visit`, `get_dashboard_usage_totals`, `aggregate_usage_by_model`, `aggregate_usage_by_operation`) to avoid Supabase 1000-row default limit |
+| `section_feedback`  | Doctor thumbs-up/down ratings per note section (or global). Tracks categories, detail text, clean streak, and resolution. RLS: owner-only. Indexes for active negative lookup, per-user listing, and per-visit UI restore                    |
 | `audit_logs`        | User-action audit trail                                                                                                                                                                                                                     |
 | `transcript_chunks` | Inert legacy chunk + embedding store. No application code reads or writes it; pgvector extension + table + `match_chunks` RPC remain available as primitives for future retrieval work                                                      |
 
@@ -432,6 +441,7 @@ Separate Next.js app at `admin/`:
 - `GET/PATCH/DELETE /api/encounters/[id]` — read / update / delete
 - `POST /api/encounters/[id]/files` — file upload
 - `POST /api/encounters/[id]/extract` — trigger text extraction
+- `GET/POST /api/encounters/[id]/feedback` — list / submit section feedback (thumbs-up/down with categories)
 
 ### Generation
 
@@ -488,7 +498,7 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ## 18. Testing
 
-- **739+ tests** across utilities, hooks, pipeline modules, and parsers
+- **760+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
 - A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections

@@ -195,6 +195,27 @@
         "confirmCheckbox": "By proceeding, I confirm that I have obtained the patient's consent to record this consultation.",
         "iConsent": "I Consent",
         "cancel": "Cancel"
+      },
+      "feedback": {
+        "globalLabel": "Overall rating",
+        "sectionLabel": "Section rating",
+        "modalTitleSection": "What's wrong with {section}?",
+        "modalTitleGlobal": "What's wrong with this note?",
+        "modalDescription": "Select categories and optionally describe the issue",
+        "category": {
+          "hallucination": "Hallucination",
+          "missing-info": "Missing info",
+          "wrong-section": "Wrong section",
+          "style": "Style",
+          "medical-accuracy": "Medical accuracy",
+          "redundant": "Redundant",
+          "other": "Other"
+        },
+        "detailPlaceholder": "Describe the issue (optional)...",
+        "cancel": "Cancel",
+        "submit": "Submit",
+        "toastTitle": "Thank you for your feedback",
+        "toastDescription": "Your feedback helps improve the quality of generated notes."
       }
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",

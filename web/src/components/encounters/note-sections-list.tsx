@@ -20,6 +20,12 @@ interface NoteSectionsListProps {
   focusSectionId: string | null;
   onAutoFocused: () => void;
   noNoteLabel: string;
+  /** Feedback rating lookup (null = no rating yet) */
+  getFeedbackRating?: (sectionId: string) => "up" | "down" | null;
+  /** Thumbs-up handler per section */
+  onSectionThumbsUp?: (sectionId: string) => void;
+  /** Thumbs-down handler per section */
+  onSectionThumbsDown?: (sectionId: string) => void;
 }
 
 /**
@@ -42,6 +48,9 @@ export function NoteSectionsList({
   focusSectionId,
   onAutoFocused,
   noNoteLabel,
+  getFeedbackRating,
+  onSectionThumbsUp,
+  onSectionThumbsDown,
 }: NoteSectionsListProps) {
   const isActivelyStreaming = isRegenerating || isStreamingGeneration;
 
@@ -184,6 +193,17 @@ export function NoteSectionsList({
               onRemove={onRemoveSection}
               autoFocusId={focusSectionId}
               onAutoFocused={onAutoFocused}
+              feedbackRating={getFeedbackRating?.(section.id) ?? null}
+              onThumbsUp={
+                onSectionThumbsUp
+                  ? () => onSectionThumbsUp(section.id)
+                  : undefined
+              }
+              onThumbsDown={
+                onSectionThumbsDown
+                  ? () => onSectionThumbsDown(section.id)
+                  : undefined
+              }
             />
           ))}
       </>

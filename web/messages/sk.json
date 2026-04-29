@@ -195,6 +195,27 @@
         "confirmCheckbox": "Týmto potvrdzujem, že som získal súhlas pacienta na nahratie tejto konzultácie.",
         "iConsent": "Súhlasím",
         "cancel": "Zrušiť"
+      },
+      "feedback": {
+        "globalLabel": "Celkové hodnotenie",
+        "sectionLabel": "Hodnotenie sekcie",
+        "modalTitleSection": "Čo je zlé v sekcii {section}?",
+        "modalTitleGlobal": "Čo je zlé na tejto správe?",
+        "modalDescription": "Vyberte kategórie a prípadne opíšte problém",
+        "category": {
+          "hallucination": "Halucinácia",
+          "missing-info": "Chýbajúce informácie",
+          "wrong-section": "Nesprávna sekcia",
+          "style": "Štýl",
+          "medical-accuracy": "Medicínska presnosť",
+          "redundant": "Redundantné",
+          "other": "Iné"
+        },
+        "detailPlaceholder": "Opíšte problém (nepovinné)...",
+        "cancel": "Zrušiť",
+        "submit": "Odoslať",
+        "toastTitle": "Ďakujeme za spätnú väzbu",
+        "toastDescription": "Vaša spätná väzba pomáha zlepšovať kvalitu generovaných správ."
       }
     },
     "insufficientContext": "Nedostatok klinických informácií na vygenerovanie záznamu. Nahrajte konzultáciu, pridajte poznámky s klinickými detailmi alebo nahrajte relevantné súbory.",
