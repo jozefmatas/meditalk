@@ -1,12 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type {
-  Encounter,
-  EncounterListResponse,
-  EncounterStatus,
-} from "@/lib/types";
+import type { Encounter, EncounterListResponse } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
+import { emit, on } from "@/lib/events";
+import { patchEncounter } from "@/lib/encounters/api";
 
 const SIDEBAR_LIMIT = 20;
 
@@ -105,14 +103,7 @@ export function useSidebarEncounters() {
   // Live-update a visit when the detail page changes title or status,
   // and add new encounters when created via sidebar-refresh
   useEffect(() => {
-    const handleUpdate = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{
-          id: string;
-          title?: string | null;
-          status?: EncounterStatus;
-        }>
-      ).detail;
+    const cleanupUpdate = on("encounter-update", (detail) => {
       setVisits((prev) =>
         prev.map((v) => {
           if (v.id !== detail.id) return v;
@@ -122,9 +113,8 @@ export function useSidebarEncounters() {
           return updated;
         }),
       );
-    };
-    const handleRefresh = (e: Event) => {
-      const { encounter } = (e as CustomEvent<{ encounter: Encounter }>).detail;
+    });
+    const cleanupRefresh = on("sidebar-refresh", ({ encounter }) => {
       const normalized = normalizeEncounters([encounter])[0];
       setVisits((prev) => {
         // Avoid duplicates (e.g. if the event fires twice)
@@ -132,12 +122,10 @@ export function useSidebarEncounters() {
         return [normalized, ...prev];
       });
       setTotal((prev) => prev + 1);
-    };
-    window.addEventListener("encounter-update", handleUpdate);
-    window.addEventListener("sidebar-refresh", handleRefresh);
+    });
     return () => {
-      window.removeEventListener("encounter-update", handleUpdate);
-      window.removeEventListener("sidebar-refresh", handleRefresh);
+      cleanupUpdate();
+      cleanupRefresh();
     };
   }, [setVisits, setTotal]);
 
@@ -155,9 +143,7 @@ export function useSidebarEncounters() {
       setVisits((prev) => prev.filter((v) => v.id !== visitId));
       setTotal((prev) => prev - 1);
       // Notify detail page so it can navigate to the encounters list
-      window.dispatchEvent(
-        new CustomEvent("encounter-delete", { detail: { id: visitId } }),
-      );
+      emit("encounter-delete", { id: visitId });
 
       try {
         const res = await fetch(`/api/encounters/${visitId}`, {
@@ -183,20 +169,10 @@ export function useSidebarEncounters() {
         ),
       );
       // Notify detail page so it can update its local state
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "completed" },
-        }),
-      );
+      emit("encounter-update", { id: visitId, status: "completed" });
 
-      try {
-        const res = await fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "completed" }),
-        });
-        if (!res.ok) throw new Error("Failed to update");
-      } catch {
+      const res = await patchEncounter(visitId, { status: "completed" });
+      if (!res?.ok) {
         fetchVisits(1);
       }
     },

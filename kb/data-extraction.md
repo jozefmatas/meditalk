@@ -1,6 +1,6 @@
 # MediTalk Data Extraction
 
-_Last updated: 2026-04-23_
+_Last updated: 2026-04-28_
 
 How raw clinical data (audio, files, doctor notes) gets into the system before the generation pipeline takes over. For the pipeline itself, see [prompt-pipeline.md](prompt-pipeline.md).
 
@@ -10,7 +10,7 @@ How raw clinical data (audio, files, doctor notes) gets into the system before t
   - **Actual** (default): file represents today's data (ambulance readings, fresh results). Whole file text feeds the pipeline. No `context` stored.
   - **Past**: file is historical. User MUST type what to distill from it (required to save). The typed directive is stored as `FileMetadata.context`.
 - **File-focus pre-filter** — [`sections/file-focus.ts`](../web/src/lib/sections/file-focus.ts). When a file has a non-empty `context`, a Haiku extraction pass runs BEFORE any section agent or the ICD suggester reads the source. Returns only the verbatim passages that match the directive.
-- **Cache** — `visit.metadata.file_focus_cache: { [fileId]: { textHash, directive, output } }`. Unchanged `(fileId, textHash, directive)` tuples short-circuit the Haiku call. Wired into `/api/generate`, `/api/regenerate`, `/api/adjust`.
+- **Cache** — `visit.metadata.file_focus_cache: { [fileId]: { textHash, directive, output } }`. Unchanged `(fileId, textHash, directive)` tuples short-circuit the Haiku call. Wired into `pipeline/session.ts` (shared by `/api/generate` and `/api/adjust`).
 - **Race fix in `handleContextSave`** — when the user saves the dialog, the client now re-fetches the server's current `metadata.files` before patching, merges only the `context` field, and only then PATCHes. Prevents stale client snapshots from overwriting a just-completed `extracted_text` / `extraction_status: completed`.
 
 ---
@@ -87,7 +87,7 @@ The server downloads and transcribes `audioPath`, then **prepends** it to `trans
 
 **Pause-time transcription on native:** When recording is paused on native, the cumulative blob is uploaded to storage. Transcription uses `transcribeFromPath` (storage path -> server-side download) instead of `transcribeBlob` (FormData) to bypass Vercel's 4.5 MB body limit — native WAV recordings at 16 kHz can be 25+ MB. Web recordings use `transcribeBlob` since compressed webm/m4a blobs are typically small enough.
 
-**Server-side audio recovery:** The `/api/generate` route (`maxDuration: 800`) independently resolves an effective audio path from three sources (in priority order): (1) client-provided `audioPath`, (2) `metadata.generation_pending.audioPath`, (3) `metadata.recording_session.audioPath`. This belt-and-suspenders approach ensures recovery works even when the client fails to pass the path. Recovery transcription includes **2 retries** (3 attempts total) with exponential backoff (3s, 6s, 9s) for transient failures (download errors, ElevenLabs timeouts, empty transcriptions).
+**Server-side audio recovery:** The `resolveSource()` function in [`pipeline/resolve-source.ts`](../web/src/lib/pipeline/resolve-source.ts) independently resolves an effective audio path from three sources (in priority order): (1) client-provided `audioPath`, (2) `metadata.generation_pending.audioPath`, (3) `metadata.recording_session.audioPath`. This belt-and-suspenders approach ensures recovery works even when the client fails to pass the path. Recovery transcription includes **2 retries** (3 attempts total) with exponential backoff (3s, 6s, 9s) for transient failures (download errors, ElevenLabs timeouts, empty transcriptions).
 
 **Double-transcription guard:** Recovery audio transcription is only entered when: (1) the client explicitly passed `audioPath` (e.g. client transcription failed, or restored session prepend), OR (2) there is no `transcriptText` yet (full recovery needed). When the client already sent `transcriptText` (successful client-side batch transcription) AND did NOT pass `audioPath`, recovery is **skipped** — the `pendingAudioPath`/`sessionAudioPath` in metadata is the same blob the client already transcribed via `/api/batch-transcribe`, and re-transcribing it would double the transcript. The guard condition: `if (effectiveAudioPath && (audioPath || !transcriptText))`.
 
@@ -140,7 +140,7 @@ All OCR calls are pinned to `temperature: 0` so the same image/PDF always extrac
 Two routes invoke the extractor:
 
 1. **Background extraction** at [web/src/app/api/encounters/[encounterId]/extract/route.ts](web/src/app/api/encounters/[encounterId]/extract/route.ts). Triggered right after upload (with a single client-side retry after 2s on failure). Atomically flips `extraction_status` to `"extracting"` (and sets `extraction_started_at`) before the expensive call so concurrent requests can't double-extract. Uses the RPC in [20260401120753_atomic_file_status_update.sql](web/supabase/migrations/20260401120753_atomic_file_status_update.sql). The final status-update RPC is wrapped in a **3-attempt retry with backoff** (500ms/1s/2s) — losing extracted text after a successful OCR call is expensive, so we try hard to persist it. On total failure, the text length is logged at error level for audit recovery. On success, the client dispatches an `extraction-complete` CustomEvent. The encounter page debounces this event (500ms) to batch multiple rapid extractions into a single `refreshEncounter()` call.
-2. **On-demand inside generate** at [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts). If a file arrives at generate-time with `extraction_status !== "completed"`, it's extracted inline. **Stuck extraction recovery:** before the extraction wait loop, any file with `extraction_status === "extracting"` and `extraction_started_at` older than 5 minutes (from `EXTRACTION_STUCK_THRESHOLD_MS`) is reset to `"failed"` (and `extraction_started_at` cleared) so it enters the retry path with a fresh timestamp. The wait loop polls every 500ms for up to 60s (from shared constants). Failures are collected into `extractionErrors` and reported alongside the generation response — they do _not_ kill the pipeline. The inline extraction uses a single `extractFileText` call per file (audio files receive `transcriptText` as a shortcut); duplicated audio/non-audio paths were eliminated.
+2. **On-demand inside source resolution** at [`pipeline/resolve-source.ts`](../web/src/lib/pipeline/resolve-source.ts). If a file arrives at generate-time with `extraction_status !== "completed"`, it's extracted inline. **Stuck extraction recovery:** before the extraction wait loop, any file with `extraction_status === "extracting"` and `extraction_started_at` older than 5 minutes (from `EXTRACTION_STUCK_THRESHOLD_MS`) is reset to `"failed"` (and `extraction_started_at` cleared) so it enters the retry path with a fresh timestamp. The wait loop polls every 500ms for up to 60s (from shared constants). Failures are collected into `extractionErrors` and reported alongside the generation response — they do _not_ kill the pipeline. The inline extraction uses a single `extractFileText` call per file (audio files receive `transcriptText` as a shortcut); duplicated audio/non-audio paths were eliminated.
 
 ### 2.4 Handoff to generation
 
@@ -223,22 +223,22 @@ Admin has a slim clone at [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.t
 
 ## 5. Edge Cases & Recovery
 
-| Scenario                                                            | Resolution                                                                                                           |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Safari recording `audio/mp4` but upload filename says `.webm`       | `blobMimeToExt()` derives filename from blob's actual MIME type; server fallback is `.m4a`                           |
-| `requestData()` corrupting mp4 container on Safari iOS              | `requestData()` skipped on mp4 — `pause()` calls `recorder.pause()` directly; all data in one clean blob on `stop()` |
-| `getSupportedMimeType()` returning `""` on exotic browsers          | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`                                  |
-| Long recordings (>4.5 MB) failing transcription (Vercel body limit) | Blob uploaded to storage first; `transcribeFromPath` sends storage path via JSON — server downloads directly         |
-| ElevenLabs SDK timeout on long recordings                           | SDK `timeoutInSeconds` set to 600 (default was 60). Server `maxDuration` 600s (batch-transcribe) / 800s (generate)   |
-| Native foreground-service teardown disrupting WebView network       | `audioRecoveryPath = uploadedPath` safety net — server downloads and transcribes from storage                        |
-| Server-side recovery re-transcribing already-transcribed audio      | Double-transcription guard: skips when client sent `transcriptText` without `audioPath`                              |
-| File context save racing with generation (directive lost)           | `pendingContextSaves` Map + `awaitPendingContextSave()` before `/api/generate`                                       |
-| Doctor notes auto-save failing silently                             | `useSaveStatus` hook with visual indicator + single retry after 3s                                                   |
-| File extraction getting stuck (server crash mid-extraction)         | Generate route resets files stuck in `"extracting"` > 5 min to `"failed"` for retry                                  |
-| Extract RPC failing after successful OCR (lost extracted text)      | 3-attempt retry with backoff (500ms/1s/2s) on the final status update RPC                                            |
-| Client-side transcription failing on network hiccup                 | Both `transcribeBlob` and `transcribeFromPath` retry twice (3 attempts) with exponential backoff (3s, 6s)            |
-| Supabase storage download failing in batch-transcribe               | 3-attempt retry with exponential backoff (3s, 6s) on storage `.download()` call                                      |
-| Multiple files finishing extraction at once (redundant refreshes)   | 500ms debounce on `extraction-complete` event handler batches into single `refreshEncounter()`                       |
+| Scenario                                                            | Resolution                                                                                                                                                        |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Safari recording `audio/mp4` but upload filename says `.webm`       | `blobMimeToExt()` derives filename from blob's actual MIME type; server fallback is `.m4a`                                                                        |
+| `requestData()` corrupting mp4 container on Safari iOS              | `requestData()` skipped on mp4 — `pause()` calls `recorder.pause()` directly; all data in one clean blob on `stop()`                                              |
+| `getSupportedMimeType()` returning `""` on exotic browsers          | Fallback returns `"audio/mp4"` instead of empty string to avoid `NotSupportedError`                                                                               |
+| Long recordings (>4.5 MB) failing transcription (Vercel body limit) | Blob uploaded to storage first; `transcribeFromPath` sends storage path via JSON — server downloads directly                                                      |
+| ElevenLabs SDK timeout on long recordings                           | SDK `timeoutInSeconds` set to 600 (default was 60). Server `maxDuration` 600s (batch-transcribe) / 800s (generate)                                                |
+| Native foreground-service teardown disrupting WebView network       | `audioRecoveryPath = uploadedPath` safety net — server downloads and transcribes from storage                                                                     |
+| Server-side recovery re-transcribing already-transcribed audio      | Double-transcription guard: skips when client sent `transcriptText` without `audioPath`                                                                           |
+| File context save racing with generation (directive lost)           | `pendingContextSaves` Map + `awaitPendingContextSave()` before `/api/generate`                                                                                    |
+| Doctor notes auto-save failing silently                             | `useSaveStatus` hook with visual indicator + single retry after 3s                                                                                                |
+| File extraction getting stuck (server crash mid-extraction)         | Generate route resets files stuck in `"extracting"` > 5 min to `"failed"` for retry                                                                               |
+| Extract RPC failing after successful OCR (lost extracted text)      | 3-attempt retry with backoff (500ms/1s/2s) on the final status update RPC                                                                                         |
+| Client-side transcription failing on network hiccup                 | Both `transcribeBlob` and `transcribeFromPath` retry twice (3 attempts) with exponential backoff (3s, 6s)                                                         |
+| Supabase storage download failing in batch-transcribe               | 3-attempt retry with exponential backoff (3s, 6s) on storage `.download()` call                                                                                   |
+| Multiple files finishing extraction at once (redundant refreshes)   | 500ms debounce on `extraction-complete` event handler batches into single `refreshEncounter()`                                                                    |
 | Transcription misspelling medication names                          | `drug-normalizer` reconciler auto-corrects via `correctMedicationBaseName` (Levenshtein fuzzy match against medication CSV) after the critic pass, on LA sections |
 
 ---

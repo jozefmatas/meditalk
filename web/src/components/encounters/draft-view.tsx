@@ -16,10 +16,8 @@ import {
   type RecordingBarRef,
 } from "@/components/encounters/recording-bar";
 import { TemplateSidebar } from "@/components/encounters/template-sidebar";
-import {
-  FilesContent,
-  type EncounterFile,
-} from "@/components/encounters/files-panel";
+import { FilesContent } from "@/components/encounters/files-panel";
+import type { EncounterFile } from "@/lib/encounters/file-state";
 import {
   TiptapEditor,
   type Editor,

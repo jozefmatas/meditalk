@@ -46,6 +46,7 @@ import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
 import type { SupportedLanguage } from "@/lib/types";
+import { patchEncounter } from "@/lib/encounters/api";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -227,18 +228,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           encounterId: visitId,
         });
 
-        await fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            metadata: {
-              recording_session: {
-                state: "paused",
-                durationAtPause: durationOffset + recorderRef.current.duration,
-                audioPath: path,
-              } satisfies RecordingSession,
-            },
-          }),
+        await patchEncounter(visitId, {
+          metadata: {
+            recording_session: {
+              state: "paused",
+              durationAtPause: durationOffset + recorderRef.current.duration,
+              audioPath: path,
+            } satisfies RecordingSession,
+          },
         });
 
         logger.debug(`[recording] Blob uploaded at pause: ${path}`);
@@ -260,12 +257,10 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           transcribePromise
             .then((text) => {
               if (!text) return;
-              fetch(`/api/encounters/${visitId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ metadata: { transcript: text } }),
-              }).catch(() => {
-                toast.error(t("transcriptSaveFailed"));
+              patchEncounter(visitId, {
+                metadata: { transcript: text },
+              }).then((res) => {
+                if (!res?.ok) toast.error(t("transcriptSaveFailed"));
               });
               logger.debug(
                 `[recording] Pause-time transcription saved: ${text.length} chars`,

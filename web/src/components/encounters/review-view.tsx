@@ -68,13 +68,13 @@ interface ReviewViewProps {
   onRetry?: () => void;
   // Adjust
   visitId?: string;
-  files?: import("@/components/encounters/files-panel").EncounterFile[];
+  files?: import("@/lib/encounters/file-state").EncounterFile[];
   onFilesChange?: (
     files:
-      | import("@/components/encounters/files-panel").EncounterFile[]
+      | import("@/lib/encounters/file-state").EncounterFile[]
       | ((
-          prev: import("@/components/encounters/files-panel").EncounterFile[],
-        ) => import("@/components/encounters/files-panel").EncounterFile[]),
+          prev: import("@/lib/encounters/file-state").EncounterFile[],
+        ) => import("@/lib/encounters/file-state").EncounterFile[]),
   ) => void;
   generationLanguage?: import("@/lib/types").SupportedLanguage;
   onLanguageChange?: (lang: import("@/lib/types").SupportedLanguage) => void;

@@ -5,6 +5,7 @@ import type { Encounter } from "@/lib/types";
 import type { Template } from "@/lib/templates";
 import { parseNoteToSectionMap } from "@/lib/parse-note-sections";
 import { buildTemplateHtml } from "@/lib/templates/html";
+import { patchEncounter } from "@/lib/encounters/api";
 
 interface UseSectionEditingOptions {
   visitId: string;
@@ -77,17 +78,11 @@ export function useSectionEditing({
           if (!removed.has(id)) filtered[id] = text;
         }
         const html = buildTemplateHtml(template, filtered, sectionLabels);
-        try {
-          await fetch(`/api/encounters/${visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ encounter_note: html }),
-          });
+        const res = await patchEncounter(visitId, { encounter_note: html });
+        if (res?.ok) {
           // Update local state so copy works with latest
           setGeneratedNoteHtml(html);
           setVisit((prev) => (prev ? { ...prev, encounter_note: html } : prev));
-        } catch {
-          // Silent fail
         }
       }, 2000);
     },

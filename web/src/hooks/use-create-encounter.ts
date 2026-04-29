@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import { useLocalizedHref } from "@/hooks/use-localized-href";
+import { emit } from "@/lib/events";
 
 export function useCreateEncounter() {
   const router = useRouter();
@@ -32,9 +33,7 @@ export function useCreateEncounter() {
 
         const encounter = await res.json();
         // Notify sidebar to add the new encounter immediately
-        window.dispatchEvent(
-          new CustomEvent("sidebar-refresh", { detail: { encounter } }),
-        );
+        emit("sidebar-refresh", { encounter });
         router.push(getHref(`/encounters/${encounter.id}`));
       } catch {
         // Let the caller handle errors if needed, but don't block UI

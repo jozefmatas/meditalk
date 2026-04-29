@@ -36,11 +36,11 @@ import {
   RecordingBar,
   type RecordingBarRef,
 } from "@/components/encounters/recording-bar";
+import { FilesContent } from "@/components/encounters/files-panel";
 import {
-  FilesContent,
   hasUploadingFiles,
   type EncounterFile,
-} from "@/components/encounters/files-panel";
+} from "@/lib/encounters/file-state";
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SparklesIcon, Loading03Icon } from "@hugeicons/core-free-icons";

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { patchEncounterOrThrow } from "@/lib/encounters/api";
 
 interface RecordingConsentMetadata {
   recording_consent?: boolean;
@@ -32,20 +33,12 @@ export function useRecordingConsent(
   );
 
   const saveConsent = useCallback(async () => {
-    const response = await fetch(`/api/encounters/${visitId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        metadata: {
-          recording_consent: true,
-          recording_consent_date: new Date().toISOString(),
-        },
-      }),
+    await patchEncounterOrThrow(visitId, {
+      metadata: {
+        recording_consent: true,
+        recording_consent_date: new Date().toISOString(),
+      },
     });
-
-    if (!response.ok) {
-      throw new Error("Failed to save consent");
-    }
 
     setHasConsent(true);
     setShowConsentDialog(false);

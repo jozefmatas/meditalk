@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useSidebarEncounters, _resetCache } from "./use-sidebar-encounters";
 import type { Encounter, EncounterListResponse } from "@/lib/types";
+import { emit } from "@/lib/events";
 
 // No longer uses usePathname — sidebar fetches on mount only
 
@@ -200,11 +201,7 @@ describe("useSidebarEncounters", () => {
 
     const newEncounter = makeVisit({ title: "New encounter" });
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent("sidebar-refresh", {
-          detail: { encounter: newEncounter },
-        }),
-      );
+      emit("sidebar-refresh", { encounter: newEncounter });
     });
 
     expect(result.current.visits).toHaveLength(2);
@@ -228,11 +225,7 @@ describe("useSidebarEncounters", () => {
 
     // Dispatch sidebar-refresh with same encounter
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent("sidebar-refresh", {
-          detail: { encounter: existing },
-        }),
-      );
+      emit("sidebar-refresh", { encounter: existing });
     });
 
     // Should not duplicate

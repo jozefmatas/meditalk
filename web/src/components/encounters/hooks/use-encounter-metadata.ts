@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Encounter, EncounterType } from "@/lib/types";
+import { patchEncounter } from "@/lib/encounters/api";
 
 interface UseEncounterMetadataOptions {
   visitId: string;
@@ -30,17 +31,11 @@ export function useEncounterMetadata({
 
     if (Object.keys(updates).length === 0) return;
 
-    try {
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
+    const res = await patchEncounter(visitId, updates);
+    if (res?.ok) {
       setVisit((prev) =>
         prev ? ({ ...prev, ...updates } as Encounter) : prev,
       );
-    } catch {
-      // Silent fail
     }
   };
 
@@ -61,12 +56,8 @@ export function useEncounterMetadata({
 
     if (Object.keys(updates).length === 0) return;
 
-    try {
-      await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
+    const res = await patchEncounter(visitId, updates);
+    if (res?.ok) {
       setVisit((prev) => {
         if (!prev) return prev;
         // Merge metadata partial instead of replacing the whole object
@@ -77,8 +68,6 @@ export function useEncounterMetadata({
         }
         return merged;
       });
-    } catch {
-      // Silent fail
     }
   };
 

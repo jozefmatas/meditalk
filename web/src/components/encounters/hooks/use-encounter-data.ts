@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Encounter, EncounterStatus } from "@/lib/types";
-import type { EncounterFile } from "@/components/encounters/files-panel";
+import type { Encounter } from "@/lib/types";
+import type { EncounterFile } from "@/lib/encounters/file-state";
 import { GENERATION_STALE_THRESHOLD_MS } from "@/lib/extraction/constants";
+import { on } from "@/lib/events";
+import { patchEncounter } from "@/lib/encounters/api";
 import { logger } from "@/lib/logger";
 
 interface UseEncounterDataOptions {
@@ -69,11 +71,7 @@ export function useEncounterData({
             `[encounter-data] Auto-correcting status: recording → started (visit=${visitId})`,
           );
           data.status = "started";
-          fetch(`/api/encounters/${visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "started" }),
-          }).catch(() => {});
+          patchEncounter(visitId, { status: "started" });
         }
 
         // Processing: server-side generation may still be running
@@ -84,11 +82,7 @@ export function useEncounterData({
               `[encounter-data] Auto-correcting status: processing → to_review (note exists, visit=${visitId})`,
             );
             data.status = "to_review";
-            fetch(`/api/encounters/${visitId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ status: "to_review" }),
-            }).catch(() => {});
+            patchEncounter(visitId, { status: "to_review" });
           } else {
             // No note — check if the generation is stale (server died mid-flight).
             const meta = data.metadata as Record<string, unknown> | null;
@@ -103,11 +97,7 @@ export function useEncounterData({
                   `[encounter-data] Stale generation detected: processing → started (elapsed=${Math.round(elapsed / 1000)}s, visit=${visitId})`,
                 );
                 data.status = "started";
-                fetch(`/api/encounters/${visitId}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ status: "started" }),
-                }).catch(() => {});
+                patchEncounter(visitId, { status: "started" });
               }
             }
             // else: server may still be generating — keep "processing", polling hook will handle
@@ -120,11 +110,7 @@ export function useEncounterData({
             `[encounter-data] Auto-correcting status: started → to_review (note exists, visit=${visitId})`,
           );
           data.status = "to_review";
-          fetch(`/api/encounters/${visitId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "to_review" }),
-          }).catch(() => {});
+          patchEncounter(visitId, { status: "to_review" });
         }
         setVisit(data);
 
@@ -146,30 +132,21 @@ export function useEncounterData({
 
   // React to sidebar actions (delete, mark complete) on the current encounter
   useEffect(() => {
-    const handleDelete = (e: Event) => {
-      const { id } = (e as CustomEvent<{ id: string }>).detail;
+    const cleanupDelete = on("encounter-delete", ({ id }) => {
       if (id === visitId) {
         const base = locale === "sk" ? "" : `/${locale}`;
         router.push(base || "/");
       }
-    };
-    const handleUpdate = (e: Event) => {
-      const detail = (
-        e as CustomEvent<{
-          id: string;
-          status?: EncounterStatus;
-        }>
-      ).detail;
+    });
+    const cleanupUpdate = on("encounter-update", (detail) => {
       if (detail.id !== visitId) return;
       if (detail.status !== undefined) {
         setVisit((prev) => (prev ? { ...prev, status: detail.status! } : prev));
       }
-    };
-    window.addEventListener("encounter-delete", handleDelete);
-    window.addEventListener("encounter-update", handleUpdate);
+    });
     return () => {
-      window.removeEventListener("encounter-delete", handleDelete);
-      window.removeEventListener("encounter-update", handleUpdate);
+      cleanupDelete();
+      cleanupUpdate();
     };
   }, [visitId, router, locale]);
 

@@ -153,7 +153,7 @@
       "generatingEncounter": "Generating",
       "generatingReadyIn": "Ready in ~ {time}",
       "generatingInitializing": "Initializing...",
-      "stageEvaluating": "Evaluating...",
+      "stageEvaluating": "Preparing note...",
       "lessThanMinute": "< 1 min",
       "minutesRemaining": "{minutes} min",
       "regenerating": "Regenerating note...",

@@ -1,10 +1,10 @@
 # MediTalk Prompt Pipeline — Deep Dive
 
-_Last updated: 2026-04-24 (Provider abstraction: 6 pipeline call sites now route through `web/src/lib/models/` with Anthropic defaults; env overrides route any call to Vertex Gemini 3.1. Anthropic tool-use on critic / suggester / adjust-router / file-focus / note-skeleton; section-agent stays on free-text prose.)_
+_Last updated: 2026-04-28 (Pipeline consolidation: 3 routes collapsed to 2; shared orchestration in `web/src/lib/pipeline/`; god hook decomposed into 3 focused hooks; 41 new tests.)_
 
 How raw clinical data becomes a structured medical note. For data intake (recording, transcription, file upload, doctor notes), see [data-extraction.md](data-extraction.md).
 
-Read this before touching anything in [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts), [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts), [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts), [web/src/lib/sections/](../web/src/lib/sections/), or [web/src/lib/lookup/](../web/src/lib/lookup/).
+Read this before touching anything in [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts), [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts), [web/src/lib/pipeline/](../web/src/lib/pipeline/), [web/src/lib/sections/](../web/src/lib/sections/), or [web/src/lib/lookup/](../web/src/lib/lookup/).
 
 ---
 
@@ -53,45 +53,45 @@ This section answers the question: _"We ship sk + cardiology today. What do I up
 
 ### Auto-portable (no code change, no prompt tweak)
 
-| Surface | Why it's portable |
-|---|---|
-| Source-substring grounding (critic + suggester evidence validation) | Works on any UTF-8 text; diacritic-folded |
-| Tool-use schemas (`submit_corrected_section`, `submit_icd_candidates`, `select_affected_sections`, `submit_extracted_passages`) | Schema only, no locale in field shape |
-| `stripUngroundedVitalValue` (Pulz / TK / Výška / Hmotnosť / BMI / EKG guard) | Arabic digits only — language-agnostic |
-| `/api/adjust` router + file-focus filter | Model-level classification; no hardcoded language strings |
-| PHI scrub (patient name, phone, email) | Regex patterns are structurally locale-neutral (SK-specific rodné číslo is an edge addition) |
+| Surface                                                                                                                         | Why it's portable                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Source-substring grounding (critic + suggester evidence validation)                                                             | Works on any UTF-8 text; diacritic-folded                                                    |
+| Tool-use schemas (`submit_corrected_section`, `submit_icd_candidates`, `select_affected_sections`, `submit_extracted_passages`) | Schema only, no locale in field shape                                                        |
+| `stripUngroundedVitalValue` (Pulz / TK / Výška / Hmotnosť / BMI / EKG guard)                                                    | Arabic digits only — language-agnostic                                                       |
+| `/api/adjust` router + file-focus filter                                                                                        | Model-level classification; no hardcoded language strings                                    |
+| PHI scrub (patient name, phone, email)                                                                                          | Regex patterns are structurally locale-neutral (SK-specific rodné číslo is an edge addition) |
 
 ### Admin-editable per-template (no code change, but content work)
 
-| Surface | What to update |
-|---|---|
-| `section.context` — per-section clinical contract | Translate the contract; keep the OWNS / NEVER OWNS / FORMAT / LIMITS structure |
-| `template.systemPrompt` — template-wide guardrails | Translate worldview, abbreviation conventions, locale grammar rules |
-| `template.styleExamples` — voice corpus | Replace with locale's attending-note excerpts (style bible) |
-| `section.labels` — per-locale headings | Add the new locale key (sk / cs / en / …) to every section's `labels` map |
-| `section.model` — Haiku / Sonnet / Opus tier | Usually unchanged; bump to Sonnet if locale struggles on Haiku |
+| Surface                                            | What to update                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `section.context` — per-section clinical contract  | Translate the contract; keep the OWNS / NEVER OWNS / FORMAT / LIMITS structure |
+| `template.systemPrompt` — template-wide guardrails | Translate worldview, abbreviation conventions, locale grammar rules            |
+| `template.styleExamples` — voice corpus            | Replace with locale's attending-note excerpts (style bible)                    |
+| `section.labels` — per-locale headings             | Add the new locale key (sk / cs / en / …) to every section's `labels` map      |
+| `section.model` — Haiku / Sonnet / Opus tier       | Usually unchanged; bump to Sonnet if locale struggles on Haiku                 |
 
 All four live in `templates` table rows. Use `web/scripts/*.mjs` migration patterns to ship template changes.
 
 ### Hand-maintained (code change required)
 
-| Surface | File | What changes for a new locale | What changes for a new specialty |
-|---|---|---|---|
-| `isAbsenceDescription` regex patterns | [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts) | Add locale-specific "no data" phrasings (e.g. German "keine Angabe", French "non renseigné") | Usually none |
-| Critic prompt — paraphrase examples ("cukrovka → DM") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Add locale paraphrase pairs (German "Zucker → DM", French "sucre → DT") | Specialty-specific paraphrases if any |
-| Critic prompt — unfounded-denial examples ("Alkohol neguje", "Infekčné ochorenie neguje") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Translate denial patterns to target locale | Typically none — denials are cross-specialty |
-| Critic prompt — boilerplate traps ("Pacient pri vedomí", "Habitus štíhly") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts) | Locale's common boilerplate phrases | Specialty-specific exam boilerplate (e.g. neurology "reflexy sym. prítomné") |
-| Suggester prompt — ICD code knowledge (MI anatomy, F17.2, I48.0 specifics) | [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) | ICD codes are WHO-global; locale only affects description text | **Big specialty work**: add neurology / psychiatry / internal ICD traps and primary-code rules |
-| `LANGUAGE_LABEL` maps (`{ sk: "Slovak", ... }`) | `section-agent.ts`, `critic.ts`, `suggest-icd.ts`, `file-focus.ts`, `adjust-router.ts` | Add the new locale entry to all five maps | None |
-| `SupportedLanguage` type + `normalizeLanguage` | [`web/src/lib/types.ts`](../web/src/lib/types.ts), `pipeline.ts` | Add the new ISO code to the union | None |
-| `STRUCTURAL_VITAL_LABELS` + `EXAM_NARRATIVE_LABELS` (normalised label sets) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's label spellings (e.g. German "Größe", "Gewicht"; French "Taille", "Poids") | Add specialty-specific sections if they need the same voice-example skip treatment |
-| `ZAVER_LABELS` (recognised conclusion labels) | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts) | Add locale's "Assessment" / "Závěr" / "Fazit" / "Conclusion" variants | None |
-| ICD CSV lookup data | `web/src/lib/lookup/icd/*.csv` | Ship the locale's WHO ICD-10 CSV (SK, CS, EN already shipped) | None — codes are specialty-agnostic at the catalog level |
-| i18n message bundles | `web/messages/{sk,cs,en}.json` | Add new locale JSON | None |
-| Next-intl routing config | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Add new locale to `locales` list | None |
-| `next-intl` `localePrefix` strategy | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts) | Usually unchanged (`as-needed` works for any set) | None |
-| PHI scrub — locale-specific IDs (SK/CZ rodné číslo, German Versicherungsnummer, etc.) | [`web/src/lib/phi-scrub.ts`](../web/src/lib/phi-scrub.ts) | Add the locale's national ID regex + guards | None |
-| ElevenLabs Scribe transcription prompt hints | [`web/src/lib/elevenlabs.ts`](../web/src/lib/elevenlabs.ts) | The `language_code` param already accepts any locale Scribe supports — verify ISO-639 code | None |
+| Surface                                                                                   | File                                                                                   | What changes for a new locale                                                                | What changes for a new specialty                                                               |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `isAbsenceDescription` regex patterns                                                     | [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)    | Add locale-specific "no data" phrasings (e.g. German "keine Angabe", French "non renseigné") | Usually none                                                                                   |
+| Critic prompt — paraphrase examples ("cukrovka → DM")                                     | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                  | Add locale paraphrase pairs (German "Zucker → DM", French "sucre → DT")                      | Specialty-specific paraphrases if any                                                          |
+| Critic prompt — unfounded-denial examples ("Alkohol neguje", "Infekčné ochorenie neguje") | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                  | Translate denial patterns to target locale                                                   | Typically none — denials are cross-specialty                                                   |
+| Critic prompt — boilerplate traps ("Pacient pri vedomí", "Habitus štíhly")                | [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                  | Locale's common boilerplate phrases                                                          | Specialty-specific exam boilerplate (e.g. neurology "reflexy sym. prítomné")                   |
+| Suggester prompt — ICD code knowledge (MI anatomy, F17.2, I48.0 specifics)                | [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)        | ICD codes are WHO-global; locale only affects description text                               | **Big specialty work**: add neurology / psychiatry / internal ICD traps and primary-code rules |
+| `LANGUAGE_LABEL` maps (`{ sk: "Slovak", ... }`)                                           | `section-agent.ts`, `critic.ts`, `suggest-icd.ts`, `file-focus.ts`, `adjust-router.ts` | Add the new locale entry to all five maps                                                    | None                                                                                           |
+| `SupportedLanguage` type + `normalizeLanguage`                                            | [`web/src/lib/types.ts`](../web/src/lib/types.ts), `pipeline.ts`                       | Add the new ISO code to the union                                                            | None                                                                                           |
+| `STRUCTURAL_VITAL_LABELS` + `EXAM_NARRATIVE_LABELS` (normalised label sets)               | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)              | Add locale's label spellings (e.g. German "Größe", "Gewicht"; French "Taille", "Poids")      | Add specialty-specific sections if they need the same voice-example skip treatment             |
+| `ZAVER_LABELS` (recognised conclusion labels)                                             | [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)              | Add locale's "Assessment" / "Závěr" / "Fazit" / "Conclusion" variants                        | None                                                                                           |
+| ICD CSV lookup data                                                                       | `web/src/lib/lookup/icd/*.csv`                                                         | Ship the locale's WHO ICD-10 CSV (SK, CS, EN already shipped)                                | None — codes are specialty-agnostic at the catalog level                                       |
+| i18n message bundles                                                                      | `web/messages/{sk,cs,en}.json`                                                         | Add new locale JSON                                                                          | None                                                                                           |
+| Next-intl routing config                                                                  | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts)                                | Add new locale to `locales` list                                                             | None                                                                                           |
+| `next-intl` `localePrefix` strategy                                                       | [`web/src/i18n/routing.ts`](../web/src/i18n/routing.ts)                                | Usually unchanged (`as-needed` works for any set)                                            | None                                                                                           |
+| PHI scrub — locale-specific IDs (SK/CZ rodné číslo, German Versicherungsnummer, etc.)     | [`web/src/lib/phi-scrub.ts`](../web/src/lib/phi-scrub.ts)                              | Add the locale's national ID regex + guards                                                  | None                                                                                           |
+| ElevenLabs Scribe transcription prompt hints                                              | [`web/src/lib/elevenlabs.ts`](../web/src/lib/elevenlabs.ts)                            | The `language_code` param already accepts any locale Scribe supports — verify ISO-639 code   | None                                                                                           |
 
 ### Checklist — adding a new locale (e.g. `de`)
 
@@ -114,13 +114,13 @@ All four live in `templates` table rows. Use `web/scripts/*.mjs` migration patte
 
 ### Scoping the work
 
-| Task | Locale lift | Specialty lift |
-|---|---|---|
-| Code changes | ~8 files, ~200 lines | ~2 files, ~50 lines |
-| Clinician content | ~1-2 days prompt review + translation | ~1 day for ICD traps + boilerplate |
-| Template authoring | 1 template cloned + translated per specialty | 3-5 new templates per specialty |
-| Voice corpus curation | 10-20 attending notes per template | Same, per template |
-| Eval fixtures | 2-3 per locale | 2-3 per specialty |
+| Task                  | Locale lift                                  | Specialty lift                     |
+| --------------------- | -------------------------------------------- | ---------------------------------- |
+| Code changes          | ~8 files, ~200 lines                         | ~2 files, ~50 lines                |
+| Clinician content     | ~1-2 days prompt review + translation        | ~1 day for ICD traps + boilerplate |
+| Template authoring    | 1 template cloned + translated per specialty | 3-5 new templates per specialty    |
+| Voice corpus curation | 10-20 attending notes per template           | Same, per template                 |
+| Eval fixtures         | 2-3 per locale                               | 2-3 per specialty                  |
 
 The heaviest work is clinician review of prompt examples + template curation, not engineering. The code-side work is a half-day of plumbing.
 
@@ -165,7 +165,7 @@ Per section, three Haiku-era stages: RENDER → CRITIC (opt-in) → RECONCILERS.
                |          reconcilers[] run immediately after render
                |          single emit with final content
                |
-  Stage 3      Záver injection                      route (generate / regenerate)
+  Stage 3      Záver injection                      pipeline/session.ts
                -> formatZaverFromSuggestions(codes) → draft
                -> runCriticAndReconcilers(draft, source, zaver.context)
                     * critic pass when zaver.critic === true
@@ -197,32 +197,41 @@ Per-section flags on the template:
 
 ### Pipeline
 
-| File                                                                                              | Role                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)                         | Orchestrator. Walks template leaves in order, skips Záver (fed by suggester), per leaf: render → (critic, if enabled, in background) → reconcilers → emit. `findZaverSection` + `runCriticAndReconcilers` exported for the route's Záver path.         |
-| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)               | `renderSection` — one Anthropic call per section. System prompt: role + template worldview + corpus examples + section contract. User message: source with `# File: … (Doctor's focus: …)` when set. `isAbsenceDescription` safety net also lives here. |
-| [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                             | `criticPass` — second Haiku call per opt-in section. Input: source + draft + section.context. Output: corrected draft text. Preserves voice / ordering / connective tissue; removes invention; adds missed facts.                                      |
-| [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)                   | One-shot Haiku call: source → 10–15 CSV-validated ICD-10 candidates (ranked). Output powers BOTH the right-side "Navrhované kódy" panel AND the Záver section.                                                                                         |
-| [`web/src/lib/sections/format-zaver.ts`](../web/src/lib/sections/format-zaver.ts)                 | Deterministic formatter: `SuggestedIcdCode[]` → Záver line ("primary [differential], secondaries, …").                                                                                                                                                 |
-| [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)         | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                                                         |
-| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts)       | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                                                  |
-| [`web/src/lib/models/`](../web/src/lib/models/)                                                   | Provider abstraction. `resolve(callSite, tier)` returns a Provider that wraps Anthropic or Vertex Gemini. Default routes preserve Anthropic; env overrides (`MODEL_ROUTE_<CALL>_<TIER>`) swap individual calls without code changes. See §3. |
+| File                                                                                        | Role                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/lib/sections/pipeline.ts`](../web/src/lib/sections/pipeline.ts)                   | Orchestrator. Walks template leaves in order, skips Záver (fed by suggester), per leaf: render → (critic, if enabled, in background) → reconcilers → emit. `findZaverSection` + `runCriticAndReconcilers` exported for the route's Záver path.          |
+| [`web/src/lib/sections/section-agent.ts`](../web/src/lib/sections/section-agent.ts)         | `renderSection` — one Anthropic call per section. System prompt: role + template worldview + corpus examples + section contract. User message: source with `# File: … (Doctor's focus: …)` when set. `isAbsenceDescription` safety net also lives here. |
+| [`web/src/lib/sections/critic.ts`](../web/src/lib/sections/critic.ts)                       | `criticPass` — second Haiku call per opt-in section. Input: source + draft + section.context. Output: corrected draft text. Preserves voice / ordering / connective tissue; removes invention; adds missed facts.                                       |
+| [`web/src/lib/sections/suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts)             | One-shot Haiku call: source → 10–15 CSV-validated ICD-10 candidates (ranked). Output powers BOTH the right-side "Navrhované kódy" panel AND the Záver section.                                                                                          |
+| [`web/src/lib/sections/format-zaver.ts`](../web/src/lib/sections/format-zaver.ts)           | Deterministic formatter: `SuggestedIcdCode[]` → Záver line ("primary [differential], secondaries, …").                                                                                                                                                  |
+| [`web/src/lib/templates/reference-notes.ts`](../web/src/lib/templates/reference-notes.ts)   | Parses `template.styleExamples` (full attending notes) into per-section snippet buckets via label matching. Round-robin selects 3 per section. Feeds `# Voice examples` block.                                                                          |
+| [`web/src/lib/sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts) | Registry: `drug-normalizer`, `icd-validator`. Each reconciler has signature `(text, source, { language }) => string`.                                                                                                                                   |
+| [`web/src/lib/models/`](../web/src/lib/models/)                                             | Provider abstraction. `resolve(callSite, tier)` returns a Provider that wraps Anthropic or Vertex Gemini. Default routes preserve Anthropic; env overrides (`MODEL_ROUTE_<CALL>_<TIER>`) swap individual calls without code changes. See §3.            |
 
-### Routes
+### Pipeline Modules (shared orchestration)
 
-| File                                                                            | Role                                                                                                                                                                                                                                                         |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`web/src/app/api/generate/route.ts`](../web/src/app/api/generate/route.ts)     | POST `/api/generate`. Auth → audio recovery → file extraction → PHI scrub → parallel `suggestIcdCodes` + `generateNote` → Záver via `formatZaver` + `runCriticAndReconcilers` → save + SSE stream.                                                           |
-| [`web/src/app/api/regenerate/route.ts`](../web/src/app/api/regenerate/route.ts) | POST `/api/regenerate`. Same flow as generate, starting from cached raw source. No audio recovery, no inline file extraction.                                                                                                                                |
+| File                                                                                  | Role                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/lib/pipeline/resolve-source.ts`](../web/src/lib/pipeline/resolve-source.ts) | Source pre-processing: audio recovery (download + transcribe + concat), stuck extraction recovery, extraction polling, inline extraction fallback, PHI scrubbing, file-text assembly, transcript merge.                                                     |
+| [`web/src/lib/pipeline/session.ts`](../web/src/lib/pipeline/session.ts)               | Shared orchestration core for both `/api/generate` and `/api/adjust`. Owns: file-focus filter → skeleton ∥ ICD (parallel) → section loop → Záver (conditional) → HTML assembly. When `leafIdFilter` is set (adjust mode), only filtered sections re-render. |
+| [`web/src/lib/pipeline/persist.ts`](../web/src/lib/pipeline/persist.ts)               | Shared persistence: column update (`encounter_note` + `status`) + metadata merge (`template_id`, `section_contents`, etc.) + lost-note logging on failure.                                                                                                  |
+| [`web/src/lib/pipeline/adjust-helpers.ts`](../web/src/lib/pipeline/adjust-helpers.ts) | Adjust-specific utilities: `collectLeafSectionsForRouter()`, `isVitalOrExamLabel()`, `foldLabel()`, `shouldRerunZaver()`, `expandVitalGroup()`.                                                                                                             |
+
+### Routes (thin shells)
+
+| File                                                                        | Role                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/app/api/generate/route.ts`](../web/src/app/api/generate/route.ts) | POST `/api/generate`. Auth → detect mode (fresh vs cached) → `resolveSource()` or build from metadata → `runPipelineSession()` → `persistGeneration()` → post-generation (email, audio cleanup). Handles both fresh generation and regeneration (replaces deleted `/api/regenerate`). |
+| [`web/src/app/api/adjust/route.ts`](../web/src/app/api/adjust/route.ts)     | POST `/api/adjust`. Auth → merge transcript delta → `routeAdjustment()` → `expandVitalGroup()` → `runPipelineSession(leafIdFilter, priorSectionContents)` → `persistGeneration()`.                                                                                                    |
 
 ### Utilities
 
-| File                                                                        | Role                                                                                              |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [`web/src/lib/phi-scrubber.ts`](../web/src/lib/phi-scrubber.ts)             | Deterministic PHI scrub. Runs once on raw source before any LLM call.                             |
-| [`web/src/lib/lookup/icd.ts`](../web/src/lib/lookup/icd.ts)                 | ICD-10 CSV loader — `getIcdDescription` (used by suggester + reconciler), `searchIcd` / `resolveIcdCodes` (admin panel). |
+| File                                                                        | Role                                                                                                                                      |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| [`web/src/lib/phi-scrubber.ts`](../web/src/lib/phi-scrubber.ts)             | Deterministic PHI scrub. Runs once on raw source before any LLM call.                                                                     |
+| [`web/src/lib/lookup/icd.ts`](../web/src/lib/lookup/icd.ts)                 | ICD-10 CSV loader — `getIcdDescription` (used by suggester + reconciler), `searchIcd` / `resolveIcdCodes` (admin panel).                  |
 | [`web/src/lib/lookup/medications.ts`](../web/src/lib/lookup/medications.ts) | Medication CSV loader — `isValidMedication`, `correctMedicationBaseName` (drug-normalizer reconciler), `searchMedications` (admin panel). |
-| [`web/src/lib/templates/html.ts`](../web/src/lib/templates/html.ts)         | `buildTemplateHtml` concatenates rendered section contents into the final HTML note.              |
+| [`web/src/lib/templates/html.ts`](../web/src/lib/templates/html.ts)         | `buildTemplateHtml` concatenates rendered section contents into the final HTML note.                                                      |
 
 ---
 
@@ -302,6 +311,7 @@ The Gemini provider supports two auth modes (managed inside [`providers/vertex-g
 `GEMINI_API_KEY` wins when both are set. Unset it in production to switch to Vertex. Credentials are read lazily — projects with neither set still build and run against the Anthropic defaults.
 
 Available models (confirmed via `GET /v1beta/models` on the Gemini Developer API):
+
 - `gemini-3.1-pro` → `gemini-3.1-pro-preview` ✓ thinking (LOW/MEDIUM/HIGH), paid tier
 - `gemini-3.1-flash-lite` → `gemini-3.1-flash-lite-preview` ✓ thinking
 - `gemini-3.1-flash` → aliases to `gemini-3-flash-preview` (3.1 Flash doesn't exist yet)
@@ -320,12 +330,14 @@ Prompt caching: Anthropic cache blocks are marked with `cache: true` on `SystemB
 Set `section.critic = true` on the template to enable a second Haiku pass that audits the draft against the raw source.
 
 What it does:
+
 - **Removes invention**: any fact/number/name/drug/diagnosis/wording in the draft not found in the raw source → deleted.
 - **Adds omission**: any fact in the source that belongs in this section (per `section.context`) but is missing from the draft → added, formatted consistently with the existing draft.
 - **Preserves voice**: formatting, ordering, connective tissue ("pred dvoma dňami", "včera", "preto"), negations.
 - **Returns UNCHANGED** byte-for-byte when the draft is already faithful.
 
 Where to enable:
+
 - Narrative / clinical-judgment sections where invention or omission hurt most: **HPI/TO, OA, Záver**.
 - Skip structural sections (Vitals, BMI, EKG, LA, AA, etc.) where a second Haiku pass just adds noise.
 
@@ -349,10 +361,10 @@ type Reconciler = (
 
 Registered in [`sections/reconcilers/index.ts`](../web/src/lib/sections/reconcilers/index.ts). Attached to sections via `section.reconcilers: string[]` — set by [`web/scripts/enable-reconcilers.mjs`](../web/scripts/enable-reconcilers.mjs) (idempotent, label-matched).
 
-| Name               | Runs on                 | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `drug-normalizer`  | LA / medication sections | Extracts the leading drug-name prefix from each line or comma-separated entry, short-circuits through `ABBREVIATION_ALIASES` (e.g. `ANP → ANOPYRIN`), then fuzzy-corrects against the medication CSV if no alias hit. Preserves dose/frequency verbatim.                                                                                                                                                                                                    |
-| `icd-validator`    | Záver                    | Code-boundary splitter (not comma-based). Per code: CSV hit → canonical description; 1-2 decimal digit miss with valid root → downgrade; ICD-10-CM shape (≥3 decimal digits) + no CSV → drop. Also dedupes redundant parentheticals — if the CSV canonical already ends with `(MGUS)` and the input also ends with `(MGUS)`, drops the duplicate.                                                                                                           |
+| Name              | Runs on                  | Behaviour                                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `drug-normalizer` | LA / medication sections | Extracts the leading drug-name prefix from each line or comma-separated entry, short-circuits through `ABBREVIATION_ALIASES` (e.g. `ANP → ANOPYRIN`), then fuzzy-corrects against the medication CSV if no alias hit. Preserves dose/frequency verbatim.                                                                                          |
+| `icd-validator`   | Záver                    | Code-boundary splitter (not comma-based). Per code: CSV hit → canonical description; 1-2 decimal digit miss with valid root → downgrade; ICD-10-CM shape (≥3 decimal digits) + no CSV → drop. Also dedupes redundant parentheticals — if the CSV canonical already ends with `(MGUS)` and the input also ends with `(MGUS)`, drops the duplicate. |
 
 **Absence stripper** is built into `renderSection` (and applied on critic output via `runCriticAndReconcilers`), not a registered reconciler. Catches "V surových zdrojoch…", "(empty)", "ZERO CHARACTERS", cleanup-pass meta-commentary essays, "Žiadne údaje…", "The current output contains no …". See `isAbsenceDescription` in `section-agent.ts`.
 
@@ -394,32 +406,33 @@ Sections stream in template order (depth-first). Typical full generation: ~40s o
 
 ---
 
-## 8. Regenerate Path
+## 8. Regenerate Path (absorbed into `/api/generate`)
 
-Regenerate is nearly identical to generate. Differences:
+The `/api/regenerate` route was deleted. Regeneration is now handled by `/api/generate` in **cached mode** — auto-detected when the client omits `transcriptText` and `audioPath`. Differences from fresh mode:
 
 - No audio recovery, no inline file extraction — the visit already has `metadata.transcript`, `metadata.doctor_notes`, and `metadata.files[].extracted_text` cached.
-- Reads raw source from metadata, runs the same pipeline.
-- All former branches (fact-based rerender, prose reformat, full Opus) collapsed into a single "run with possibly-new template" flow.
+- Reads raw source from metadata via `getTranscript()`, `getDoctorNotes()`, `getFileTexts()`.
+- Runs the same `runPipelineSession()` with the (possibly new) template.
+- The client's `handleRegenerate` calls `/api/generate` with just `{ visitId, templateId, doctorNotes }` — no `transcriptText` triggers cached mode.
 
 ---
 
 ## 9. What's Intentionally NOT in the Pipeline Anymore
 
-| Removed                                                                 | What it did                                                    | Why it's gone                                                                                                      |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Sonnet clinical-analysis Pass 1                                         | Inferred specialty, matched concepts, suggested ICD candidates | Non-deterministic; replaced by deterministic section contracts + reconcilers.                                      |
-| Haiku fact-extraction Pass 1.5                                          | 15-category structured facts with source evidence              | Sections now read raw source directly, nothing is pre-filtered out.                                                |
-| Fact validator / resolver / timeline                                    | Drop ungrounded / self-corrected / time-conflicting facts      | No facts → no fact pipeline.                                                                                       |
-| Diagnosis resolver + synonym table                                      | Deterministic ICD resolution from diagnosis facts              | Záver section now emits ICD codes directly from raw source.                                                        |
-| ICD certainty filter                                                    | Drop ICD candidates not lexically grounded in facts            | Reconciler-level concern, not a pipeline stage.                                                                    |
-| EncounterModel                                                          | Single source of truth for bucketed facts / problems           | Replaced by: source + critic pass = all an agent needs.                                                            |
-| Deterministic section renderers (medications, vitals, assessment, etc.) | Format structured slots without LLM                            | Each section is now an LLM call. If determinism is critical for a given section, add a reconciler.                 |
-| Specialty pack                                                          | Per-language, per-specialty prompt variants                    | Templates themselves are per-specialty; pack lives in the template's system prompt + each section's context.       |
-| `generateFromTemplate` / `anthropic.ts`                                 | 1,200-line monolithic two-pass generation                      | Replaced by ~300 lines across `pipeline.ts` + `section-agent.ts` + `critic.ts`.                                    |
-| Source preprocessor (`source-preprocessor.ts`)                          | Regex pass over source emitting `<STRUCTURED_FACTS>` XML tags  | The critic pass handles the same "make sure nothing was missed" job with broader coverage and no regex maintenance. |
+| Removed                                                                 | What it did                                                    | Why it's gone                                                                                                                                                     |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sonnet clinical-analysis Pass 1                                         | Inferred specialty, matched concepts, suggested ICD candidates | Non-deterministic; replaced by deterministic section contracts + reconcilers.                                                                                     |
+| Haiku fact-extraction Pass 1.5                                          | 15-category structured facts with source evidence              | Sections now read raw source directly, nothing is pre-filtered out.                                                                                               |
+| Fact validator / resolver / timeline                                    | Drop ungrounded / self-corrected / time-conflicting facts      | No facts → no fact pipeline.                                                                                                                                      |
+| Diagnosis resolver + synonym table                                      | Deterministic ICD resolution from diagnosis facts              | Záver section now emits ICD codes directly from raw source.                                                                                                       |
+| ICD certainty filter                                                    | Drop ICD candidates not lexically grounded in facts            | Reconciler-level concern, not a pipeline stage.                                                                                                                   |
+| EncounterModel                                                          | Single source of truth for bucketed facts / problems           | Replaced by: source + critic pass = all an agent needs.                                                                                                           |
+| Deterministic section renderers (medications, vitals, assessment, etc.) | Format structured slots without LLM                            | Each section is now an LLM call. If determinism is critical for a given section, add a reconciler.                                                                |
+| Specialty pack                                                          | Per-language, per-specialty prompt variants                    | Templates themselves are per-specialty; pack lives in the template's system prompt + each section's context.                                                      |
+| `generateFromTemplate` / `anthropic.ts`                                 | 1,200-line monolithic two-pass generation                      | Replaced by ~300 lines across `pipeline.ts` + `section-agent.ts` + `critic.ts`.                                                                                   |
+| Source preprocessor (`source-preprocessor.ts`)                          | Regex pass over source emitting `<STRUCTURED_FACTS>` XML tags  | The critic pass handles the same "make sure nothing was missed" job with broader coverage and no regex maintenance.                                               |
 | Sonnet fact extraction (Phase 1 experiment)                             | Tool-use extraction of verified `ClinicalFact[]` with quotes   | Was architecturally interesting but added 30–60s of latency and complexity. The critic pass delivers the same quality guarantee faster using only source + draft. |
-| Per-section `factTypes` opt-in (Phase 2b experiment)                    | Section renders from filtered facts instead of raw source      | Rolled back together with fact extraction — the critic pass covers the same failure modes.                         |
+| Per-section `factTypes` opt-in (Phase 2b experiment)                    | Section renders from filtered facts instead of raw source      | Rolled back together with fact extraction — the critic pass covers the same failure modes.                                                                        |
 
 See the commit history if you need to understand why a specific piece was removed.
 

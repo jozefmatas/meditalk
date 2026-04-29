@@ -6,10 +6,8 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/nav/app-shell";
 import { usePageTitle } from "@/components/nav/page-title-context";
 import { EncounterHeaderActions } from "@/components/encounters/encounter-header-actions";
-import {
-  FilesPanel,
-  hasUploadingFiles,
-} from "@/components/encounters/files-panel";
+import { FilesPanel } from "@/components/encounters/files-panel";
+import { hasUploadingFiles } from "@/lib/encounters/file-state";
 import { ProcessingOverlay } from "@/components/encounters/processing-overlay";
 import { IcdPanel } from "@/components/encounters/icd-panel";
 import { DraftView } from "@/components/encounters/draft-view";
@@ -33,6 +31,8 @@ import { buildSectionLabelsFromTemplate } from "@/lib/templates";
 import { useTemplate } from "@/hooks/use-template";
 import type { Encounter, EncounterType } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
+import { emit, on } from "@/lib/events";
+import { patchEncounterOrThrow } from "@/lib/encounters/api";
 
 import { useEncounterData } from "@/components/encounters/hooks/use-encounter-data";
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
@@ -121,11 +121,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
     (newTitle: string) => {
       setMetadataTitle(newTitle);
       setPageTitle(newTitle || null);
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, title: newTitle || null },
-        }),
-      );
+      emit("encounter-update", { id: visitId, title: newTitle || null });
     },
     [visitId, setPageTitle, setMetadataTitle],
   );
@@ -141,16 +137,15 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const { refreshEncounter } = data;
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    const cleanup = on("extraction-complete", () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         refreshEncounter();
         debounceTimer = null;
       }, 500);
-    };
-    window.addEventListener("extraction-complete", handler);
+    });
     return () => {
-      window.removeEventListener("extraction-complete", handler);
+      cleanup();
       if (debounceTimer) clearTimeout(debounceTimer);
     };
   }, [refreshEncounter]);
@@ -198,11 +193,11 @@ export default function EncounterDetailPage({ params }: PageProps) {
   }, [data, generation]);
 
   // --- Derived state ---
-  // Only block while bytes are still in flight to the server. OCR /
-  // extraction happens server-side and is fully handled by the generate
-  // endpoint (which waits for any pending extraction to land). Doctors
-  // don't wait for a light to turn green — they click, and the server
-  // does the waiting.
+  // Block only while bytes are still in flight to the server. If files
+  // are uploaded but extraction is still running, the generate button
+  // stays enabled — handleGenerate awaits pending extractions under the
+  // processing overlay so the doctor doesn't have to wait for a light
+  // to turn green.
   const filesUploading = hasUploadingFiles(data.files);
   const canGenerate =
     !!(
@@ -223,18 +218,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const handleMarkComplete = async () => {
     if (!visitId) return;
     try {
-      const res = await fetch(`/api/encounters/${visitId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
-      });
-      if (!res.ok) throw new Error("Failed to update status");
+      await patchEncounterOrThrow(visitId, { status: "completed" });
       data.setVisit((prev) => (prev ? { ...prev, status: "completed" } : prev));
-      window.dispatchEvent(
-        new CustomEvent("encounter-update", {
-          detail: { id: visitId, status: "completed" },
-        }),
-      );
+      emit("encounter-update", { id: visitId, status: "completed" });
     } catch (err) {
       data.setError(
         err instanceof Error ? err.message : "Failed to update status",

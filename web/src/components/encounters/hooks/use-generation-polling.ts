@@ -3,6 +3,8 @@
 import { useEffect, useCallback, useRef } from "react";
 import type { Encounter } from "@/lib/types";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
+import { emit, on } from "@/lib/events";
+import { patchEncounterStatus } from "@/lib/encounters/api";
 
 const POLL_TIMEOUT_MS = 180_000; // 3 min — matches GENERATION_STALE_THRESHOLD_MS
 const POLL_INTERVAL_MS = 3_000;
@@ -64,9 +66,8 @@ export function useGenerationPolling({
 
   // Re-fetch encounter when a background generation completes
   useEffect(() => {
-    const handler = (e: Event) => {
-      const { visitId: doneId } = (e as CustomEvent).detail;
-      if (doneId !== visitId) return;
+    return on("generation-done", (detail) => {
+      if (detail.visitId !== visitId) return;
 
       (async () => {
         try {
@@ -82,9 +83,7 @@ export function useGenerationPolling({
           /* silent */
         }
       })();
-    };
-    window.addEventListener("generation-done", handler);
-    return () => window.removeEventListener("generation-done", handler);
+    });
   }, [
     visitId,
     setVisit,
@@ -110,16 +109,7 @@ export function useGenerationPolling({
         setVisit((prev) =>
           prev ? { ...prev, status: "started" as const } : prev,
         );
-        fetch(`/api/encounters/${visitId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "started" }),
-        }).catch(() => {});
-        window.dispatchEvent(
-          new CustomEvent("encounter-update", {
-            detail: { id: visitId, status: "started" },
-          }),
-        );
+        patchEncounterStatus(visitId, "started");
         // Notify parent — allows auto-resume of lost generations
         onPollTimeoutRef.current?.();
         return;
@@ -143,15 +133,11 @@ export function useGenerationPolling({
             });
           }
           if (updated.title) updateTitleRef.current(updated.title);
-          window.dispatchEvent(
-            new CustomEvent("encounter-update", {
-              detail: {
-                id: visitId,
-                status: updated.status,
-                ...(updated.title ? { title: updated.title } : {}),
-              },
-            }),
-          );
+          emit("encounter-update", {
+            id: visitId,
+            status: updated.status,
+            ...(updated.title ? { title: updated.title } : {}),
+          });
         }
       } catch {
         /* silent — retry next interval */

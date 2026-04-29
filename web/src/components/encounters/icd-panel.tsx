@@ -17,6 +17,7 @@ import {
   Copy01Icon,
 } from "@hugeicons/core-free-icons";
 import type { Encounter } from "@/lib/types";
+import { patchEncounter } from "@/lib/encounters/api";
 
 interface IcdCode {
   code: string;
@@ -163,12 +164,8 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
       saveTimeoutRef.current = setTimeout(async () => {
         const partial = { selected_icd_codes: codes };
 
-        try {
-          await fetch(`/api/encounters/${visit.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ metadata: partial }),
-          });
+        const res = await patchEncounter(visit.id, { metadata: partial });
+        if (res?.ok) {
           setVisit((prev) => {
             if (!prev) return prev;
             const current = (prev.metadata || {}) as Record<string, unknown>;
@@ -177,8 +174,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
               metadata: { ...current, ...partial },
             } as typeof prev;
           });
-        } catch {
-          // Silent fail
         }
       }, 500);
     },

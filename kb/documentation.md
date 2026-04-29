@@ -1,12 +1,14 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-23_
+_Last updated: 2026-04-28_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
-## What's new (2026-04-23)
+## What's new (2026-04-28)
 
-- **`POST /api/adjust`** — new endpoint for mid-visit incremental updates. Accepts only the delta (`{visitId, templateId, adjustmentTranscript, newFileIds?}`). A router Haiku decides which sections to re-render; unchanged sections keep their content from `visit.metadata.section_contents`. See [prompt-pipeline.md](prompt-pipeline.md) for details.
+- **Pipeline consolidation** — 3 route handlers collapsed to 2 (`/api/generate` + `/api/adjust`); `/api/regenerate` deleted (absorbed into `/api/generate` cached mode). Shared orchestration extracted into `web/src/lib/pipeline/` (resolve-source, session, persist, adjust-helpers). 41 new tests.
+- **God hook decomposed** — the 1,436-line `use-encounter-generation.ts` split into 3 focused hooks: `use-doctor-notes.ts` (auto-save), `use-generation-stream.ts` (SSE streaming), `use-pre-generation.ts` (recording finalization + transcription). The coordinator hook composes them (~430 lines).
+- **`POST /api/adjust`** — incremental mid-visit updates. Router Haiku decides which sections to re-render; unchanged sections keep content from `visit.metadata.section_contents`.
 - **File context dialog** — Actual / Past radio. "Actual" = whole file used; "Past" = user must type what to distill (Haiku pre-filters). See [data-extraction.md](data-extraction.md).
 - **Critic via tool-use** — section critic now uses `tool_choice: submit_corrected_section`, eliminating essay / meta-commentary leaks structurally.
 - **Eval harness on 3 real doctor-corrected fixtures** (`npm run eval`): Mordavská, Kovačiková, Gozora.
@@ -132,7 +134,10 @@ When the doctor hits **Generate**:
 
 **Key files:**
 
-- [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) — streaming orchestration
+- [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) — coordinator hook (composes the three hooks below)
+- [web/src/components/encounters/hooks/use-generation-stream.ts](web/src/components/encounters/hooks/use-generation-stream.ts) — SSE streaming consumer, module-level caches, client retry
+- [web/src/components/encounters/hooks/use-pre-generation.ts](web/src/components/encounters/hooks/use-pre-generation.ts) — recording finalization, blob upload, transcription
+- [web/src/components/encounters/hooks/use-doctor-notes.ts](web/src/components/encounters/hooks/use-doctor-notes.ts) — 2s debounced auto-save with retry
 - [web/src/components/encounters/hooks/use-generation-polling.ts](web/src/components/encounters/hooks/use-generation-polling.ts) — recovery polling
 - [web/src/components/encounters/hooks/use-encounter-data.ts](web/src/components/encounters/hooks/use-encounter-data.ts) — status auto-corrections
 
@@ -166,26 +171,26 @@ This is the core engine. For the full canonical reference, see [prompt-pipeline.
 
 ### Pipeline stages:
 
-| Stage                                         | Engine                     | Purpose                                                                                                                                                                                                               |
-| --------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Stage 1** — PHI Scrub                       | Pure TypeScript            | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                      |
-| **Stage 2a** — ICD suggester                  | Claude Haiku               | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §2b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                              |
-| **Stage 2b** — Section-agent loop             | Claude (Haiku by default)  | Walks template leaves in order, skipping the Záver leaf (fed by 2a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.          |
-| **Stage 2c** — Critic pass (opt-in)           | Claude Haiku               | For sections with `critic: true` (HPI/TO, OA, Záver), a second Haiku call audits the draft against the source: removes invention, adds missed facts, preserves voice. Runs in parallel in the background; emits an update via `onSection`. |
-| **Stage 2d** — Reconcilers                    | Pure TypeScript            | Post-critic transforms per section: `drug-normalizer` (alias map + fuzzy match against medication CSV), `icd-validator` (canonical swap + CM rejection + duplicate-parenthetical guard).                               |
-| **Stage 3** — Záver injection                 | Pure TS + Haiku            | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Passed through the critic (if enabled on Záver) + `icd-validator` reconciler. |
-| **Stage 4** — HTML assembly                   | Pure TypeScript            | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                            |
+| Stage                               | Engine                    | Purpose                                                                                                                                                                                                                                    |
+| ----------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Stage 1** — PHI Scrub             | Pure TypeScript           | Strip patient name (when known), rodné číslo, phone, email, PSČ+city, slash-notation addresses. Clinical values (BP, GCS, pupils, dose schedules) protected by contextual guards.                                                          |
+| **Stage 2a** — ICD suggester        | Claude Haiku              | One-shot call producing 10–15 CSV-validated ICD-10 candidates. Runs in parallel with §2b. Output feeds both the right-side "Navrhované kódy" panel AND the Záver section.                                                                  |
+| **Stage 2b** — Section-agent loop   | Claude (Haiku by default) | Walks template leaves in order, skipping the Záver leaf (fed by 2a). Each section-agent call: role + template worldview + `# Voice examples` (corpus) + section contract; user message contains the source.                                |
+| **Stage 2c** — Critic pass (opt-in) | Claude Haiku              | For sections with `critic: true` (HPI/TO, OA, Záver), a second Haiku call audits the draft against the source: removes invention, adds missed facts, preserves voice. Runs in parallel in the background; emits an update via `onSection`. |
+| **Stage 2d** — Reconcilers          | Pure TypeScript           | Post-critic transforms per section: `drug-normalizer` (alias map + fuzzy match against medication CSV), `icd-validator` (canonical swap + CM rejection + duplicate-parenthetical guard).                                                   |
+| **Stage 3** — Záver injection       | Pure TS + Haiku           | `formatZaverFromSuggestions` joins the ranked codes into a comma-separated line with optional differential clause on a symptom-code primary. Passed through the critic (if enabled on Záver) + `icd-validator` reconciler.                 |
+| **Stage 4** — HTML assembly         | Pure TypeScript           | `buildTemplateHtml` concatenates rendered section contents into the final HTML note (empty sections hidden by `skipEmpty`).                                                                                                                |
 
 Clinical knowledge lives in three places: `template.styleExamples` (reference-notes corpus, few-shot), `template.systemPrompt` (template-wide worldview), and `section.context` (per-section contract — also fed verbatim to the critic pass). Per-section flags on the template: `model`, `critic`, `reconcilers`.
 
 ### Streaming Protocol (SSE events):
 
-| Event             | When                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                                                                   |
+| Event             | When                                                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `streaming_start` | Start of generation — carries `sectionIds` + `sectionLabels`                                                                                |
 | `section`         | Each time a section's state changes. First emit = raw draft; second emit (for critic-enabled sections) = corrected text. UI replaces by id. |
-| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes`                                             |
-| `error`           | On failure                                                                                                                     |
+| `complete`        | Final payload: `generatedNote`, `templateId`, `clinicalAnalysis.suggestedIcdCodes`                                                          |
+| `error`           | On failure                                                                                                                                  |
 
 ### Persistence:
 
@@ -194,8 +199,12 @@ Clinical knowledge lives in three places: `template.styleExamples` (reference-no
 
 **Key files:**
 
-- [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — main generation endpoint (orchestrates all stages above)
-- [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts) — regeneration endpoint (same pipeline from cached source)
+- [web/src/lib/pipeline/resolve-source.ts](../web/src/lib/pipeline/resolve-source.ts) — source pre-processing (audio recovery, extraction, PHI scrub, file-text assembly)
+- [web/src/lib/pipeline/session.ts](../web/src/lib/pipeline/session.ts) — shared orchestration core (file-focus → skeleton ∥ ICD → sections → Záver → HTML)
+- [web/src/lib/pipeline/persist.ts](../web/src/lib/pipeline/persist.ts) — shared persistence (column update + metadata merge + lost-note logging)
+- [web/src/lib/pipeline/adjust-helpers.ts](../web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
+- [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
+- [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
 - [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
 - [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
 - [web/src/lib/sections/format-zaver.ts](../web/src/lib/sections/format-zaver.ts) — suggester → Záver formatter
@@ -212,9 +221,9 @@ See [prompt-pipeline.md](prompt-pipeline.md) for the deep dive.
 
 ---
 
-## 7. Regeneration
+## 7. Regeneration (via `/api/generate` cached mode)
 
-Via [web/src/app/api/regenerate/route.ts](../web/src/app/api/regenerate/route.ts). Reads the visit's cached raw source (`metadata.transcript`, `metadata.doctor_notes`, `metadata.files[].extracted_text`) and runs the same section-agent pipeline with a possibly-new template. No special rerender/reformat branches — one path.
+The `/api/regenerate` route was deleted. Regeneration is now handled by `/api/generate` in **cached mode** — auto-detected when the client omits `transcriptText` and `audioPath`. Reads the visit's cached raw source (`metadata.transcript`, `metadata.doctor_notes`, `metadata.files[].extracted_text`) and runs the same `runPipelineSession()` with a possibly-new template. No special rerender/reformat branches — one path.
 
 ---
 
@@ -393,14 +402,15 @@ started → recording → processing → to_review → completed/archived
 
 Separate Next.js app at `admin/`:
 
-| Page       | Purpose                                                                                                                                                                     |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dashboard  | Pricing metrics, cost analysis per model/operation                                                                                                                          |
-| Users      | User management (invite, delete, view activity)                                                                                                                             |
+| Page       | Purpose                                                                                                                                                                                                                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dashboard  | Pricing metrics, cost analysis per model/operation                                                                                                                                                                                                                    |
+| Users      | User management (invite, delete, view activity)                                                                                                                                                                                                                       |
 | Templates  | Create, edit, visibility toggle, sorting. Template editor includes **Reference Notes Corpus** panel — upload real attending notes (PDF/image/text) → PHI-scrubbed → persisted to `templates.style_examples` jsonb → injected as few-shot examples at generation time. |
-| Encounters | View all encounters across users                                                                                                                                            |
+| Encounters | View all encounters across users                                                                                                                                                                                                                                      |
 
 **Reference-notes ingestion** (template editor → Corpus panel → "Add note"):
+
 1. File POSTed to `/api/templates/analyze-note` (admin).
 2. [`admin/lib/file-extraction.ts`](admin/lib/file-extraction.ts) extracts text (PDF/image via Sonnet vision, plain text direct).
 3. [`admin/lib/phi-scrubber.ts`](admin/lib/phi-scrubber.ts) strips rodné číslo, phone, email, PSČ+city.
@@ -421,8 +431,8 @@ Separate Next.js app at `admin/`:
 
 ### Generation
 
-- `POST /api/generate` — SSE streaming note generation
-- `POST /api/regenerate` — regenerate with same or different template
+- `POST /api/generate` — SSE streaming note generation (fresh mode with `transcriptText`/`audioPath`, or cached mode without them for regeneration)
+- `POST /api/adjust` — incremental re-render of affected sections after mid-visit changes
 - `POST /api/batch-transcribe` — batch audio transcription
 
 ### Lookup
@@ -474,7 +484,7 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ## 18. Testing
 
-- **370+ tests** across utilities, hooks, and parsers
+- **570+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
 - A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
