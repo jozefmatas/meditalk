@@ -26,22 +26,45 @@ export interface PreGenerationResult {
  *
  * Extracted from handleGenerate / handleAdjustGenerate in the god hook.
  */
+export interface FinalizedRecording {
+  blob: Blob | null;
+  isRestoredSession: boolean;
+  releaseGuards?: () => void;
+}
+
 export function usePreGeneration(visitId: string) {
   const prepareSource = useCallback(
     async (params: {
       recordingBarRef: React.RefObject<RecordingBarRef | null>;
       language: SupportedLanguage;
       visit: Encounter | null;
+      /** Pre-finalized recording — when provided, skips finalization
+       *  so the caller can switch to processing UI in between. */
+      finalized?: FinalizedRecording | null;
     }): Promise<PreGenerationResult> => {
-      const { recordingBarRef, language, visit } = params;
+      const {
+        recordingBarRef,
+        language,
+        visit,
+        finalized: preFinalized,
+      } = params;
 
-      // Capture releaseGuards before unmount nulls the ref
-      const releaseGuards = recordingBarRef.current?.releaseGuards;
+      let releaseGuards: (() => void) | undefined;
+      let blobToProcess: Blob | null;
+      let isRestoredSession: boolean;
 
-      // Finalize recording
-      const finalized = await recordingBarRef.current?.finalize();
-      const blobToProcess = finalized?.blob ?? null;
-      const isRestoredSession = finalized?.isRestoredSession ?? false;
+      if (preFinalized !== undefined) {
+        // Caller already finalized the recording
+        blobToProcess = preFinalized?.blob ?? null;
+        isRestoredSession = preFinalized?.isRestoredSession ?? false;
+        releaseGuards = preFinalized?.releaseGuards;
+      } else {
+        // Legacy path: finalize inline
+        releaseGuards = recordingBarRef.current?.releaseGuards;
+        const result = await recordingBarRef.current?.finalize();
+        blobToProcess = result?.blob ?? null;
+        isRestoredSession = result?.isRestoredSession ?? false;
+      }
 
       logger.debug(
         `[pre-gen] Finalized — blob: ${blobToProcess?.size || 0} bytes`,

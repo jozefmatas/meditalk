@@ -112,19 +112,31 @@ export function useEncounterGeneration({
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
 
-      // Finalize recording BEFORE switching to processing UI
+      // 1. Finalize recording synchronously (fast, local-only)
+      //    Must happen BEFORE the UI switch — the recording bar unmounts
+      //    when status changes to "processing".
+      const bar = recordingBarRef.current;
+      const finalized = bar
+        ? {
+            ...(await bar.finalize()),
+            releaseGuards: bar.releaseGuards,
+          }
+        : null;
+
+      // 2. Switch to processing UI immediately (user sees overlay now)
+      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
+      emit("encounter-update", { id: visitId, status: "processing" });
+
+      // 3. Upload blob + transcribe (slow, network) with pre-finalized blob
       const { transcriptText, audioRecoveryPath, releaseGuards } =
         await prepareSource({
           recordingBarRef,
           language: generationLanguage,
           visit,
+          finalized,
         });
 
-      // Switch to processing UI
-      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
-      emit("encounter-update", { id: visitId, status: "processing" });
-
-      // Persist generation intent BEFORE transcription
+      // Persist generation intent after we know the audio path
       await patchEncounter(visitId, {
         status: "processing",
         metadata: {
@@ -247,15 +259,26 @@ export function useEncounterGeneration({
         .filter(Boolean)
         .join("\n\n");
 
-      // Finalize recording
+      // 1. Finalize recording (fast, local-only)
+      const bar = opts.adjustRecordingBarRef.current;
+      const finalized = bar
+        ? {
+            ...(await bar.finalize()),
+            releaseGuards: bar.releaseGuards,
+          }
+        : null;
+
+      // 2. Switch to processing UI immediately
+      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
+
+      // 3. Upload blob + transcribe (slow, network)
       const { transcriptText, releaseGuards } = await prepareSource({
         recordingBarRef: opts.adjustRecordingBarRef,
         language: generationLanguage,
         visit,
+        finalized,
       });
 
-      // Switch to processing UI
-      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       await patchEncounterStatus(visitId, "processing", {
         metadata: {
           generation_pending: {
