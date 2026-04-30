@@ -14,7 +14,7 @@ interface FeedbackEntry {
 
 interface SubmitDownOptions {
   sectionKind?: string;
-  categories: string[];
+  categories?: string[];
   detail: string;
 }
 
@@ -86,7 +86,7 @@ export function useFeedback(visitId: string | undefined) {
           sectionId: sectionId ?? undefined,
           sectionKind: options.sectionKind,
           rating: "down",
-          categories: options.categories,
+          categories: options.categories ?? [],
           detail: options.detail,
         }),
       });
@@ -98,5 +98,13 @@ export function useFeedback(visitId: string | undefined) {
     [visitId, tFeedback],
   );
 
-  return { getRating, submitUp, submitDown, isLoaded };
+  const clearRating = useCallback((sectionId: string | null) => {
+    setRatings((prev) => {
+      const next = new Map(prev);
+      next.delete(sectionId);
+      return next;
+    });
+  }, []);
+
+  return { getRating, submitUp, submitDown, clearRating, isLoaded };
 }

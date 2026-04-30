@@ -23,6 +23,7 @@ import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import type { RawSource } from "@/lib/sections/section-agent";
 import type { Template } from "@/lib/templates/types";
 import type { SupportedLanguage } from "@/lib/types";
+import { getActiveFeedback, buildFeedbackMap } from "@/lib/pipeline/feedback";
 
 // ── Public types ──────────────────────────────────────────────────
 
@@ -40,6 +41,8 @@ export interface PipelineSessionInput {
   leafIdFilter?: Set<string>;
   /** Adjust-specific: prior section contents for seeding. */
   priorSectionContents?: Record<string, string>;
+  /** Skip doctor feedback injection (adjust route — doctor steers via instructions). */
+  skipFeedback?: boolean;
 }
 
 export interface PipelineSessionResult {
@@ -68,6 +71,7 @@ export async function runPipelineSession(
     sendEvent,
     leafIdFilter,
     priorSectionContents,
+    skipFeedback,
   } = input;
 
   const allIds = flattenSectionIds(template);
@@ -113,6 +117,25 @@ export async function runPipelineSession(
   // Await skeleton before section rendering so every renderer has it
   const skeleton = await skeletonPromise;
 
+  // ── 3b. Doctor feedback injection ──────────────────────────────
+  // Skipped for adjust routes (doctor steers via explicit instructions).
+  let feedbackMap: Map<string, string> | undefined;
+  if (!skipFeedback) {
+    try {
+      const feedback = await getActiveFeedback(
+        input.supabase,
+        userId,
+        template.id,
+      );
+      if (feedback.length > 0) {
+        feedbackMap = buildFeedbackMap(feedback, allIds);
+      }
+    } catch (err) {
+      // Silently continue without feedback if query fails
+      console.error("[session] Feedback query failed:", err);
+    }
+  }
+
   // ── 4. Section rendering ────────────────────────────────────────
   // ICD suggestions promise is passed into generateNote — conclusion
   // sections await it internally while other sections render in parallel.
@@ -127,6 +150,7 @@ export async function runPipelineSession(
     usage: { userId, visitId },
     skeleton,
     icdSuggestionsPromise: suggesterPromise,
+    feedbackMap,
     ...(leafIdFilter ? { leafIdFilter } : {}),
     onSection: (section) => {
       sectionContentsMap[section.id] = section.content;

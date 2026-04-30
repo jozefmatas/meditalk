@@ -188,6 +188,7 @@
       "adjustTabNotes": "Voľné poznámky",
       "adjustRegenerate": "Pregenerovať",
       "adjustNotesPlaceholder": "Pridajte ďalší kontext...",
+      "adjustHint": "Niečo nie je správne? Kliknite Upraviť a povedzte MediTalku čo opraviť.",
       "recordingConsent": {
         "title": "Súhlas s nahrávaním",
         "description": "Pred spustením nahrávania je potrebný súhlas pacienta",
@@ -199,6 +200,10 @@
       "feedback": {
         "globalLabel": "Celkové hodnotenie",
         "sectionLabel": "Hodnotenie sekcie",
+        "looksGood": "Vyzerá dobre",
+        "needsWork": "Potrebuje úpravu...",
+        "feedbackPlaceholder": "Opíšte, čo je zlé alebo čo treba zmeniť...",
+        "rememberForFuture": "Zapamätať pre budúce záznamy",
         "modalTitleSection": "Čo je zlé v sekcii {section}?",
         "modalTitleGlobal": "Čo je zlé na tejto správe?",
         "modalDescription": "Vyberte kategórie a prípadne opíšte problém",
@@ -215,7 +220,8 @@
         "cancel": "Zrušiť",
         "submit": "Odoslať",
         "toastTitle": "Ďakujeme za spätnú väzbu",
-        "toastDescription": "Vaša spätná väzba pomáha zlepšovať kvalitu generovaných správ."
+        "toastDescription": "Vaša spätná väzba pomáha zlepšovať kvalitu generovaných správ.",
+        "regenerate": "Pregenerovať s vašou spätnou väzbou?"
       }
     },
     "insufficientContext": "Nedostatok klinických informácií na vygenerovanie záznamu. Nahrajte konzultáciu, pridajte poznámky s klinickými detailmi alebo nahrajte relevantné súbory.",

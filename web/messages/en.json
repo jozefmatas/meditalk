@@ -188,6 +188,7 @@
       "adjustTabNotes": "Free notes",
       "adjustRegenerate": "Regenerate",
       "adjustNotesPlaceholder": "Add additional context...",
+      "adjustHint": "Something off? Click Adjust to tell MediTalk what to fix.",
       "recordingConsent": {
         "title": "Recording Consent",
         "description": "Patient consent required before recording",
@@ -199,6 +200,10 @@
       "feedback": {
         "globalLabel": "Overall rating",
         "sectionLabel": "Section rating",
+        "looksGood": "Looks good",
+        "needsWork": "Needs work...",
+        "feedbackPlaceholder": "Describe what's wrong or what needs to be changed...",
+        "rememberForFuture": "Remember for future notes",
         "modalTitleSection": "What's wrong with {section}?",
         "modalTitleGlobal": "What's wrong with this note?",
         "modalDescription": "Select categories and optionally describe the issue",
@@ -215,7 +220,8 @@
         "cancel": "Cancel",
         "submit": "Submit",
         "toastTitle": "Thank you for your feedback",
-        "toastDescription": "Your feedback helps improve the quality of generated notes."
+        "toastDescription": "Your feedback helps improve the quality of generated notes.",
+        "regenerate": "Regenerate with your feedback?"
       }
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",

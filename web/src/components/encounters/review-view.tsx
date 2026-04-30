@@ -27,10 +27,7 @@ import { TemplateSidebar } from "@/components/encounters/template-sidebar";
 import { TemplateSelector } from "@/components/templates/template-selector";
 import { IcdPanelContent } from "@/components/encounters/icd-panel";
 import { NoteSectionsList } from "@/components/encounters/note-sections-list";
-import { SectionFeedbackRow } from "@/components/encounters/section-feedback-row";
-import { FeedbackModal } from "@/components/encounters/feedback-modal";
 import { ResourcesPanel } from "@/components/encounters/resources-panel";
-import { useFeedback } from "@/components/encounters/hooks/use-feedback";
 import { useMobileHeaderCollapse } from "@/components/encounters/hooks/use-mobile-header-collapse";
 import { useNoteActions } from "@/components/encounters/hooks/use-note-actions";
 import type { Template } from "@/lib/templates";
@@ -152,55 +149,6 @@ export function ReviewView({
       generatedNoteHtml,
       visitId: visit.id,
     });
-
-  // Feedback
-  const { getRating, submitUp, submitDown } = useFeedback(visit.id);
-  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
-  const [feedbackTarget, setFeedbackTarget] = useState<{
-    sectionId: string | null;
-    title: string;
-    sectionKind?: string;
-  } | null>(null);
-
-  const handleSectionThumbsUp = useCallback(
-    (sectionId: string) => submitUp(sectionId),
-    [submitUp],
-  );
-
-  const handleSectionThumbsDown = useCallback(
-    (sectionId: string) => {
-      const section = template?.sections.find((s) => s.id === sectionId);
-      setFeedbackTarget({
-        sectionId,
-        title: sectionLabels[sectionId] ?? sectionId,
-        sectionKind: section?.kind,
-      });
-      setFeedbackModalOpen(true);
-    },
-    [template, sectionLabels],
-  );
-
-  const handleGlobalThumbsUp = useCallback(() => submitUp(null), [submitUp]);
-
-  const handleGlobalThumbsDown = useCallback(() => {
-    setFeedbackTarget({
-      sectionId: null,
-      title: tDetail("feedback.globalLabel"),
-    });
-    setFeedbackModalOpen(true);
-  }, [tDetail]);
-
-  const handleFeedbackSubmit = useCallback(
-    (data: { categories: string[]; detail: string }) => {
-      if (!feedbackTarget) return;
-      submitDown(feedbackTarget.sectionId, {
-        sectionKind: feedbackTarget.sectionKind,
-        categories: data.categories,
-        detail: data.detail,
-      });
-    },
-    [feedbackTarget, submitDown],
-  );
 
   // Sticky header height — drives sidebar sticky offset + scroll-to-section offset
   const stickyHeaderRef = useRef<HTMLDivElement>(null);
@@ -346,8 +294,6 @@ export function ReviewView({
   const isActivelyStreaming = isRegenerating || isStreamingGeneration;
 
   // Shared note sections list (used in both mobile and desktop layouts)
-  const hasNote = template && Object.keys(sectionContents).length > 0;
-
   const noteSectionCards = (
     <NoteSectionsList
       template={template}
@@ -363,25 +309,8 @@ export function ReviewView({
       focusSectionId={focusSectionId}
       onAutoFocused={onAutoFocused}
       noNoteLabel={t("detail.noNote")}
-      getFeedbackRating={(sectionId) => getRating(sectionId)}
-      onSectionThumbsUp={handleSectionThumbsUp}
-      onSectionThumbsDown={handleSectionThumbsDown}
     />
   );
-
-  const globalFeedbackRow =
-    hasNote && !isActivelyStreaming ? (
-      <div className="flex items-center gap-1">
-        <span className="hidden text-sm text-foreground/65 desktop:inline">
-          {tDetail("feedback.globalLabel")}
-        </span>
-        <SectionFeedbackRow
-          rating={getRating(null)}
-          onThumbsUp={handleGlobalThumbsUp}
-          onThumbsDown={handleGlobalThumbsDown}
-        />
-      </div>
-    ) : null;
 
   // Shared error alert (used in both mobile and desktop layouts)
   const errorAlert = error ? (
@@ -522,7 +451,7 @@ export function ReviewView({
         </div>
 
         {/* Sticky tabs — fixed height, never changes */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background">
+        <div className="sticky top-0 z-10 border-b border-border bg-background">
           <Tabs
             value={mobileTab}
             onValueChange={(v) => setMobileTab(v as "note" | "codes")}
@@ -532,7 +461,6 @@ export function ReviewView({
               <TabsTrigger value="codes">{t("detail.codes")}</TabsTrigger>
             </TabsList>
           </Tabs>
-          {globalFeedbackRow}
         </div>
 
         {errorAlert}
@@ -642,10 +570,7 @@ export function ReviewView({
                 className="sticky z-10 -mx-1 flex items-center justify-between bg-background px-1 pt-6 pb-4"
                 style={{ top: stickyHeaderHeight }}
               >
-                <div className="flex items-center gap-4">
-                  <h2 className="text-lg font-medium">{t("detail.note")}</h2>
-                  {globalFeedbackRow}
-                </div>
+                <h2 className="text-lg font-medium">{t("detail.note")}</h2>
                 {isActivelyStreaming ? (
                   <TextShimmer className="text-sm tabular-nums" duration={3}>
                     {streamingTimerLabel}
@@ -712,14 +637,6 @@ export function ReviewView({
             t={t}
           />
         )}
-
-      {/* Feedback modal (thumbs-down detail) */}
-      <FeedbackModal
-        open={feedbackModalOpen}
-        onOpenChange={setFeedbackModalOpen}
-        onSubmit={handleFeedbackSubmit}
-        sectionTitle={feedbackTarget?.title}
-      />
     </>
   );
 }

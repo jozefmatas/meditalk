@@ -20,12 +20,20 @@ interface NoteSectionsListProps {
   focusSectionId: string | null;
   onAutoFocused: () => void;
   noNoteLabel: string;
+  /** Visit ID for sessionStorage keys */
+  visitId?: string;
   /** Feedback rating lookup (null = no rating yet) */
   getFeedbackRating?: (sectionId: string) => "up" | "down" | null;
   /** Thumbs-up handler per section */
   onSectionThumbsUp?: (sectionId: string) => void;
-  /** Thumbs-down handler per section */
-  onSectionThumbsDown?: (sectionId: string) => void;
+  /** Submit feedback handler (auto-regenerates section) */
+  onSectionSubmitFeedback?: (
+    sectionId: string,
+    detail: string,
+    remember: boolean,
+  ) => void;
+  /** Section currently being regenerated (shows skeleton). */
+  regeneratingSectionId?: string | null;
 }
 
 /**
@@ -48,9 +56,11 @@ export function NoteSectionsList({
   focusSectionId,
   onAutoFocused,
   noNoteLabel,
+  visitId,
   getFeedbackRating,
   onSectionThumbsUp,
-  onSectionThumbsDown,
+  onSectionSubmitFeedback,
+  regeneratingSectionId,
 }: NoteSectionsListProps) {
   const isActivelyStreaming = isRegenerating || isStreamingGeneration;
 
@@ -175,37 +185,68 @@ export function NoteSectionsList({
       <>
         {template.sections
           .filter((s) => !removedSections.has(s.id))
-          .map((section) => (
-            <NoteSectionCard
-              key={section.id}
-              id={`note-section-${section.id}`}
-              sectionId={section.id}
-              title={sectionLabels[section.id] ?? section.id}
-              content={sectionContents[section.id] ?? ""}
-              subsections={section.subsections
-                ?.filter((sub) => !removedSections.has(sub.id))
-                .map((sub) => ({
-                  id: sub.id,
-                  title: sectionLabels[sub.id] ?? sub.id,
-                  content: sectionContents[sub.id] ?? "",
-                }))}
-              onContentChange={onSectionContentChange}
-              onRemove={onRemoveSection}
-              autoFocusId={focusSectionId}
-              onAutoFocused={onAutoFocused}
-              feedbackRating={getFeedbackRating?.(section.id) ?? null}
-              onThumbsUp={
-                onSectionThumbsUp
-                  ? () => onSectionThumbsUp(section.id)
-                  : undefined
-              }
-              onThumbsDown={
-                onSectionThumbsDown
-                  ? () => onSectionThumbsDown(section.id)
-                  : undefined
-              }
-            />
-          ))}
+          .map((section) => {
+            // Show skeleton placeholder while this section is regenerating
+            if (regeneratingSectionId === section.id) {
+              return (
+                <div
+                  key={section.id}
+                  className="rounded-2xl border border-border p-6"
+                >
+                  <div className="flex flex-col gap-3">
+                    <Skeleton className="h-5 w-32 rounded" />
+                    <div className="flex flex-col gap-2">
+                      <Skeleton className="h-4 w-full rounded" />
+                      <Skeleton className="h-4 w-4/5 rounded" />
+                      <Skeleton className="h-4 w-3/5 rounded" />
+                    </div>
+                    {section.subsections?.map((sub) => (
+                      <div key={sub.id} className="mt-2 flex flex-col gap-2">
+                        <Skeleton className="h-4 w-24 rounded" />
+                        <Skeleton className="h-4 w-full rounded" />
+                        <Skeleton className="h-4 w-3/4 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <NoteSectionCard
+                key={section.id}
+                id={`note-section-${section.id}`}
+                sectionId={section.id}
+                title={sectionLabels[section.id] ?? section.id}
+                content={sectionContents[section.id] ?? ""}
+                subsections={section.subsections
+                  ?.filter((sub) => !removedSections.has(sub.id))
+                  .map((sub) => ({
+                    id: sub.id,
+                    title: sectionLabels[sub.id] ?? sub.id,
+                    content: sectionContents[sub.id] ?? "",
+                  }))}
+                onContentChange={onSectionContentChange}
+                onRemove={onRemoveSection}
+                autoFocusId={focusSectionId}
+                onAutoFocused={onAutoFocused}
+                feedbackRating={getFeedbackRating?.(section.id) ?? null}
+                onThumbsUp={
+                  onSectionThumbsUp
+                    ? () => onSectionThumbsUp(section.id)
+                    : undefined
+                }
+                onSubmitFeedback={
+                  onSectionSubmitFeedback
+                    ? (detail, remember) =>
+                        onSectionSubmitFeedback(section.id, detail, remember)
+                    : undefined
+                }
+                isRegenerating={regeneratingSectionId === section.id}
+                visitId={visitId}
+              />
+            );
+          })}
       </>
     );
   }

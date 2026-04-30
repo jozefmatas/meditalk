@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { resolveSource, createPipelineStream } from "@/lib/pipeline";
+import { incrementCleanStreaks } from "@/lib/pipeline/feedback";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import type { SupportedLanguage } from "@/lib/types";
@@ -40,6 +41,21 @@ export async function POST(request: NextRequest) {
     const transcriptText: string | undefined = body.transcriptText;
     const audioPath: string | undefined = body.audioPath;
     const sendAsEmail: boolean = body.sendAsEmail === true;
+    /** Partial regen — only re-render these section IDs (feedback-triggered). */
+    const sectionIds: string[] | undefined = Array.isArray(body.sectionIds)
+      ? body.sectionIds.filter(
+          (x: unknown): x is string => typeof x === "string",
+        )
+      : undefined;
+    /** Inline feedback text for immediate regen (bypasses DB round-trip). */
+    const inlineFeedback: { sectionId: string; text: string } | undefined =
+      typeof body.inlineFeedback?.sectionId === "string" &&
+      typeof body.inlineFeedback?.text === "string"
+        ? {
+            sectionId: body.inlineFeedback.sectionId,
+            text: body.inlineFeedback.text,
+          }
+        : undefined;
 
     if (!visitId) {
       return NextResponse.json(
@@ -74,6 +90,29 @@ export async function POST(request: NextRequest) {
 
     // Resolve template
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
+
+    // Partial regen: expand top-level section IDs → leaf IDs for the pipeline
+    let leafIdFilter: Set<string> | undefined;
+    let priorSectionContents: Record<string, string> | undefined;
+    if (sectionIds?.length) {
+      const expandedIds = new Set<string>();
+      for (const id of sectionIds) {
+        const section = template.sections.find((s) => s.id === id);
+        if (section?.subsections?.length) {
+          for (const sub of section.subsections) expandedIds.add(sub.id);
+        } else {
+          expandedIds.add(id);
+        }
+      }
+      leafIdFilter = expandedIds;
+      priorSectionContents = (visitMeta.section_contents ?? {}) as Record<
+        string,
+        string
+      >;
+      logger.debug(
+        `[generate] section regen: ${sectionIds.join(",")} → ${expandedIds.size} leaves`,
+      );
+    }
 
     // Detect mode: fresh (has transcriptText/audioPath) vs cached (regenerate)
     const isFreshSource = !!(transcriptText || audioPath);
@@ -177,6 +216,9 @@ export async function POST(request: NextRequest) {
         fileIds,
         visitMetadata: refreshedMetadata,
         template,
+        ...(leafIdFilter ? { leafIdFilter } : {}),
+        ...(priorSectionContents ? { priorSectionContents } : {}),
+        ...(inlineFeedback ? { inlineFeedback } : {}),
       },
       persist: {
         supabase,
@@ -195,8 +237,21 @@ export async function POST(request: NextRequest) {
       afterPersist: async (result) => {
         lap("generation-done");
 
-        // Email dispatch
-        if (sendAsEmail) {
+        // Streak increment — full generation only (partial regen doesn't count)
+        if (!sectionIds?.length) {
+          const renderedIds = Object.keys(result.sectionContents);
+          incrementCleanStreaks(
+            supabase,
+            userId,
+            template.id,
+            renderedIds,
+          ).catch((err) =>
+            logger.warn("[generate] streak increment failed:", err),
+          );
+        }
+
+        // Email dispatch (skip for partial section regen)
+        if (sendAsEmail && !sectionIds?.length) {
           await dispatchNoteEmail({
             userId,
             visitId,
@@ -207,13 +262,14 @@ export async function POST(request: NextRequest) {
           lap("email-sent");
         }
 
-        // Clean up recovery audio blob (fire-and-forget)
-        const pendingAudioPath =
-          audioPath ||
-          (
-            (refreshedMetadata as Record<string, unknown>)
-              ?.generation_pending as { audioPath?: string } | undefined
-          )?.audioPath;
+        // Clean up recovery audio blob (fire-and-forget, full gen only)
+        const pendingAudioPath = sectionIds?.length
+          ? undefined
+          : audioPath ||
+            (
+              (refreshedMetadata as Record<string, unknown>)
+                ?.generation_pending as { audioPath?: string } | undefined
+            )?.audioPath;
         if (pendingAudioPath) {
           supabase.storage
             .from("encounter-files")

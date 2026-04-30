@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import { useTranslations } from "next-intl";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -33,8 +32,12 @@ interface NoteSectionCardProps {
   feedbackRating?: "up" | "down" | null;
   /** Called when user clicks thumbs-up */
   onThumbsUp?: () => void;
-  /** Called when user clicks thumbs-down */
-  onThumbsDown?: () => void;
+  /** Called when user submits feedback text (auto-regenerates) */
+  onSubmitFeedback?: (detail: string, remember: boolean) => void;
+  /** True when this section is currently regenerating */
+  isRegenerating?: boolean;
+  /** Visit ID for sessionStorage key */
+  visitId?: string;
 }
 
 /** Matches bullet-style list lines: - , • , – , — , *  (with optional leading whitespace) */
@@ -196,11 +199,12 @@ export function NoteSectionCard({
   onAutoFocused,
   feedbackRating,
   onThumbsUp,
-  onThumbsDown,
+  onSubmitFeedback,
+  isRegenerating,
+  visitId,
 }: NoteSectionCardProps) {
-  const tDetail = useTranslations("encounters.detail");
   const isReadOnly = !onContentChange;
-  const showFeedback = onThumbsUp && onThumbsDown;
+  const showFeedback = onThumbsUp && onSubmitFeedback;
 
   return (
     <div
@@ -256,16 +260,13 @@ export function NoteSectionCard({
         ))}
 
         {showFeedback && (
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-foreground/65">
-              {tDetail("feedback.sectionLabel")}
-            </span>
-            <SectionFeedbackRow
-              rating={feedbackRating ?? null}
-              onThumbsUp={onThumbsUp}
-              onThumbsDown={onThumbsDown}
-            />
-          </div>
+          <SectionFeedbackRow
+            rating={feedbackRating ?? null}
+            onThumbsUp={onThumbsUp}
+            onSubmitFeedback={onSubmitFeedback}
+            isRegenerating={isRegenerating}
+            storageKey={visitId ? `${visitId}-${sectionId}` : undefined}
+          />
         )}
       </div>
     </div>
