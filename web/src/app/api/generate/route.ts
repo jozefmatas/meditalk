@@ -202,7 +202,7 @@ export async function POST(request: NextRequest) {
           await dispatchNoteEmail({
             userId,
             visitId,
-            title: visit.title || "Untitled",
+            title: visit.title || result.suggestedTitle || "Untitled",
             noteHtml: result.generatedNote,
             language,
           });
