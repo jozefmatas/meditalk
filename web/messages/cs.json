@@ -200,7 +200,7 @@
       "feedback": {
         "globalLabel": "Celkové hodnocení",
         "sectionLabel": "Hodnocení sekce",
-        "looksGood": "Vypadá dobře",
+        "looksGood": "Dobře",
         "needsWork": "Potřebuje úpravu...",
         "feedbackPlaceholder": "Popište, co je špatně nebo co je třeba změnit...",
         "rememberForFuture": "Zapamatovat pro budoucí záznamy",
@@ -219,9 +219,16 @@
         "detailPlaceholder": "Popište problém (nepovinné)...",
         "cancel": "Zrušit",
         "submit": "Odeslat",
-        "toastTitle": "Děkujeme za zpětnou vazbu",
-        "toastDescription": "Vaše zpětná vazba pomáhá zlepšovat kvalitu generovaných záznamů.",
-        "regenerate": "Přegenerovat s vaší zpětnou vazbou?"
+        "toastMessage": "Děkujeme za zpětnou vazbu! Pomáháte zlepšovat kvalitu generovaných záznamů.",
+        "regenerate": "Přegenerovat s vaší zpětnou vazbou?",
+        "recordFeedback": "Nahrát zpětnou vazbu",
+        "recordingStatus": "Nahrávám",
+        "stopRecording": "Zastavit",
+        "transcribing": "Přepisuji...",
+        "transcriptionFailed": "Přepis selhal. Prosím napište zpětnou vazbu.",
+        "recordingError": "Nahrávání selhalo. Zkontrolujte oprávnění mikrofonu.",
+        "recordingTooShort": "Nahrávka příliš krátká",
+        "defaultMicrophone": "Výchozí mikrofon"
       }
     },
     "insufficientContext": "Nedostatek klinických informací pro vygenerování záznamu. Nahrajte konzultaci, přidejte poznámky s klinickými detaily nebo nahrajte relevantní soubory.",

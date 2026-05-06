@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/shared/skeleton";
 import { NoteSectionCard } from "@/components/encounters/note-section-card";
 import { NOT_STATED_VALUES, type NoteSection } from "@/lib/parse-note-sections";
 import type { Template } from "@/lib/templates";
+import type { SupportedLanguage } from "@/lib/types";
 
 interface NoteSectionsListProps {
   template: Template | undefined;
@@ -22,10 +23,14 @@ interface NoteSectionsListProps {
   noNoteLabel: string;
   /** Visit ID for sessionStorage keys */
   visitId?: string;
+  /** Language for voice recording transcription */
+  language?: SupportedLanguage;
   /** Feedback rating lookup (null = no rating yet) */
   getFeedbackRating?: (sectionId: string) => "up" | "down" | null;
   /** Thumbs-up handler per section */
   onSectionThumbsUp?: (sectionId: string) => void;
+  /** Remove feedback handler (clears thumbs-up) */
+  onSectionRemoveFeedback?: (sectionId: string) => void;
   /** Submit feedback handler (auto-regenerates section) */
   onSectionSubmitFeedback?: (
     sectionId: string,
@@ -57,8 +62,10 @@ export function NoteSectionsList({
   onAutoFocused,
   noNoteLabel,
   visitId,
+  language,
   getFeedbackRating,
   onSectionThumbsUp,
+  onSectionRemoveFeedback,
   onSectionSubmitFeedback,
   regeneratingSectionId,
 }: NoteSectionsListProps) {
@@ -236,6 +243,11 @@ export function NoteSectionsList({
                     ? () => onSectionThumbsUp(section.id)
                     : undefined
                 }
+                onRemoveFeedback={
+                  onSectionRemoveFeedback
+                    ? () => onSectionRemoveFeedback(section.id)
+                    : undefined
+                }
                 onSubmitFeedback={
                   onSectionSubmitFeedback
                     ? (detail, remember) =>
@@ -244,6 +256,7 @@ export function NoteSectionsList({
                 }
                 isRegenerating={regeneratingSectionId === section.id}
                 visitId={visitId}
+                language={language}
               />
             );
           })}

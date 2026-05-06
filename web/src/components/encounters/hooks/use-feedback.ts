@@ -16,6 +16,7 @@ interface SubmitDownOptions {
   sectionKind?: string;
   categories?: string[];
   detail: string;
+  remember?: boolean;
 }
 
 export function useFeedback(visitId: string | undefined) {
@@ -66,9 +67,7 @@ export function useFeedback(visitId: string | undefined) {
         }),
       });
 
-      toast.success(tFeedback("toastTitle"), {
-        description: tFeedback("toastDescription"),
-      });
+      toast.success(tFeedback("toastMessage"));
     },
     [visitId, tFeedback],
   );
@@ -88,12 +87,11 @@ export function useFeedback(visitId: string | undefined) {
           rating: "down",
           categories: options.categories ?? [],
           detail: options.detail,
+          remember: options.remember ?? false,
         }),
       });
 
-      toast.success(tFeedback("toastTitle"), {
-        description: tFeedback("toastDescription"),
-      });
+      toast.success(tFeedback("toastMessage"));
     },
     [visitId, tFeedback],
   );
@@ -106,5 +104,30 @@ export function useFeedback(visitId: string | undefined) {
     });
   }, []);
 
-  return { getRating, submitUp, submitDown, clearRating, isLoaded };
+  const removeFeedback = useCallback(
+    async (sectionId: string | null) => {
+      if (!visitId) return;
+
+      // Optimistic update
+      clearRating(sectionId);
+
+      await fetch(`/api/encounters/${visitId}/feedback`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sectionId: sectionId ?? undefined,
+        }),
+      });
+    },
+    [visitId, clearRating],
+  );
+
+  return {
+    getRating,
+    submitUp,
+    submitDown,
+    clearRating,
+    removeFeedback,
+    isLoaded,
+  };
 }

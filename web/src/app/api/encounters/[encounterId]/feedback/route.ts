@@ -18,7 +18,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { encounterId: visitId } = await params;
 
     const body = await request.json();
-    const { sectionId, sectionKind, rating, categories, detail } = body;
+    const {
+      sectionId,
+      sectionKind,
+      rating,
+      categories,
+      detail,
+      remember = false,
+    } = body;
 
     if (!rating || !["up", "down"].includes(rating)) {
       return NextResponse.json(
@@ -46,29 +53,28 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const templateId = metadata.template_id;
     const sectionContents = metadata.section_contents ?? {};
 
-    // Snapshot section content + source at feedback time
-    const sectionContent = sectionId ? sectionContents[sectionId] : null;
-    const sourceSnapshot = {
-      transcript: metadata.transcript,
-      doctor_notes: metadata.doctor_notes,
-    };
-
-    // Reset streak on existing active entries for repeat thumbs-down
-    if (rating === "down") {
-      let query = supabase
+    // For "up" rating: resolve any existing negative feedback
+    if (rating === "up") {
+      await supabase
         .from("section_feedback")
-        .update({ clean_streak: 0 })
+        .update({ resolved_at: new Date().toISOString() })
         .eq("user_id", userId)
-        .eq("template_id", templateId)
-        .eq("rating", "down")
-        .is("retired_after_streak", null)
-        .is("resolved_at", null);
-      // NULL != '' in Postgres — use .is() for global feedback
-      query = sectionId
-        ? query.eq("section_id", sectionId)
-        : query.is("section_id", null);
-      await query;
+        .eq("visit_id", visitId)
+        .is("resolved_at", null)
+        .eq("section_id", sectionId || null);
+
+      return NextResponse.json({ success: true });
     }
+
+    // For "down" rating with remember=false: encounter-specific only
+    // For "down" rating with remember=true: cross-encounter learning
+    const sourceSnapshot = remember
+      ? {
+          transcript: metadata.transcript,
+          doctor_notes: metadata.doctor_notes,
+          files: metadata.files,
+        }
+      : null;
 
     const { data, error } = await supabase
       .from("section_feedback")
@@ -81,7 +87,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         rating,
         categories: categories ?? [],
         detail: detail ?? "",
-        section_content: sectionContent,
         source_snapshot: sourceSnapshot,
       })
       .select("id");
@@ -106,6 +111,55 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   } catch (err) {
     if (err instanceof Response) return err;
     logger.error("Feedback submit error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * DELETE /api/encounters/[encounterId]/feedback
+ * Remove feedback for a section (toggle thumbs-up off).
+ */
+export async function DELETE(request: NextRequest, { params }: RouteParams) {
+  try {
+    const auth = await requireAuth();
+    const { userId, supabase } = auth;
+    const { encounterId: visitId } = await params;
+
+    const body = await request.json();
+    const { sectionId } = body;
+
+    // Mark all feedback for this section as resolved
+    const { error } = await supabase
+      .from("section_feedback")
+      .update({ resolved_at: new Date().toISOString() })
+      .eq("visit_id", visitId)
+      .eq("user_id", userId)
+      .eq("section_id", sectionId ?? null)
+      .is("resolved_at", null);
+
+    if (error) {
+      logger.error("[feedback] Delete failed:", error);
+      return NextResponse.json(
+        { error: "Failed to remove feedback" },
+        { status: 500 },
+      );
+    }
+
+    logAudit({
+      ...createAuditContext(auth, request),
+      action: "feedback.remove",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { sectionId },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    if (err instanceof Response) return err;
+    logger.error("Feedback remove error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

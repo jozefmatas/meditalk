@@ -186,10 +186,23 @@ export function useSectionEditing({
       sectionContentsRef.current = merged;
       setSectionContents(merged);
 
+      // Remove newly-filled sections from removedSections so they render
+      const updatedRemoved = new Set(removedSections);
+      let removedSetChanged = false;
+      for (const [id, content] of Object.entries(updates)) {
+        if (content?.trim() && updatedRemoved.has(id)) {
+          updatedRemoved.delete(id);
+          removedSetChanged = true;
+        }
+      }
+      if (removedSetChanged) {
+        setRemovedSections(updatedRemoved);
+      }
+
       // Rebuild HTML from merged contents and persist
       const filtered: Record<string, string> = {};
       for (const [id, text] of Object.entries(merged)) {
-        if (!removedSections.has(id)) filtered[id] = text;
+        if (!updatedRemoved.has(id)) filtered[id] = text;
       }
       const html = buildTemplateHtml(template, filtered, sectionLabels);
 
@@ -199,7 +212,14 @@ export function useSectionEditing({
       setVisit((prev) => (prev ? { ...prev, encounter_note: html } : prev));
       patchEncounter(visitId, { encounter_note: html });
     },
-    [template, visitId, sectionLabels, removedSections, setGeneratedNoteHtml, setVisit],
+    [
+      template,
+      visitId,
+      sectionLabels,
+      removedSections,
+      setGeneratedNoteHtml,
+      setVisit,
+    ],
   );
 
   return {

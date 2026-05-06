@@ -200,7 +200,7 @@
       "feedback": {
         "globalLabel": "Overall rating",
         "sectionLabel": "Section rating",
-        "looksGood": "Looks good",
+        "looksGood": "Good",
         "needsWork": "Needs work...",
         "feedbackPlaceholder": "Describe what's wrong or what needs to be changed...",
         "rememberForFuture": "Remember for future notes",
@@ -219,9 +219,16 @@
         "detailPlaceholder": "Describe the issue (optional)...",
         "cancel": "Cancel",
         "submit": "Submit",
-        "toastTitle": "Thank you for your feedback",
-        "toastDescription": "Your feedback helps improve the quality of generated notes.",
-        "regenerate": "Regenerate with your feedback?"
+        "toastMessage": "Thank you for your feedback! You're helping improve the quality of generated notes.",
+        "regenerate": "Regenerate with your feedback?",
+        "recordFeedback": "Record feedback",
+        "recordingStatus": "Recording",
+        "stopRecording": "Stop",
+        "transcribing": "Transcribing...",
+        "transcriptionFailed": "Transcription failed. Please type your feedback.",
+        "recordingError": "Recording failed. Please check microphone permissions.",
+        "recordingTooShort": "Recording too short",
+        "defaultMicrophone": "Default Microphone"
       }
     },
     "insufficientContext": "Not enough clinical information to generate a note. Please record a consultation, add doctor's notes with clinical details, or upload relevant files.",

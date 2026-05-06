@@ -38,6 +38,8 @@ import { useEncounterData } from "@/components/encounters/hooks/use-encounter-da
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
 import { useEncounterGeneration } from "@/components/encounters/hooks/use-encounter-generation";
 import { useSectionEditing } from "@/components/encounters/hooks/use-section-editing";
+import { useFeedback } from "@/components/encounters/hooks/use-feedback";
+import { useFeedbackRegeneration } from "@/components/encounters/hooks/use-feedback-regeneration";
 
 interface PageProps {
   params: Promise<{ visitId: string }>;
@@ -185,6 +187,37 @@ export default function EncounterDetailPage({ params }: PageProps) {
     setGeneratedNoteHtml: generation.setGeneratedNoteHtml,
     setVisit: data.setVisit,
   });
+
+  // --- Feedback hooks ---
+  const feedback = useFeedback(visitId);
+  const feedbackRegen = useFeedbackRegeneration({
+    visitId,
+    sectionContentsRef: sections.sectionContentsRef,
+    replaceSections: sections.replaceSections,
+    template,
+    sectionLabels,
+  });
+
+  const handleSectionThumbsUp = useCallback(
+    (sectionId: string) => {
+      feedback.submitUp(sectionId);
+    },
+    [feedback],
+  );
+
+  const handleSectionRemoveFeedback = useCallback(
+    (sectionId: string) => {
+      feedback.removeFeedback(sectionId);
+    },
+    [feedback],
+  );
+
+  const handleSectionSubmitFeedback = useCallback(
+    (sectionId: string, detail: string, remember: boolean) => {
+      feedbackRegen.handleSectionSubmitFeedback(sectionId, detail, remember);
+    },
+    [feedbackRegen],
+  );
 
   // --- Retry handler ---
   const handleRetry = useCallback(() => {
@@ -344,6 +377,11 @@ export default function EncounterDetailPage({ params }: PageProps) {
               adjustDrawerOpen={adjustDrawerOpen}
               onAdjustDrawerOpenChange={setAdjustDrawerOpen}
               timerState={generation.timerState}
+              getFeedbackRating={feedback.getRating}
+              onSectionThumbsUp={handleSectionThumbsUp}
+              onSectionRemoveFeedback={handleSectionRemoveFeedback}
+              onSectionSubmitFeedback={handleSectionSubmitFeedback}
+              regeneratingSectionId={feedbackRegen.regeneratingSectionId}
               t={t}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
@@ -439,6 +477,11 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onAdjustGenerate={generation.handleAdjustGenerate}
                 adjustDrawerOpen={adjustDrawerOpen}
                 onAdjustDrawerOpenChange={setAdjustDrawerOpen}
+                getFeedbackRating={feedback.getRating}
+                onSectionThumbsUp={handleSectionThumbsUp}
+                onSectionRemoveFeedback={handleSectionRemoveFeedback}
+                onSectionSubmitFeedback={handleSectionSubmitFeedback}
+                regeneratingSectionId={feedbackRegen.regeneratingSectionId}
                 t={t}
               />
               <div aria-hidden className="min-h-32 shrink-0" />
