@@ -18,6 +18,7 @@ import {
 } from "@/components/shared/select";
 import { LiveWaveform } from "@/components/shared/live-waveform";
 import { TemplateSelector } from "@/components/templates/template-selector";
+import { cn } from "@/lib/utils";
 
 import {
   Dialog,
@@ -69,7 +70,8 @@ export interface RecordingBarRef {
 
 interface RecordingBarProps {
   disabled?: boolean;
-  onRecordingComplete: (blob: Blob) => void;
+  /** Called when finalize() returns a blob (not used in skipSessionPersistence mode) */
+  onRecordingComplete?: (blob: Blob) => void;
   onRecordingStateChange?: (state: RecordingState) => void;
   templateId?: string;
   onTemplateChange?: (id: string) => void;
@@ -77,6 +79,14 @@ interface RecordingBarProps {
   metadata?: Record<string, unknown>;
   /** Language for pause-time transcription (e.g. "sk", "en", "cs"). */
   language?: SupportedLanguage;
+  /** Skip consent dialog (assumes consent already obtained). Default: false */
+  skipConsent?: boolean;
+  /** Skip session persistence (no blob upload, no session restore). Default: false */
+  skipSessionPersistence?: boolean;
+  /** Callback fired with transcribed text when recording stops (requires language). */
+  onTranscriptionComplete?: (text: string) => void;
+  /** Custom button label (defaults to "Start recording") */
+  buttonLabel?: string;
 }
 
 function formatDuration(seconds: number) {
@@ -98,10 +108,15 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       visitId,
       metadata,
       language,
+      skipConsent = false,
+      skipSessionPersistence = false,
+      onTranscriptionComplete,
+      buttonLabel,
     },
     ref,
   ) {
     const t = useTranslations("encounters.detail");
+    const startButtonLabel = buttonLabel ?? t("startRecording");
 
     // Tracks whether the user has started a fresh recording in this mount
     const [freshRecordingStarted, setFreshRecordingStarted] = useState(false);
@@ -111,9 +126,10 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const [isPersisting, setIsPersisting] = useState(false);
 
     // Extract restored session from metadata (derived values computed after recorder)
-    const restoredSession = metadata?.recording_session as
-      | RecordingSession
-      | undefined;
+    // Skip session restoration when skipSessionPersistence is true
+    const restoredSession = skipSessionPersistence
+      ? undefined
+      : (metadata?.recording_session as RecordingSession | undefined);
 
     // Recording consent hook
     const consentMetadata = metadata as
@@ -220,6 +236,28 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     const persistBlobAtPause = async () => {
       const snapshot = recorderRef.current.getSnapshotBlob();
       if (!snapshot) return;
+
+      // Skip session persistence mode: just transcribe and callback
+      if (skipSessionPersistence && onTranscriptionComplete && language) {
+        setIsPersisting(true);
+        try {
+          const text = await transcribeBlob(snapshot, language, visitId);
+          if (text) {
+            onTranscriptionComplete(text);
+          } else {
+            toast.error(t("transcriptSaveFailed"));
+          }
+        } catch (err) {
+          logger.warn("[recording] Transcription failed:", err);
+          toast.error(t("transcriptSaveFailed"));
+        } finally {
+          setIsPersisting(false);
+        }
+        return;
+      }
+
+      // Skip session persistence entirely if requested
+      if (skipSessionPersistence) return;
 
       setIsPersisting(true);
       try {
@@ -338,7 +376,7 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     };
 
     const handleStart = () => {
-      if (metadata?.recording_consent === true) {
+      if (skipConsent || metadata?.recording_consent === true) {
         startRecordingFlow();
       } else {
         setShowConsentDialog(true);
@@ -484,22 +522,24 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
             disabled={!!disabled}
             className="w-full shrink-0 desktop:hidden"
           >
-            {t("startRecording")}
+            {startButtonLabel}
           </Button>
-          <div className="w-full desktop:hidden">{deviceSelector}</div>
-          {/* Desktop: mic then button */}
-          <div className="hidden min-w-0 items-center gap-3 desktop:flex">
+          {/* Desktop: mic on left */}
+          <div className="hidden desktop:block desktop:min-w-0 desktop:flex-1">
             {deviceSelector}
-            <Button
-              variant="secondary"
-              size="lg"
-              onClick={handleStart}
-              disabled={!!disabled}
-              className="shrink-0"
-            >
-              {t("startRecording")}
-            </Button>
           </div>
+
+          {/* Desktop: button on right */}
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={handleStart}
+            disabled={!!disabled}
+            className="hidden shrink-0 desktop:block"
+          >
+            {startButtonLabel}
+          </Button>
+
           {recorder.micError && (
             <p className="text-sm text-destructive">{t("micError")}</p>
           )}
@@ -561,7 +601,14 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     /* ── Paused: template selector (left) | mic + divider + status + resume button (right) ── */
     return (
       <>
-        <div className="flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-4">
+        <div
+          className={cn(
+            "flex flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-4",
+            templateId !== undefined && onTemplateChange
+              ? "desktop:justify-between"
+              : "desktop:justify-end",
+          )}
+        >
           {templateId !== undefined && onTemplateChange && (
             <TemplateSelector
               value={templateId}
@@ -572,8 +619,8 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
               className="w-full desktop:w-auto desktop:max-w-70"
             />
           )}
-          <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:gap-5">
-            <div className="hidden min-w-0 items-center gap-3 desktop:flex">
+          <div className="flex min-w-0 flex-col gap-3 desktop:flex-row desktop:items-center desktop:justify-between desktop:gap-5">
+            <div className="hidden min-w-0 items-center gap-3 desktop:flex desktop:flex-1">
               {deviceSelector}
               <div className="h-6 w-px shrink-0 bg-border" />
             </div>
