@@ -56,8 +56,8 @@ export default async function UsersPage() {
                   {new Date(u.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3 text-muted-foreground">
-                  {u.last_sign_in_at
-                    ? new Date(u.last_sign_in_at).toLocaleDateString()
+                  {u.last_active
+                    ? new Date(u.last_active).toLocaleDateString()
                     : "—"}
                 </td>
                 <td className="px-4 py-3 text-right">

@@ -3,10 +3,10 @@
 
 -- Per-user totals (users list + user detail)
 CREATE OR REPLACE FUNCTION aggregate_usage_by_user()
-RETURNS TABLE(user_id uuid, requests bigint, total_cost numeric)
+RETURNS TABLE(user_id uuid, requests bigint, total_cost numeric, last_active timestamptz)
 LANGUAGE sql STABLE
 AS $$
-  SELECT user_id, COUNT(*), COALESCE(SUM(cost_usd), 0)
+  SELECT user_id, COUNT(*), COALESCE(SUM(cost_usd), 0), MAX(created_at)
   FROM api_usage
   GROUP BY user_id;
 $$;

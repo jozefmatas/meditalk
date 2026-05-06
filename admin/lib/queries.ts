@@ -113,7 +113,7 @@ export interface UserRow {
   id: string;
   email: string;
   created_at: string;
-  last_sign_in_at: string | null;
+  last_active: string | null;
   requests: number;
   total_cost: number;
 }
@@ -133,22 +133,30 @@ export async function getUsers(): Promise<UserRow[]> {
     logger.error("[admin] getUsers usage error:", usageRes.error.message);
   }
 
-  const userUsage = new Map<string, { requests: number; cost: number }>();
+  const userUsage = new Map<
+    string,
+    { requests: number; cost: number; lastActive: string | null }
+  >();
   for (const r of usageRes.data ?? []) {
     userUsage.set(String(r.user_id), {
       requests: Number(r.requests),
       cost: Number(r.total_cost),
+      lastActive: r.last_active ? String(r.last_active) : null,
     });
   }
 
   return authRes.data.users
     .map((u) => {
-      const usage = userUsage.get(u.id) ?? { requests: 0, cost: 0 };
+      const usage = userUsage.get(u.id) ?? {
+        requests: 0,
+        cost: 0,
+        lastActive: null,
+      };
       return {
         id: u.id,
         email: u.email ?? "",
         created_at: u.created_at,
-        last_sign_in_at: u.last_sign_in_at ?? null,
+        last_active: usage.lastActive,
         requests: usage.requests,
         total_cost: usage.cost,
       };
