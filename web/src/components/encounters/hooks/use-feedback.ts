@@ -56,44 +56,66 @@ export function useFeedback(visitId: string | undefined) {
     async (sectionId: string | null) => {
       if (!visitId) return;
 
-      setRatings((prev) => new Map(prev).set(sectionId, "up"));
+      const prev = ratings.get(sectionId) ?? null;
+      setRatings((r) => new Map(r).set(sectionId, "up"));
 
-      await fetch(`/api/encounters/${visitId}/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId: sectionId ?? undefined,
-          rating: "up",
-        }),
-      });
-
-      toast.success(tFeedback("toastMessage"));
+      try {
+        const res = await fetch(`/api/encounters/${visitId}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sectionId: sectionId ?? undefined,
+            rating: "up",
+          }),
+        });
+        if (!res.ok) throw new Error("Request failed");
+        toast.success(tFeedback("toastMessage"));
+      } catch {
+        setRatings((r) => {
+          const next = new Map(r);
+          if (prev) next.set(sectionId, prev);
+          else next.delete(sectionId);
+          return next;
+        });
+        toast.error("Failed to save feedback");
+      }
     },
-    [visitId, tFeedback],
+    [visitId, tFeedback, ratings],
   );
 
   const submitDown = useCallback(
     async (sectionId: string | null, options: SubmitDownOptions) => {
       if (!visitId) return;
 
-      setRatings((prev) => new Map(prev).set(sectionId, "down"));
+      const prev = ratings.get(sectionId) ?? null;
+      setRatings((r) => new Map(r).set(sectionId, "down"));
 
-      await fetch(`/api/encounters/${visitId}/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId: sectionId ?? undefined,
-          sectionKind: options.sectionKind,
-          rating: "down",
-          categories: options.categories ?? [],
-          detail: options.detail,
-          remember: options.remember ?? false,
-        }),
-      });
-
-      toast.success(tFeedback("toastMessage"));
+      try {
+        const res = await fetch(`/api/encounters/${visitId}/feedback`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sectionId: sectionId ?? undefined,
+            sectionKind: options.sectionKind,
+            rating: "down",
+            categories: options.categories ?? [],
+            detail: options.detail,
+            remember: options.remember ?? false,
+          }),
+        });
+        if (!res.ok) throw new Error("Request failed");
+        toast.success(tFeedback("toastMessage"));
+      } catch {
+        setRatings((r) => {
+          const next = new Map(r);
+          if (prev) next.set(sectionId, prev);
+          else next.delete(sectionId);
+          return next;
+        });
+        toast.error("Failed to save feedback");
+      }
     },
-    [visitId, tFeedback],
+    [visitId, tFeedback, ratings],
   );
 
   const clearRating = useCallback((sectionId: string | null) => {
@@ -108,18 +130,25 @@ export function useFeedback(visitId: string | undefined) {
     async (sectionId: string | null) => {
       if (!visitId) return;
 
-      // Optimistic update
+      const prev = ratings.get(sectionId) ?? null;
       clearRating(sectionId);
 
-      await fetch(`/api/encounters/${visitId}/feedback`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId: sectionId ?? undefined,
-        }),
-      });
+      try {
+        const res = await fetch(`/api/encounters/${visitId}/feedback`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sectionId: sectionId ?? undefined,
+          }),
+        });
+        if (!res.ok) throw new Error("Request failed");
+      } catch {
+        // Rollback
+        if (prev) setRatings((r) => new Map(r).set(sectionId, prev));
+        toast.error("Failed to remove feedback");
+      }
     },
-    [visitId, clearRating],
+    [visitId, clearRating, ratings],
   );
 
   return {

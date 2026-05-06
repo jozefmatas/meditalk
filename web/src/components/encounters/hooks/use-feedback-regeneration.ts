@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { toast } from "sonner";
 import type { Template, TemplateSection } from "@/lib/templates/types";
 
 interface UseFeedbackRegenerationProps {
@@ -69,17 +70,7 @@ export function useFeedbackRegeneration({
         // 2. Trigger section regeneration
         setRegeneratingSectionId(sectionId);
 
-        const allSectionIds = Object.keys(sectionContentsRef.current || {});
         const currentContent = sectionContentsRef.current?.[sectionId] || "";
-
-        console.log("[feedback-regen] Regenerating section:", {
-          requestedSectionId: sectionId,
-          availableSectionIds: allSectionIds,
-          hasContent: sectionId in (sectionContentsRef.current || {}),
-          contentLength: currentContent.length,
-          contentPreview: currentContent.substring(0, 100),
-          feedbackLength: detail.length,
-        });
 
         // Check if this is a parent section (no content)
         const isParentSection =
@@ -87,30 +78,18 @@ export function useFeedbackRegeneration({
 
         if (isParentSection) {
           // Find child sections from template structure
-          // IMPORTANT: Include ALL subsections from template, even if they don't have content yet
           const childSections: Record<string, string> = {};
 
           if (template) {
             const section = findSectionInTemplate(template.sections, sectionId);
             if (section?.subsections) {
               for (const subsection of section.subsections) {
-                // Include all subsections, even if empty - let Claude create content for them
                 const content =
                   sectionContentsRef.current?.[subsection.id] || "";
                 childSections[subsection.id] = content;
               }
             }
           }
-
-          console.log("[feedback-regen] Parent section detected:", {
-            parentId: sectionId,
-            hasTemplate: !!template,
-            childSectionCount: Object.keys(childSections).length,
-            childSectionIds: Object.keys(childSections),
-            emptySubsections: Object.entries(childSections)
-              .filter(([_, content]) => !content)
-              .map(([id]) => id),
-          });
 
           // Build subsection labels for API
           const subsectionLabels: Record<string, string> = {};
@@ -137,11 +116,6 @@ export function useFeedbackRegeneration({
 
           const { updates } = await regenResponse.json();
 
-          console.log("[feedback-regen] Updating subsections:", {
-            updatedCount: Object.keys(updates).length,
-            updatedSectionIds: Object.keys(updates),
-          });
-
           // 3. Update subsection content in UI
           replaceSections(updates);
         } else {
@@ -164,28 +138,11 @@ export function useFeedbackRegeneration({
           const { sectionId: updatedSectionId, content } =
             await regenResponse.json();
 
-          // Verify the returned section ID matches the requested one
-          if (updatedSectionId !== sectionId) {
-            console.error("[feedback-regen] Section ID mismatch!", {
-              requested: sectionId,
-              returned: updatedSectionId,
-            });
-            throw new Error(
-              `Section ID mismatch: requested ${sectionId}, got ${updatedSectionId}`,
-            );
-          }
-
-          console.log("[feedback-regen] Updating section:", {
-            sectionId: updatedSectionId,
-            newContentLength: content.length,
-          });
-
           // 3. Update section content in UI
           replaceSections({ [updatedSectionId]: content });
         }
-      } catch (error) {
-        console.error("[feedback-regen] Error:", error);
-        throw error;
+      } catch {
+        toast.error("Failed to regenerate section");
       } finally {
         setRegeneratingSectionId(null);
       }

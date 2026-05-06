@@ -162,7 +162,7 @@ export function EncounterHeaderActions({
         {/* Adjust button — review mode only, desktop only */}
         {!isDraft && onAdjust && (
           <TooltipProvider>
-            <Tooltip open={showAdjustHint}>
+            <Tooltip open={showAdjustHint ?? false}>
               <TooltipTrigger asChild>
                 <Button
                   size="lg"
@@ -180,9 +180,11 @@ export function EncounterHeaderActions({
                     : t("detail.adjust")}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="max-w-64">
-                {t("detail.adjustHint")}
-              </TooltipContent>
+              {showAdjustHint && (
+                <TooltipContent side="bottom" className="max-w-64">
+                  {t("detail.adjustHint")}
+                </TooltipContent>
+              )}
             </Tooltip>
           </TooltipProvider>
         )}

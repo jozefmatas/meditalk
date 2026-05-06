@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const templateId = metadata.template_id;
     const sectionContents = metadata.section_contents ?? {};
 
-    // For "up" rating: resolve any existing negative feedback
+    // For "up" rating: resolve any existing negative feedback + insert "up" row
     if (rating === "up") {
       await supabase
         .from("section_feedback")
@@ -62,6 +62,19 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .eq("visit_id", visitId)
         .is("resolved_at", null)
         .eq("section_id", sectionId || null);
+
+      // Insert "up" row so GET can restore thumbs-up state on revisit
+      await supabase.from("section_feedback").insert({
+        visit_id: visitId,
+        user_id: userId,
+        template_id: templateId,
+        section_id: sectionId ?? null,
+        section_kind: sectionKind ?? null,
+        rating: "up",
+        categories: [],
+        detail: "",
+        source_snapshot: null,
+      });
 
       return NextResponse.json({ success: true });
     }
@@ -76,6 +89,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         }
       : null;
 
+    // Snapshot the section content at feedback time for prompt injection context
+    const sectionContent = sectionId
+      ? (sectionContents[sectionId] ?? null)
+      : null;
+
     const { data, error } = await supabase
       .from("section_feedback")
       .insert({
@@ -87,6 +105,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         rating,
         categories: categories ?? [],
         detail: detail ?? "",
+        section_content: sectionContent,
         source_snapshot: sourceSnapshot,
       })
       .select("id");

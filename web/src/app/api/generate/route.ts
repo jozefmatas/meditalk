@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/supabase/auth";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { resolveSource, createPipelineStream } from "@/lib/pipeline";
+import { incrementCleanStreaks } from "@/lib/pipeline/feedback";
+import { flattenSectionIds } from "@/lib/templates/html";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
 import type { SupportedLanguage } from "@/lib/types";
@@ -228,6 +230,14 @@ export async function POST(request: NextRequest) {
                 );
             });
         }
+
+        // Increment feedback streaks (fire-and-forget)
+        incrementCleanStreaks(
+          supabase,
+          userId,
+          template.id,
+          flattenSectionIds(template),
+        );
 
         lap("total");
       },

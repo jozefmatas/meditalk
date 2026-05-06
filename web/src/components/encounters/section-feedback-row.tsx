@@ -84,12 +84,13 @@ export function SectionFeedbackRow({
   // Save draft to sessionStorage on change
   useEffect(() => {
     if (!storageKey) return;
-    if (expanded && (feedbackText || rememberForFuture)) {
+    const hasDraft = expanded && (feedbackText || rememberForFuture);
+    if (hasDraft) {
       sessionStorage.setItem(
         storageKey,
         JSON.stringify({ text: feedbackText, remember: rememberForFuture }),
       );
-    } else if (!expanded) {
+    } else {
       sessionStorage.removeItem(storageKey);
     }
   }, [storageKey, expanded, feedbackText, rememberForFuture]);

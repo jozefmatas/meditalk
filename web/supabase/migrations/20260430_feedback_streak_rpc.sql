@@ -8,8 +8,13 @@ CREATE OR REPLACE FUNCTION increment_feedback_streaks(
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
+  -- Enforce caller identity: p_user_id must match the authenticated user
+  IF p_user_id IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'user_id mismatch';
+  END IF;
   -- Step 1: Increment streak for all active feedback on rendered sections
   UPDATE section_feedback
   SET clean_streak = clean_streak + 1

@@ -24,6 +24,7 @@ import type { RawSource } from "@/lib/sections/section-agent";
 import type { Template } from "@/lib/templates/types";
 import type { SupportedLanguage } from "@/lib/types";
 import { getActiveFeedback, buildFeedbackMap } from "@/lib/pipeline/feedback";
+import { logger } from "@/lib/logger";
 
 // ── Public types ──────────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ export async function runPipelineSession(
       }
     } catch (err) {
       // Silently continue without feedback if query fails
-      console.error("[session] Feedback query failed:", err);
+      logger.warn("[session] Feedback query failed:", err);
     }
   }
 

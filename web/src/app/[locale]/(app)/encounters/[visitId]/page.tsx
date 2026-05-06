@@ -213,8 +213,12 @@ export default function EncounterDetailPage({ params }: PageProps) {
   );
 
   const handleSectionSubmitFeedback = useCallback(
-    (sectionId: string, detail: string, remember: boolean) => {
-      feedbackRegen.handleSectionSubmitFeedback(sectionId, detail, remember);
+    async (sectionId: string, detail: string, remember: boolean) => {
+      await feedbackRegen.handleSectionSubmitFeedback(
+        sectionId,
+        detail,
+        remember,
+      );
     },
     [feedbackRegen],
   );

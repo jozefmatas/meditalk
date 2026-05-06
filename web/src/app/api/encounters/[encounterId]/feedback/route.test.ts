@@ -127,11 +127,19 @@ describe("POST /api/encounters/[encounterId]/feedback", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
 
-    // Should update (resolve) rather than insert
+    // Should update (resolve) existing negative feedback
     expect(mockSupabase.update).toHaveBeenCalledWith(
       expect.objectContaining({ resolved_at: expect.any(String) }),
     );
-    expect(mockSupabase.insert).not.toHaveBeenCalled();
+    // Should also insert an "up" row for state restoration on revisit
+    expect(mockSupabase.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rating: "up",
+        section_id: null,
+        categories: [],
+        detail: "",
+      }),
+    );
   });
 
   it("includes source_snapshot when remember=true", async () => {
