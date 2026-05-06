@@ -11,6 +11,14 @@ vi.mock("next-intl", () => ({
   },
 }));
 
+vi.mock("@/components/encounters/recording-bar", () => ({
+  RecordingBar: () => null,
+}));
+
+vi.mock("@/lib/utils", () => ({
+  cn: (...args: unknown[]) => args.filter(Boolean).join(" "),
+}));
+
 // Mock hugeicons
 vi.mock("@hugeicons/react", () => ({
   HugeiconsIcon: ({ "data-testid": testId }: { "data-testid"?: string }) => (
@@ -90,6 +98,7 @@ describe("SectionFeedbackRow", () => {
         rating={null}
         onThumbsUp={vi.fn()}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 
@@ -105,6 +114,7 @@ describe("SectionFeedbackRow", () => {
         rating={null}
         onThumbsUp={onUp}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 
@@ -118,11 +128,12 @@ describe("SectionFeedbackRow", () => {
         rating="up"
         onThumbsUp={vi.fn()}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 
     const looksGoodButton = screen.getByText("looksGood").closest("button");
-    expect(looksGoodButton).toHaveClass("bg-green-600");
+    expect(looksGoodButton).toHaveClass("bg-status-completed/10");
   });
 
   it("expands textarea when Needs work clicked", async () => {
@@ -132,6 +143,7 @@ describe("SectionFeedbackRow", () => {
         rating={null}
         onThumbsUp={vi.fn()}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 
@@ -199,6 +211,7 @@ describe("SectionFeedbackRow", () => {
         rating={null}
         onThumbsUp={vi.fn()}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 
@@ -215,6 +228,7 @@ describe("SectionFeedbackRow", () => {
         rating={null}
         onThumbsUp={vi.fn()}
         onSubmitFeedback={vi.fn()}
+        onRemoveFeedback={vi.fn()}
       />,
     );
 

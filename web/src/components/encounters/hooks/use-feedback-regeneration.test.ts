@@ -128,7 +128,9 @@ describe("useFeedbackRegeneration", () => {
         visitId: "visit-123",
         sectionContentsRef: { current: { history: "old content" } },
         replaceSections: vi.fn(),
-        template: mockTemplate as any,
+        template: mockTemplate as unknown as Parameters<
+          typeof useFeedbackRegeneration
+        >[0]["template"],
       }),
     );
 
@@ -218,7 +220,9 @@ describe("useFeedbackRegeneration", () => {
         visitId: "visit-123",
         sectionContentsRef: { current: sectionContents },
         replaceSections: mockReplaceSections,
-        template: mockTemplate as any,
+        template: mockTemplate as unknown as Parameters<
+          typeof useFeedbackRegeneration
+        >[0]["template"],
         sectionLabels: {
           "physical-exam": "Physical Examination",
           "physical-exam.blood-pressure": "Blood Pressure",
@@ -314,7 +318,9 @@ describe("useFeedbackRegeneration", () => {
         visitId: "visit-123",
         sectionContentsRef: { current: sectionContents },
         replaceSections: mockReplaceSections,
-        template: mockTemplate as any,
+        template: mockTemplate as unknown as Parameters<
+          typeof useFeedbackRegeneration
+        >[0]["template"],
         sectionLabels: {
           vitals: "Vitálne funkcie",
           "vitals.blood-pressure": "Krvný tlak",

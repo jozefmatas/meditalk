@@ -85,7 +85,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/encounters/[encounterId]/feedback", () => {
-  it("submits thumbs-down with categories and snapshots section content", async () => {
+  it("submits thumbs-down with categories", async () => {
     const req = makeJsonRequest("/api/encounters/v1/feedback", {
       sectionId: "oa",
       sectionKind: "history-narrative",
@@ -100,7 +100,7 @@ describe("POST /api/encounters/[encounterId]/feedback", () => {
     const body = await res.json();
     expect(body.id).toBe("fb-1");
 
-    // Verify insert was called with correct shape
+    // Verify insert was called with correct shape (no section_content, source_snapshot null when remember=false)
     expect(mockSupabase.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         visit_id: "v1",
@@ -111,20 +111,12 @@ describe("POST /api/encounters/[encounterId]/feedback", () => {
         rating: "down",
         categories: ["hallucination", "missing-info"],
         detail: "Patient never said they had a fever",
-        section_content: "<p>Patient presented with headache</p>",
-        source_snapshot: expect.objectContaining({
-          transcript: expect.any(String),
-          doctor_notes: expect.any(String),
-        }),
+        source_snapshot: null,
       }),
     );
   });
 
-  it("submits global thumbs-up with no categories or detail", async () => {
-    mockSupabase.select
-      .mockReturnValueOnce(mockSupabase)
-      .mockResolvedValueOnce({ data: [{ id: "fb-2" }], error: null });
-
+  it("resolves existing feedback on thumbs-up", async () => {
     const req = makeJsonRequest("/api/encounters/v1/feedback", {
       rating: "up",
     });
@@ -132,37 +124,36 @@ describe("POST /api/encounters/[encounterId]/feedback", () => {
     const res = await POST(req, routeParams());
     expect(res.status).toBe(200);
 
-    expect(mockSupabase.insert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        section_id: null,
-        section_kind: null,
-        rating: "up",
-        categories: [],
-        detail: "",
-        section_content: null,
-      }),
+    const body = await res.json();
+    expect(body.success).toBe(true);
+
+    // Should update (resolve) rather than insert
+    expect(mockSupabase.update).toHaveBeenCalledWith(
+      expect.objectContaining({ resolved_at: expect.any(String) }),
     );
+    expect(mockSupabase.insert).not.toHaveBeenCalled();
   });
 
-  it("resets clean_streak on existing active entries for repeat thumbs-down", async () => {
-    mockSupabase.select
-      .mockReturnValueOnce(mockSupabase)
-      .mockResolvedValueOnce({ data: [{ id: "fb-3" }], error: null });
-
+  it("includes source_snapshot when remember=true", async () => {
     const req = makeJsonRequest("/api/encounters/v1/feedback", {
       sectionId: "oa",
       rating: "down",
       categories: ["hallucination"],
       detail: "Still hallucinating",
+      remember: true,
     });
 
     const res = await POST(req, routeParams());
     expect(res.status).toBe(200);
 
-    // Should have called update to reset streaks before insert
-    expect(mockSupabase.update).toHaveBeenCalledWith({ clean_streak: 0 });
-    // Update should target section_feedback table
-    expect(mockSupabase.from).toHaveBeenCalledWith("section_feedback");
+    expect(mockSupabase.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_snapshot: expect.objectContaining({
+          transcript: expect.any(String),
+          doctor_notes: expect.any(String),
+        }),
+      }),
+    );
   });
 
   it("returns 404 when encounter not found", async () => {
