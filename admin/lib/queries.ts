@@ -161,7 +161,11 @@ export async function getUsers(): Promise<UserRow[]> {
         total_cost: usage.cost,
       };
     })
-    .sort((a, b) => b.total_cost - a.total_cost);
+    .sort((a, b) => {
+      const aTime = a.last_active ? new Date(a.last_active).getTime() : 0;
+      const bTime = b.last_active ? new Date(b.last_active).getTime() : 0;
+      return bTime - aTime;
+    });
 }
 
 export interface UserUsageRow {
