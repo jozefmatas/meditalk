@@ -26,12 +26,6 @@ import {
   SelectValue,
 } from "@/components/shared/select";
 import { LabeledSwitch } from "@/components/shared/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/shared/tooltip";
 import type { EncounterStatus, SupportedLanguage } from "@/lib/types";
 
 const GENERATION_LANGUAGES: { value: SupportedLanguage; label: string }[] = [
@@ -49,8 +43,6 @@ interface EncounterHeaderActionsProps {
   onDelete: () => void;
   canGenerate: boolean;
   onAdjust?: () => void;
-  /** When true, shows a hint tooltip on the Adjust button. */
-  showAdjustHint?: boolean;
 }
 
 export function EncounterHeaderActions({
@@ -62,7 +54,6 @@ export function EncounterHeaderActions({
   onDelete,
   canGenerate,
   onAdjust,
-  showAdjustHint,
 }: EncounterHeaderActionsProps) {
   const t = useTranslations("encounters");
   const tNav = useTranslations("nav");
@@ -161,32 +152,21 @@ export function EncounterHeaderActions({
 
         {/* Adjust button — review mode only, desktop only */}
         {!isDraft && onAdjust && (
-          <TooltipProvider>
-            <Tooltip open={showAdjustHint ?? false}>
-              <TooltipTrigger asChild>
-                <Button
-                  size="lg"
-                  onClick={onAdjust}
-                  disabled={isProcessing}
-                  className="hidden desktop:inline-flex"
-                >
-                  <HugeiconsIcon
-                    icon={isProcessing ? Loading03Icon : SparklesIcon}
-                    size={16}
-                    className={isProcessing ? "animate-spin" : ""}
-                  />
-                  {isProcessing
-                    ? t("detail.generatingEncounter")
-                    : t("detail.adjust")}
-                </Button>
-              </TooltipTrigger>
-              {showAdjustHint && (
-                <TooltipContent side="bottom" className="max-w-64">
-                  {t("detail.adjustHint")}
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
+          <Button
+            size="lg"
+            onClick={onAdjust}
+            disabled={isProcessing}
+            className="hidden desktop:inline-flex"
+          >
+            <HugeiconsIcon
+              icon={isProcessing ? Loading03Icon : SparklesIcon}
+              size={16}
+              className={isProcessing ? "animate-spin" : ""}
+            />
+            {isProcessing
+              ? t("detail.generatingEncounter")
+              : t("detail.adjust")}
+          </Button>
         )}
       </>,
     );
@@ -204,7 +184,6 @@ export function EncounterHeaderActions({
     onMarkComplete,
     onDelete,
     onAdjust,
-    showAdjustHint,
     setHeaderActions,
     t,
     tNav,

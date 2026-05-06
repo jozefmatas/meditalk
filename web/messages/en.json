@@ -188,7 +188,6 @@
       "adjustTabNotes": "Free notes",
       "adjustRegenerate": "Regenerate",
       "adjustNotesPlaceholder": "Add additional context...",
-      "adjustHint": "Something off? Click Adjust to tell MediTalk what to fix.",
       "recordingConsent": {
         "title": "Recording Consent",
         "description": "Patient consent required before recording",

@@ -155,7 +155,6 @@ export function useFeedback(visitId: string | undefined) {
     getRating,
     submitUp,
     submitDown,
-    clearRating,
     removeFeedback,
     isLoaded,
   };
