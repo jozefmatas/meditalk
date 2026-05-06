@@ -25,25 +25,28 @@ export async function POST(request: NextRequest) {
     } = body;
 
     // Validate required fields
-    // Either currentContent (single section) OR subsections (parent section) must be present
-    const isSingleSection = currentContent !== undefined;
-    const isParentSection = subsections !== undefined;
-
-    if (
-      !visitId ||
-      !sectionId ||
-      !feedbackText ||
-      (!isSingleSection && !isParentSection)
-    ) {
-      logger.error("[adjust-section] Missing required fields:", {
-        visitId: !!visitId,
-        sectionId: !!sectionId,
-        currentContent: currentContent === undefined ? "undefined" : "present",
-        subsections: subsections === undefined ? "undefined" : "present",
-        feedbackText: !!feedbackText,
-      });
+    if (!visitId || !sectionId || !feedbackText) {
       return NextResponse.json(
         { error: "Missing required fields" },
+        { status: 400 },
+      );
+    }
+
+    // Either currentContent (single section) OR subsections (parent section) must be present
+    const isSingleSection =
+      currentContent !== undefined && typeof currentContent === "string";
+    const isParentSection =
+      subsections !== undefined &&
+      typeof subsections === "object" &&
+      subsections !== null &&
+      !Array.isArray(subsections);
+
+    if (!isSingleSection && !isParentSection) {
+      return NextResponse.json(
+        {
+          error:
+            "Either currentContent (string) or subsections (object) is required",
+        },
         { status: 400 },
       );
     }
@@ -113,10 +116,10 @@ export async function POST(request: NextRequest) {
         })
         .join("\n\n");
 
-      logger.info("[adjust-section] Subsection labels being sent to Claude:", {
-        subsectionLabels,
-        subsectionsListPreview: subsectionsList.substring(0, 500),
-        feedbackText,
+      logger.info("[adjust-section] Sending parent section to Claude:", {
+        subsectionIds: Object.keys(subsections),
+        subsectionsContentLength: subsectionsList.length,
+        feedbackLength: feedbackText.length,
       });
 
       const prompt = `You are a medical documentation assistant. A doctor has provided feedback on a parent section that contains multiple subsections.
@@ -162,9 +165,8 @@ Return ONLY the JSON object, with no additional commentary or explanation.`;
         .map((block) => (block.type === "text" ? block.text : ""))
         .join("");
 
-      logger.info("[adjust-section] Claude response:", {
+      logger.info("[adjust-section] Claude response received:", {
         responseLength: responseText.length,
-        responsePreview: responseText.substring(0, 500),
       });
 
       // Parse JSON response
@@ -178,7 +180,7 @@ Return ONLY the JSON object, with no additional commentary or explanation.`;
       } catch (error) {
         logger.error("[adjust-section] Failed to parse Claude response:", {
           error,
-          responseText,
+          responseLength: responseText.length,
         });
         throw new Error("Failed to parse subsection updates");
       }

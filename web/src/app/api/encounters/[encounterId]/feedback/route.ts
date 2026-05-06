@@ -50,8 +50,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     const metadata = visit.metadata ?? {};
-    const templateId = metadata.template_id;
-    const sectionContents = metadata.section_contents ?? {};
+    const templateId = metadata.template_id as string | undefined;
+    const sectionContents =
+      (metadata.section_contents as Record<string, string>) ?? {};
+
+    if (!templateId) {
+      return NextResponse.json(
+        { error: "Encounter has no template — generate a note first" },
+        { status: 400 },
+      );
+    }
 
     // For "up" rating: resolve any existing negative feedback + insert "up" row
     if (rating === "up") {
@@ -78,6 +86,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
       return NextResponse.json({ success: true });
     }
+
+    // Resolve any existing active feedback for this section to prevent duplicate injections
+    await supabase
+      .from("section_feedback")
+      .update({ resolved_at: new Date().toISOString() })
+      .eq("user_id", userId)
+      .eq("visit_id", visitId)
+      .eq("section_id", sectionId || null)
+      .is("resolved_at", null);
 
     // For "down" rating with remember=false: encounter-specific only
     // For "down" rating with remember=true: cross-encounter learning
