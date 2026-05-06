@@ -179,6 +179,7 @@ export async function POST(request: NextRequest) {
         template,
         leafIdFilter: affectedSet,
         priorSectionContents,
+        skipFeedback: true,
       },
       persist: {
         supabase,

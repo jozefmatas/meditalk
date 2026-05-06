@@ -90,6 +90,16 @@ interface ReviewViewProps {
   timerState?:
     | import("@/hooks/use-generation-timer").GenerationTimerState
     | null;
+  // Feedback
+  getFeedbackRating?: (sectionId: string) => "up" | "down" | null;
+  onSectionThumbsUp?: (sectionId: string) => void;
+  onSectionRemoveFeedback?: (sectionId: string) => void;
+  onSectionSubmitFeedback?: (
+    sectionId: string,
+    detail: string,
+    remember: boolean,
+  ) => void;
+  regeneratingSectionId?: string | null;
   // i18n
   t: (key: string) => string;
 }
@@ -128,6 +138,11 @@ export function ReviewView({
   adjustDrawerOpen = false,
   onAdjustDrawerOpenChange,
   timerState,
+  getFeedbackRating,
+  onSectionThumbsUp,
+  onSectionRemoveFeedback,
+  onSectionSubmitFeedback,
+  regeneratingSectionId,
   t,
 }: ReviewViewProps) {
   const tDetail = useTranslations("encounters.detail");
@@ -309,6 +324,13 @@ export function ReviewView({
       focusSectionId={focusSectionId}
       onAutoFocused={onAutoFocused}
       noNoteLabel={t("detail.noNote")}
+      visitId={visitId}
+      language={generationLanguage}
+      getFeedbackRating={getFeedbackRating}
+      onSectionThumbsUp={onSectionThumbsUp}
+      onSectionRemoveFeedback={onSectionRemoveFeedback}
+      onSectionSubmitFeedback={onSectionSubmitFeedback}
+      regeneratingSectionId={regeneratingSectionId}
     />
   );
 

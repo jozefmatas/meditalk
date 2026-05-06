@@ -8,6 +8,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Delete01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/shared/button";
 import { cn } from "@/lib/utils";
+import { SectionFeedbackRow } from "./section-feedback-row";
+import type { SupportedLanguage } from "@/lib/types";
 
 interface SubsectionData {
   id: string;
@@ -27,6 +29,20 @@ interface NoteSectionCardProps {
   autoFocusId?: string | null;
   /** Called after auto-focus completes, so the parent can clear the state */
   onAutoFocused?: () => void;
+  /** Feedback rating for this section */
+  feedbackRating?: "up" | "down" | null;
+  /** Called when user clicks thumbs-up */
+  onThumbsUp?: () => void;
+  /** Called when user removes feedback (toggle thumbs-up off) */
+  onRemoveFeedback?: () => void;
+  /** Called when user submits feedback text (auto-regenerates) */
+  onSubmitFeedback?: (detail: string, remember: boolean) => void;
+  /** True when this section is currently regenerating */
+  isRegenerating?: boolean;
+  /** Visit ID for sessionStorage key */
+  visitId?: string;
+  /** Language for voice recording transcription */
+  language?: SupportedLanguage;
 }
 
 /** Matches bullet-style list lines: - , • , – , — , *  (with optional leading whitespace) */
@@ -186,8 +202,16 @@ export function NoteSectionCard({
   onRemove,
   autoFocusId,
   onAutoFocused,
+  feedbackRating,
+  onThumbsUp,
+  onRemoveFeedback,
+  onSubmitFeedback,
+  isRegenerating,
+  visitId,
+  language,
 }: NoteSectionCardProps) {
   const isReadOnly = !onContentChange;
+  const showFeedback = onThumbsUp && onRemoveFeedback && onSubmitFeedback;
 
   return (
     <div
@@ -241,6 +265,22 @@ export function NoteSectionCard({
             />
           </div>
         ))}
+
+        {showFeedback && (
+          <>
+            <div className="border-t border-border pb-3" />
+            <SectionFeedbackRow
+              rating={feedbackRating ?? null}
+              onThumbsUp={onThumbsUp}
+              onRemoveFeedback={onRemoveFeedback}
+              onSubmitFeedback={onSubmitFeedback}
+              isRegenerating={isRegenerating}
+              storageKey={visitId ? `${visitId}-${sectionId}` : undefined}
+              visitId={visitId}
+              language={language}
+            />
+          </>
+        )}
       </div>
     </div>
   );

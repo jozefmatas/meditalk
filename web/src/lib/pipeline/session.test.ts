@@ -29,6 +29,11 @@ vi.mock("@/lib/templates/html", () => ({
   flattenSectionIds: vi.fn(),
 }));
 
+vi.mock("@/lib/pipeline/feedback", () => ({
+  getActiveFeedback: vi.fn().mockResolvedValue([]),
+  buildFeedbackMap: vi.fn().mockReturnValue(new Map()),
+}));
+
 vi.mock("@/lib/logger", () => ({
   logger: {
     debug: vi.fn(),

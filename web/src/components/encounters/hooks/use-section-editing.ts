@@ -34,9 +34,16 @@ export function useSectionEditing({
   const [focusSectionId, setFocusSectionId] = useState<string | null>(null);
   const sectionContentsRef = useRef<Record<string, string>>({});
 
+  // When replaceSections updates generatedNoteHtml, skip re-parse below
+  const skipReparseRef = useRef(false);
+
   // Initialize sectionContents from generated HTML — setState is intentional here
   // because we're syncing local editing state from externally-generated HTML.
   useEffect(() => {
+    if (skipReparseRef.current) {
+      skipReparseRef.current = false;
+      return;
+    }
     if (!template || !generatedNoteHtml) return;
     const map = parseNoteToSectionMap(generatedNoteHtml, template);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from external data
@@ -165,6 +172,56 @@ export function useSectionEditing({
 
   const handleAutoFocused = useCallback(() => setFocusSectionId(null), []);
 
+  // Merge specific section updates into existing state (partial regen).
+  // Unlike setGeneratedNoteHtml → full re-parse, this preserves user edits
+  // on untouched sections.
+  const replaceSections = useCallback(
+    (updates: Record<string, string>) => {
+      if (!template) return;
+
+      // Cancel any pending debounced save — we're saving immediately
+      clearTimeout(saveNoteRef.current);
+
+      const merged = { ...sectionContentsRef.current, ...updates };
+      sectionContentsRef.current = merged;
+      setSectionContents(merged);
+
+      // Remove newly-filled sections from removedSections so they render
+      const updatedRemoved = new Set(removedSections);
+      let removedSetChanged = false;
+      for (const [id, content] of Object.entries(updates)) {
+        if (content?.trim() && updatedRemoved.has(id)) {
+          updatedRemoved.delete(id);
+          removedSetChanged = true;
+        }
+      }
+      if (removedSetChanged) {
+        setRemovedSections(updatedRemoved);
+      }
+
+      // Rebuild HTML from merged contents and persist
+      const filtered: Record<string, string> = {};
+      for (const [id, text] of Object.entries(merged)) {
+        if (!updatedRemoved.has(id)) filtered[id] = text;
+      }
+      const html = buildTemplateHtml(template, filtered, sectionLabels);
+
+      // Update HTML state without triggering re-parse
+      skipReparseRef.current = true;
+      setGeneratedNoteHtml(html);
+      setVisit((prev) => (prev ? { ...prev, encounter_note: html } : prev));
+      patchEncounter(visitId, { encounter_note: html });
+    },
+    [
+      template,
+      visitId,
+      sectionLabels,
+      removedSections,
+      setGeneratedNoteHtml,
+      setVisit,
+    ],
+  );
+
   return {
     sectionContents,
     removedSections,
@@ -174,5 +231,6 @@ export function useSectionEditing({
     handleRemoveSection,
     handleAddSection,
     handleAutoFocused,
+    replaceSections,
   };
 }

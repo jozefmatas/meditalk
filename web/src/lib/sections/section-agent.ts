@@ -123,12 +123,16 @@ export async function renderSection(
   /** Extra context appended to the user message (e.g. ICD suggestions
    *  for the conclusion section). Not part of the system prompt. */
   additionalContext?: string,
+  /** Prior-corrections block injected into system Block 3.
+   *  Built by `buildFeedbackMap()` from doctor feedback entries. */
+  feedbackBlock?: string,
 ): Promise<RenderedSection> {
   const systemBlocks = buildSystemBlocks(
     section,
     language,
     templateSystemPrompt,
     sectionExamples,
+    feedbackBlock,
   );
   const userMessage = buildUserMessage(
     source,
@@ -292,6 +296,7 @@ export function buildSystemBlocks(
   language: Language,
   templateSystemPrompt?: string,
   sectionExamples?: string[],
+  feedbackBlock?: string,
 ): SystemBlock[] {
   const localeLabel = LANGUAGE_LABEL[language];
   const blocks: SystemBlock[] = [];
@@ -325,12 +330,16 @@ You render ONE section of a structured medical note for a ${localeLabel}-speakin
           .join("\n\n")}\n\n`
       : "";
 
+  const feedbackText = feedbackBlock?.trim()
+    ? `\n\n${feedbackBlock.trim()}`
+    : "";
+
   blocks.push({
     text: `${examplesText}# Your task
 Render ONLY the "${section.title}" section. Output plain ${localeLabel} text — no heading, no preamble, no markdown, no meta-commentary. Follow the contract's format rules for this section (compact single paragraph vs. line-per-item vs. narrative prose).
 
 # Section contract (binding)
-${section.context}`,
+${section.context}${feedbackText}`,
   });
 
   return blocks;

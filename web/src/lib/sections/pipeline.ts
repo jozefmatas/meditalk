@@ -399,6 +399,12 @@ export interface GenerateNoteInput {
    * ignore it. When omitted, conclusion renders without ICD context.
    */
   icdSuggestionsPromise?: Promise<SuggestedIcdCode[]>;
+  /**
+   * Per-section feedback blocks from doctor corrections. Built by
+   * `buildFeedbackMap()`. Keys = section IDs, values = formatted
+   * `# Prior corrections` prompt blocks.
+   */
+  feedbackMap?: Map<string, string>;
 }
 
 export interface GenerateNoteResult {
@@ -418,6 +424,7 @@ export async function generateNote(
     leafIdFilter,
     skeleton,
     icdSuggestionsPromise,
+    feedbackMap,
   } = input;
   const language4 = normalizeLanguage(language);
   const allLeaves = collectLeafSections(template.sections);
@@ -494,6 +501,8 @@ export async function generateNote(
       );
     }
 
+    const feedbackBlock = feedbackMap?.get(leaf.id);
+
     let draft: RenderedSection;
     try {
       draft = await renderSection(
@@ -505,6 +514,7 @@ export async function generateNote(
         examples,
         skeleton,
         additionalContext,
+        feedbackBlock,
       );
     } catch (err) {
       logger.error(`[pipeline] section ${leaf.id} failed:`, err);
