@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { isTransientNetworkError } from "@/lib/api/is-transient-error";
 
 /**
  * Retry a Supabase call on transient fetch-level failures.
@@ -17,10 +18,9 @@ import { logger } from "@/lib/logger";
  * short exponential backoff. On retry, undici discards the dead socket
  * and opens a fresh connection, which succeeds.
  *
- * Only transient transport-level errors are retried:
- *  - Native `TypeError: fetch failed` thrown by undici
- *  - Errors whose message mentions `ECONNRESET`, `socket hang up`,
- *    `UND_ERR_SOCKET`, `other side closed`, `network`, `fetch failed`
+ * Only transient transport-level errors are retried — see
+ * `isTransientNetworkError` in `@/lib/api/is-transient-error` for the
+ * full pattern list.
  *
  * Supabase row-level / constraint errors returned in the `error` field
  * are NOT retried — those are application-level failures and would
@@ -76,37 +76,15 @@ export async function retrySupabaseCall<T>(
 
 /**
  * Identify transport-level fetch failures that are safe to retry.
- * These represent a dead TCP socket or transient network issue, not an
- * application-level error.
+ * Delegates to the unified `isTransientNetworkError`.
  */
 export function isTransientFetchError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = (err.message || "").toLowerCase();
-  const causeMsg = errCauseMessage(err).toLowerCase();
-  const haystack = `${msg} ${causeMsg}`;
-  return (
-    haystack.includes("fetch failed") ||
-    haystack.includes("econnreset") ||
-    haystack.includes("socket hang up") ||
-    haystack.includes("und_err_socket") ||
-    haystack.includes("other side closed") ||
-    haystack.includes("network") ||
-    haystack.includes("terminated") ||
-    haystack.includes("etimedout")
-  );
+  return isTransientNetworkError(err);
 }
 
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
-}
-
-function errCauseMessage(err: unknown): string {
-  if (err instanceof Error && err.cause) {
-    if (err.cause instanceof Error) return err.cause.message;
-    return String(err.cause);
-  }
-  return "";
 }
 
 function sleep(ms: number): Promise<void> {

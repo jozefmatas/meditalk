@@ -11,6 +11,10 @@
  *    Used for full recordings (bypasses Vercel body limit).
  */
 import { logger } from "@/lib/logger";
+import {
+  isTransientNetworkError,
+  isTransientStatusCode,
+} from "@/lib/api/is-transient-error";
 
 export interface TranscribeBlobDeps {
   /** fetch implementation — injectable so unit tests don't need global mocks. */
@@ -25,14 +29,12 @@ function blobMimeToExt(mime: string): string {
   return ".webm";
 }
 
-const TRANSIENT_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 const MAX_RETRIES = 2; // 3 attempts total
 const BASE_DELAY_MS = 3000; // 3s, 6s backoff
 
 function isTransient(err: unknown, status?: number): boolean {
-  if (err instanceof TypeError) return true; // network failure
-  if (status && TRANSIENT_STATUS_CODES.has(status)) return true;
-  return false;
+  if (status && isTransientStatusCode(status)) return true;
+  return isTransientNetworkError(err);
 }
 
 function retryDelay(attempt: number): number {
