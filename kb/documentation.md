@@ -4,6 +4,11 @@ _Last updated: 2026-04-29_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
 
+## What's new (2026-05-07)
+
+- **`POST /api/adjust-section`** — per-section LLM adjustment from doctor feedback. Handles both leaf sections (returns adjusted content) and parent sections (returns JSON map of subsection updates). Now receives `otherSectionContents` from the client so the LLM can reference lab results, findings, etc. when adjusting sections like conclusions — critical for encounters where raw sources (transcript, notes, files) are missing. Source-related prompt instructions are conditional on sources actually being present (prevents meta-commentary). 12 new tests.
+- **Error recovery in generate/adjust** — `handleGenerate` and `handleAdjust` in `use-encounter-generation.ts` now always reset encounter status from "processing" on any failure, preventing encounters from getting permanently stuck on the processing overlay.
+
 ## What's new (2026-04-29)
 
 - **Doctor feedback loops (Phase 1+2)** — `section_feedback` table + RLS, `GET/POST /api/encounters/[id]/feedback` routes, per-section and global thumbs-up/down UI with category modal, sonner toast, mobile-responsive layout. 12 new tests.
@@ -217,6 +222,8 @@ Clinical knowledge lives in three places: `template.styleExamples` (reference-no
 - [web/src/lib/pipeline/adjust-helpers.ts](../web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
 - [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
 - [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
+- [web/src/app/api/adjust-section/route.ts](../web/src/app/api/adjust-section/route.ts) — per-section feedback adjustment (single Sonnet call, receives other sections as context)
+- [web/src/components/encounters/hooks/use-feedback-regeneration.ts](../web/src/components/encounters/hooks/use-feedback-regeneration.ts) — client hook for section feedback → adjust-section API
 - [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
 - [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
 - [web/src/lib/sections/format-zaver.ts](../web/src/lib/sections/format-zaver.ts) — suggester → Záver formatter
@@ -447,6 +454,7 @@ Separate Next.js app at `admin/`:
 
 - `POST /api/generate` — SSE streaming note generation (fresh mode with `transcriptText`/`audioPath`, or cached mode without them for regeneration)
 - `POST /api/adjust` — incremental re-render of affected sections after mid-visit changes
+- `POST /api/adjust-section` — per-section LLM adjustment from doctor feedback (leaf or parent sections); receives other sections' content as context
 - `POST /api/batch-transcribe` — batch audio transcription
 
 ### Lookup

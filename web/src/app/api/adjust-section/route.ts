@@ -22,6 +22,8 @@ export async function POST(request: NextRequest) {
       feedbackText,
       subsections,
       subsectionLabels,
+      otherSectionContents,
+      sectionLabels,
     } = body;
 
     // Validate required fields
@@ -96,6 +98,27 @@ export async function POST(request: NextRequest) {
       sourcesSection += `**Uploaded Files Context:**\n${uploadedContext}\n\n`;
     }
 
+    // Build context from other sections of the note (lab results, findings, etc.)
+    let noteContext = "";
+    if (
+      otherSectionContents &&
+      typeof otherSectionContents === "object" &&
+      Object.keys(otherSectionContents).length > 0
+    ) {
+      const entries = Object.entries(
+        otherSectionContents as Record<string, string>,
+      )
+        .filter(([, content]) => content?.trim())
+        .map(([id, content]) => {
+          const label = sectionLabels?.[id] || id;
+          return `### ${label}\n${content}`;
+        })
+        .join("\n\n");
+      if (entries) {
+        noteContext = `**OTHER SECTIONS OF THE NOTE** (for reference — do NOT modify these):\n${entries}\n\n`;
+      }
+    }
+
     // Handle parent section regeneration
     if (isParentSection) {
       logger.info(
@@ -124,7 +147,7 @@ export async function POST(request: NextRequest) {
 
       const prompt = `You are a medical documentation assistant. A doctor has provided feedback on a parent section that contains multiple subsections.
 
-${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}**Current Subsections:**
+${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}${noteContext}**Current Subsections:**
 ${subsectionsList}
 
 **Doctor's Feedback:**
@@ -142,6 +165,7 @@ ${feedbackText}
   * If it has content and feedback requests changes, update it accordingly
   * Maintain consistent format and style with existing content
 ${sourcesSection ? "- You may cross-reference the original sources above to verify facts\n- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)" : "- Work with the current subsection contents as your sole reference"}
+${noteContext ? "- You may reference the other sections of the note above for medical context (e.g., lab results, findings)" : ""}
 - NEVER output meta-commentary, explanations, or apologies — return ONLY the JSON object
 
 Return a JSON object with ONLY the subsections that need updating. Use this format:
@@ -209,7 +233,7 @@ Return ONLY the JSON object, with no additional commentary or explanation.`;
 
     const prompt = `You are a medical documentation assistant. A doctor has reviewed a section of a medical note and provided feedback to improve it.
 
-${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}**Current Section Content:**
+${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}${noteContext}**Current Section Content:**
 ${currentContent}
 
 **Doctor's Feedback:**
@@ -221,6 +245,7 @@ ${feedbackText}
 - Keep all other information unchanged unless the feedback explicitly asks for changes
 - Maintain the same format and style as the original
 ${sourcesSection ? "- You may cross-reference the original sources above to verify facts\n- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)" : "- Work with the current section content as your sole reference"}
+${noteContext ? "- You may reference the other sections of the note above for medical context (e.g., lab results, findings)" : ""}
 - If the feedback asks to remove something, remove it
 - If the feedback asks to fix a typo or error, fix it precisely
 - If the feedback asks to add information, integrate it naturally into the existing content

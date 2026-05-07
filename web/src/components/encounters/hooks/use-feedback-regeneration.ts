@@ -72,6 +72,19 @@ export function useFeedbackRegeneration({
 
         const currentContent = sectionContentsRef.current?.[sectionId] || "";
 
+        // Build context from other sections so the LLM can reference
+        // lab results, findings, etc. when adjusting this section
+        const otherSectionContents: Record<string, string> = {};
+        if (sectionContentsRef.current) {
+          for (const [id, content] of Object.entries(
+            sectionContentsRef.current,
+          )) {
+            if (id !== sectionId && content?.trim()) {
+              otherSectionContents[id] = content;
+            }
+          }
+        }
+
         // Check if this is a parent section (no content)
         const isParentSection =
           !currentContent || currentContent.trim().length === 0;
@@ -107,6 +120,8 @@ export function useFeedbackRegeneration({
               feedbackText: detail,
               subsections: childSections,
               subsectionLabels,
+              otherSectionContents,
+              sectionLabels,
             }),
           });
 
@@ -128,6 +143,8 @@ export function useFeedbackRegeneration({
               sectionId,
               currentContent,
               feedbackText: detail,
+              otherSectionContents,
+              sectionLabels,
             }),
           });
 
