@@ -5,15 +5,15 @@ import { NextRequest } from "next/server";
 // ── Mocks ─────────────────────────────────────────────────────────
 
 const mockSupabase = {
-  auth: { getUser: vi.fn() },
   from: vi.fn().mockReturnThis(),
   select: vi.fn().mockReturnThis(),
   eq: vi.fn().mockReturnThis(),
   single: vi.fn(),
 };
 
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: vi.fn().mockResolvedValue(mockSupabase),
+const mockRequireAuth = vi.fn();
+vi.mock("@/lib/supabase/auth", () => ({
+  requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
 }));
 
 const mockMessagesCreate = vi.fn();
@@ -27,6 +27,22 @@ vi.mock("@anthropic-ai/sdk", () => {
 
 vi.mock("@/lib/encounters/sources", () => ({
   getTranscript: vi.fn().mockReturnValue(null),
+}));
+
+const mockLogAudit = vi.fn();
+vi.mock("@/lib/audit", () => ({
+  logAudit: (...args: unknown[]) => mockLogAudit(...args),
+  createAuditContext: vi.fn().mockReturnValue({
+    actorId: "user-1",
+    actorEmail: "test@example.com",
+    isImpersonation: false,
+    ipAddress: "127.0.0.1",
+  }),
+}));
+
+const mockLogUsage = vi.fn();
+vi.mock("@/lib/usage", () => ({
+  logUsage: (...args: unknown[]) => mockLogUsage(...args),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -53,8 +69,12 @@ function makeRequest(body: Record<string, unknown>) {
 }
 
 function authedUser() {
-  mockSupabase.auth.getUser.mockResolvedValue({
-    data: { user: { id: "user-1" } },
+  mockRequireAuth.mockResolvedValue({
+    userId: "user-1",
+    supabase: mockSupabase,
+    isImpersonating: false,
+    realUserId: "user-1",
+    realUserEmail: "test@example.com",
   });
 }
 
@@ -65,9 +85,14 @@ function visitExists(metadata: Record<string, unknown> = {}) {
   });
 }
 
-function claudeReturns(text: string) {
+function claudeReturns(
+  text: string,
+  usage = { input_tokens: 500, output_tokens: 100 },
+) {
   mockMessagesCreate.mockResolvedValue({
     content: [{ type: "text", text }],
+    model: "claude-sonnet-4-20250514",
+    usage,
   });
 }
 
@@ -85,30 +110,15 @@ beforeEach(() => {
 });
 
 describe("POST /api/adjust-section", () => {
-  // ── Validation ──────────────────────────────────────────────────
+  // ── Auth ─────────────────────────────────────────────────────────
 
-  it("returns 400 when required fields are missing", async () => {
-    const res = await POST(makeRequest({ visitId: "v1" }));
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("Missing required fields");
-  });
-
-  it("returns 400 when neither currentContent nor subsections provided", async () => {
-    const res = await POST(
-      makeRequest({
-        visitId: "v1",
-        sectionId: "s1",
-        feedbackText: "fix this",
+  it("returns 401 when requireAuth throws", async () => {
+    mockRequireAuth.mockRejectedValue(
+      new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
       }),
     );
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("Either currentContent");
-  });
-
-  it("returns 401 when user is not authenticated", async () => {
-    mockSupabase.auth.getUser.mockResolvedValue({ data: { user: null } });
 
     const res = await POST(
       makeRequest({
@@ -119,6 +129,30 @@ describe("POST /api/adjust-section", () => {
       }),
     );
     expect(res.status).toBe(401);
+  });
+
+  // ── Validation ──────────────────────────────────────────────────
+
+  it("returns 400 when required fields are missing", async () => {
+    authedUser();
+    const res = await POST(makeRequest({ visitId: "v1" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Missing required fields");
+  });
+
+  it("returns 400 when neither currentContent nor subsections provided", async () => {
+    authedUser();
+    const res = await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        feedbackText: "fix this",
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Either currentContent");
   });
 
   it("returns 404 when visit is not found", async () => {
@@ -334,5 +368,88 @@ describe("POST /api/adjust-section", () => {
     // Note context also present
     expect(prompt).toContain("OTHER SECTIONS OF THE NOTE");
     expect(prompt).toContain("Lab Results");
+  });
+
+  // ── Audit logging ──────────────────────────────────────────────
+
+  it("calls logAudit on successful adjustment", async () => {
+    authedUser();
+    visitExists();
+    claudeReturns("Updated.");
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        currentContent: "Old",
+        feedbackText: "Improve",
+      }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "encounter.adjust_section",
+        resourceType: "encounter",
+        resourceId: "v1",
+      }),
+    );
+  });
+
+  // ── Usage tracking ─────────────────────────────────────────────
+
+  it("logs usage after single-section LLM call", async () => {
+    authedUser();
+    visitExists();
+    claudeReturns("Updated.", { input_tokens: 800, output_tokens: 200 });
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        currentContent: "Old",
+        feedbackText: "Improve",
+      }),
+    );
+
+    expect(mockLogUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        visitId: "v1",
+        provider: "anthropic",
+        model: "claude-sonnet-4-20250514",
+        operation: "adjust_section",
+        inputTokens: 800,
+        outputTokens: 200,
+      }),
+    );
+  });
+
+  it("logs usage after parent-section LLM call", async () => {
+    authedUser();
+    visitExists();
+    claudeReturns('{"bp": "120/80"}', {
+      input_tokens: 1200,
+      output_tokens: 50,
+    });
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "vitals",
+        feedbackText: "Update BP",
+        subsections: { bp: "" },
+        subsectionLabels: { bp: "Blood Pressure" },
+      }),
+    );
+
+    expect(mockLogUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        visitId: "v1",
+        operation: "adjust_section",
+        inputTokens: 1200,
+        outputTokens: 50,
+      }),
+    );
   });
 });

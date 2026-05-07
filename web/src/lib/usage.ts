@@ -27,6 +27,7 @@ type Provider = "anthropic" | "vertex-gemini" | "openai" | "elevenlabs";
 type Operation =
   // Section-agent architecture (current)
   | "generate_section"
+  | "adjust_section"
   // Legacy pipeline operations — retained so older api_usage rows still classify
   | "generate_template"
   | "generate_template_draft"
