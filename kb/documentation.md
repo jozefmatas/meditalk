@@ -35,10 +35,10 @@ This document provides a comprehensive overview of how MediTalk works from end t
 
 **Key files:**
 
-- [web/src/app/[locale]/login/page.tsx](web/src/app/[locale]/login/page.tsx) — login page with OTP + magic link
-- [web/src/app/auth/callback/route.ts](web/src/app/auth/callback/route.ts) — PKCE code exchange
-- [web/src/app/auth/confirm/page.tsx](web/src/app/auth/confirm/page.tsx) — client-side token_hash verification
-- [web/src/lib/supabase/client.ts](web/src/lib/supabase/client.ts) — browser Supabase client
+- [web/src/app/[locale]/login/page.tsx](../web/src/app/[locale]/login/page.tsx) — login page with OTP + magic link
+- [web/src/app/auth/callback/route.ts](../web/src/app/auth/callback/route.ts) — PKCE code exchange
+- [web/src/app/auth/confirm/page.tsx](../web/src/app/auth/confirm/page.tsx) — client-side token_hash verification
+- [web/src/lib/supabase/client.ts](../web/src/lib/supabase/client.ts) — browser Supabase client
 
 ---
 
@@ -59,10 +59,10 @@ Sidebar updates in realtime via CustomEvents (`encounter-update`, `encounter-del
 
 **Key files:**
 
-- [web/src/components/nav/app-shell.tsx](web/src/components/nav/app-shell.tsx) — SidebarProvider + AppSidebar + Header + content
-- [web/src/components/nav/app-sidebar.tsx](web/src/components/nav/app-sidebar.tsx) — brand, nav, encounter list, user menu
-- [web/src/components/nav/header.tsx](web/src/components/nav/header.tsx) — breadcrumbs + portaled actions
-- [web/src/components/nav/nav-encounters.tsx](web/src/components/nav/nav-encounters.tsx) — infinite-scroll encounter list
+- [web/src/components/nav/app-shell.tsx](../web/src/components/nav/app-shell.tsx) — SidebarProvider + AppSidebar + Header + content
+- [web/src/components/nav/app-sidebar.tsx](../web/src/components/nav/app-sidebar.tsx) — brand, nav, encounter list, user menu
+- [web/src/components/nav/header.tsx](../web/src/components/nav/header.tsx) — breadcrumbs + portaled actions
+- [web/src/components/nav/nav-encounters.tsx](../web/src/components/nav/nav-encounters.tsx) — infinite-scroll encounter list
 
 ---
 
@@ -89,8 +89,8 @@ Sidebar updates in realtime via CustomEvents (`encounter-update`, `encounter-del
 
 **Key files:**
 
-- [web/src/hooks/use-create-encounter.ts](web/src/hooks/use-create-encounter.ts)
-- [web/src/app/api/encounters/route.ts](web/src/app/api/encounters/route.ts) — POST handler
+- [web/src/hooks/use-create-encounter.ts](../web/src/hooks/use-create-encounter.ts)
+- [web/src/app/api/encounters/route.ts](../web/src/app/api/encounters/route.ts) — POST handler
 
 ---
 
@@ -123,10 +123,10 @@ The main page at `/encounters/[visitId]` is where all the work happens. It has t
 
 **Key files:**
 
-- [web/src/components/encounters/recording-bar.tsx](web/src/components/encounters/recording-bar.tsx) — recording UI, pause-time upload, session persistence
-- [web/src/components/encounters/hooks/use-audio-recorder.ts](web/src/components/encounters/hooks/use-audio-recorder.ts) — web + native recording abstraction
-- [web/src/components/encounters/files-panel.tsx](web/src/components/encounters/files-panel.tsx) — file upload + extraction tracking
-- [web/src/hooks/use-save-status.ts](web/src/hooks/use-save-status.ts) — auto-save state machine
+- [web/src/components/encounters/recording-bar.tsx](../web/src/components/encounters/recording-bar.tsx) — recording UI, pause-time upload, session persistence
+- [web/src/components/encounters/hooks/use-audio-recorder.ts](../web/src/components/encounters/hooks/use-audio-recorder.ts) — web + native recording abstraction
+- [web/src/components/encounters/files-panel.tsx](../web/src/components/encounters/files-panel.tsx) — file upload + extraction tracking
+- [web/src/hooks/use-save-status.ts](../web/src/hooks/use-save-status.ts) — auto-save state machine
 
 ### 5b. Processing Overlay (status: `processing`)
 
@@ -145,12 +145,12 @@ When the doctor hits **Generate**:
 
 **Key files:**
 
-- [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) — coordinator hook (composes the three hooks below)
-- [web/src/components/encounters/hooks/use-generation-stream.ts](web/src/components/encounters/hooks/use-generation-stream.ts) — SSE streaming consumer, module-level caches, client retry
-- [web/src/components/encounters/hooks/use-pre-generation.ts](web/src/components/encounters/hooks/use-pre-generation.ts) — recording finalization, blob upload, transcription
-- [web/src/components/encounters/hooks/use-doctor-notes.ts](web/src/components/encounters/hooks/use-doctor-notes.ts) — 2s debounced auto-save with retry
-- [web/src/components/encounters/hooks/use-generation-polling.ts](web/src/components/encounters/hooks/use-generation-polling.ts) — recovery polling
-- [web/src/components/encounters/hooks/use-encounter-data.ts](web/src/components/encounters/hooks/use-encounter-data.ts) — status auto-corrections
+- [web/src/components/encounters/hooks/use-encounter-generation.ts](../web/src/components/encounters/hooks/use-encounter-generation.ts) — coordinator hook (composes the three hooks below)
+- [web/src/components/encounters/hooks/use-generation-stream.ts](../web/src/components/encounters/hooks/use-generation-stream.ts) — SSE streaming consumer, module-level caches, client retry
+- [web/src/components/encounters/hooks/use-pre-generation.ts](../web/src/components/encounters/hooks/use-pre-generation.ts) — recording finalization, blob upload, transcription
+- [web/src/components/encounters/hooks/use-doctor-notes.ts](../web/src/components/encounters/hooks/use-doctor-notes.ts) — 2s debounced auto-save with retry
+- [web/src/components/encounters/hooks/use-generation-polling.ts](../web/src/components/encounters/hooks/use-generation-polling.ts) — recovery polling
+- [web/src/components/encounters/hooks/use-encounter-data.ts](../web/src/components/encounters/hooks/use-encounter-data.ts) — status auto-corrections
 
 ### 5c. Review View (status: `to_review`)
 
@@ -166,11 +166,11 @@ When the doctor hits **Generate**:
 
 **Key files:**
 
-- [web/src/components/encounters/hooks/use-section-editing.ts](web/src/components/encounters/hooks/use-section-editing.ts) — inline section editing
-- [web/src/components/encounters/hooks/use-section-feedback.ts](web/src/components/encounters/hooks/use-section-feedback.ts) — feedback submission, rating state, and section regeneration via adjust-section API
-- [web/src/components/encounters/section-feedback-row.tsx](web/src/components/encounters/section-feedback-row.tsx) — thumbs-up/down buttons
-- [web/src/components/encounters/feedback-modal.tsx](web/src/components/encounters/feedback-modal.tsx) — category picker modal for thumbs-down
-- [web/src/lib/email/send-note-email.ts](web/src/lib/email/send-note-email.ts) — email dispatch
+- [web/src/components/encounters/hooks/use-section-editing.ts](../web/src/components/encounters/hooks/use-section-editing.ts) — inline section editing
+- [web/src/components/encounters/hooks/use-section-feedback.ts](../web/src/components/encounters/hooks/use-section-feedback.ts) — feedback submission, rating state, and section regeneration via adjust-section API
+- [web/src/components/encounters/section-feedback-row.tsx](../web/src/components/encounters/section-feedback-row.tsx) — thumbs-up/down buttons
+- [web/src/components/encounters/feedback-modal.tsx](../web/src/components/encounters/feedback-modal.tsx) — category picker modal for thumbs-down
+- [web/src/lib/email/send-note-email.ts](../web/src/lib/email/send-note-email.ts) — email dispatch
 
 ---
 
@@ -216,23 +216,23 @@ Clinical knowledge lives in three places: `template.styleExamples` (reference-no
 
 **Key files:**
 
-- [web/src/lib/pipeline/resolve-source.ts](web/src/lib/pipeline/resolve-source.ts) — source pre-processing (audio recovery, extraction, PHI scrub, file-text assembly)
-- [web/src/lib/pipeline/session.ts](web/src/lib/pipeline/session.ts) — shared orchestration core (file-focus → skeleton ∥ ICD → sections → Záver → HTML)
-- [web/src/lib/pipeline/persist.ts](web/src/lib/pipeline/persist.ts) — shared persistence (column update + metadata merge + lost-note logging)
-- [web/src/lib/pipeline/adjust-helpers.ts](web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
-- [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
-- [web/src/app/api/adjust/route.ts](web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
-- [web/src/app/api/adjust-section/route.ts](web/src/app/api/adjust-section/route.ts) — per-section feedback adjustment (single Sonnet call, receives other sections as context)
-- [web/src/lib/phi-scrubber.ts](web/src/lib/phi-scrubber.ts) — deterministic PHI regex
-- [web/src/lib/sections/suggest-icd.ts](web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
-- [web/src/lib/sections/pipeline.ts](web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection` + `runCriticAndReconcilers`)
-- [web/src/lib/sections/section-agent.ts](web/src/lib/sections/section-agent.ts) — `renderSection` (injects `# Voice examples` block, includes `isAbsenceDescription` safety net)
-- [web/src/lib/sections/critic.ts](web/src/lib/sections/critic.ts) — `criticPass` (opt-in per section, audits draft against source)
-- [web/src/lib/sections/reconcilers/index.ts](web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
-- [web/src/lib/templates/reference-notes.ts](web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
-- [web/src/lib/templates/html.ts](web/src/lib/templates/html.ts) — `buildTemplateHtml`
-- [web/src/lib/parse-note-sections.ts](web/src/lib/parse-note-sections.ts) — HTML → per-section map (label-based matching — fixes cascade shift when `skipEmpty` drops a middle subsection)
-- [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
+- [web/src/lib/pipeline/resolve-source.ts](../web/src/lib/pipeline/resolve-source.ts) — source pre-processing (audio recovery, extraction, PHI scrub, file-text assembly)
+- [web/src/lib/pipeline/session.ts](../web/src/lib/pipeline/session.ts) — shared orchestration core (file-focus → skeleton ∥ ICD → sections → Záver → HTML)
+- [web/src/lib/pipeline/persist.ts](../web/src/lib/pipeline/persist.ts) — shared persistence (column update + metadata merge + lost-note logging)
+- [web/src/lib/pipeline/adjust-helpers.ts](../web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
+- [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
+- [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
+- [web/src/app/api/adjust-section/route.ts](../web/src/app/api/adjust-section/route.ts) — per-section feedback adjustment (single Sonnet call, receives other sections as context)
+- [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
+- [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
+- [web/src/lib/sections/pipeline.ts](../web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection` + `runCriticAndReconcilers`)
+- [web/src/lib/sections/section-agent.ts](../web/src/lib/sections/section-agent.ts) — `renderSection` (injects `# Voice examples` block, includes `isAbsenceDescription` safety net)
+- [web/src/lib/sections/critic.ts](../web/src/lib/sections/critic.ts) — `criticPass` (opt-in per section, audits draft against source)
+- [web/src/lib/sections/reconcilers/index.ts](../web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
+- [web/src/lib/templates/reference-notes.ts](../web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
+- [web/src/lib/templates/html.ts](../web/src/lib/templates/html.ts) — `buildTemplateHtml`
+- [web/src/lib/parse-note-sections.ts](../web/src/lib/parse-note-sections.ts) — HTML → per-section map (label-based matching — fixes cascade shift when `skipEmpty` drops a middle subsection)
+- [web/src/lib/api/sse.ts](../web/src/lib/api/sse.ts) — SSE streaming helpers
 
 See [prompt-pipeline.md](prompt-pipeline.md) for the deep dive.
 
@@ -246,15 +246,15 @@ The `/api/regenerate` route was deleted. Regeneration is now handled by `/api/ge
 
 ## 8. Templates
 
-- **Built-in** (static): SOAP + specialty variants in [web/src/lib/templates/default-templates.ts](web/src/lib/templates/default-templates.ts), marked `isSystem: true`
+- **Built-in** (static): SOAP + specialty variants in [web/src/lib/templates/default-templates.ts](../web/src/lib/templates/default-templates.ts), marked `isSystem: true`
 - **User-defined**: Supabase `templates` table with custom sections, i18n labels, optional style guide, usage tracking
 - Each template has hierarchical sections with per-locale labels and mandatory `context` fields (English) explaining what content belongs in each section. All 8 system templates have context on every section and subsection (added via migration `20260416_add_global_section_contexts.sql`, refined by `20260419_fix_oa_la_section_contexts.sql` and `20260420_fix_la_ea_section_contexts.sql`). Key routing rules: OA (past medical history) explicitly excludes medications; LA (current medications) is the sole location for all drug names and dosing, including emergency/administered medications; EA (epidemiological history) explicitly excludes allergy content. Focused templates use abbreviated Slovak labels (RA, OA, SA, PA, LA, Ab, TO, etc.)
 - `resolveTemplate(id)` looks up DB first → static fallback → default SOAP
 
 **Key files:**
 
-- [web/src/lib/templates/index.ts](web/src/lib/templates/index.ts) — resolution logic
-- [web/src/lib/templates/types.ts](web/src/lib/templates/types.ts) — Template and TemplateSection interfaces
+- [web/src/lib/templates/index.ts](../web/src/lib/templates/index.ts) — resolution logic
+- [web/src/lib/templates/types.ts](../web/src/lib/templates/types.ts) — Template and TemplateSection interfaces
 
 ### 8a. User Template Editor (planned)
 
@@ -283,8 +283,8 @@ Doctors will be able to create and customize their own templates directly in the
 
 All transcription uses **ElevenLabs Scribe v2** (not Whisper) — better SK/CS accuracy.
 
-- Client-side helper: [web/src/components/encounters/hooks/transcribe-blob.ts](web/src/components/encounters/hooks/transcribe-blob.ts) — single retry with 2s delay for transient errors
-- Server endpoint: [web/src/app/api/batch-transcribe/route.ts](web/src/app/api/batch-transcribe/route.ts)
+- Client-side helper: [web/src/components/encounters/hooks/transcribe-blob.ts](../web/src/components/encounters/hooks/transcribe-blob.ts) — single retry with 2s delay for transient errors
+- Server endpoint: [web/src/app/api/batch-transcribe/route.ts](../web/src/app/api/batch-transcribe/route.ts)
 - Upload filename derived from blob's actual MIME type (`audio/mp4` → `.m4a`, not `.webm`) — critical for Safari
 
 **Transcript flow:**
@@ -307,12 +307,12 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
 
 **Two extraction paths:**
 
-1. **Background** (right after upload) — [web/src/app/api/encounters/[encounterId]/extract/route.ts](web/src/app/api/encounters/[encounterId]/extract/route.ts)
+1. **Background** (right after upload) — [web/src/app/api/encounters/[encounterId]/extract/route.ts](../web/src/app/api/encounters/[encounterId]/extract/route.ts)
 2. **Inline** (during generation) — if files arrive incomplete, extracted on-demand in the generate route
 
 **Recovery:** Stuck extractions (>5 min) reset to "failed" for retry. RPC persist has 3-attempt retry with backoff.
 
-**Key file:** [web/src/lib/extraction/extract-file.ts](web/src/lib/extraction/extract-file.ts)
+**Key file:** [web/src/lib/extraction/extract-file.ts](../web/src/lib/extraction/extract-file.ts)
 
 ---
 
@@ -392,8 +392,8 @@ started → recording → processing → to_review → completed/archived
 
 **Key files:**
 
-- [web/src/i18n/routing.ts](web/src/i18n/routing.ts) — locale config
-- [web/src/i18n/request.ts](web/src/i18n/request.ts) — message loading
+- [web/src/i18n/routing.ts](../web/src/i18n/routing.ts) — locale config
+- [web/src/i18n/request.ts](../web/src/i18n/request.ts) — message loading
 - `web/messages/{sk,cs,en}.json` — UI translations
 
 **Adding a new locale (de/fr/pl/…) or specialty (neurology/psychiatry/internal)** — see the dedicated [**"Adding a new locale or specialty"**](prompt-pipeline.md#adding-a-new-locale-or-specialty--what-to-touch) section in `prompt-pipeline.md`. It maps every locale- or specialty-coupled surface in the codebase (auto-portable / admin-editable / hand-maintained) and gives two checklists: one for locales, one for specialties. Use it as the single source of truth for expansion work.
@@ -411,8 +411,8 @@ started → recording → processing → to_review → completed/archived
 
 **Key files:**
 
-- [web/src/lib/platform.ts](web/src/lib/platform.ts) — platform detection
-- [web/src/lib/native-guards.ts](web/src/lib/native-guards.ts) — foreground service start/stop
+- [web/src/lib/platform.ts](../web/src/lib/platform.ts) — platform detection
+- [web/src/lib/native-guards.ts](../web/src/lib/native-guards.ts) — foreground service start/stop
 
 ---
 
@@ -507,7 +507,7 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 - **846+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
-- A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
+- A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
 
 ---
 

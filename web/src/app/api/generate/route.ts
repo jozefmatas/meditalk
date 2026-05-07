@@ -52,6 +52,7 @@ export const POST = withAuth(async (auth, request) => {
       "id, title, language, metadata, visit_date, patient_name, patient_id",
     )
     .eq("id", visitId)
+    .eq("user_id", userId)
     .single();
 
   if (visitError || !visit) {

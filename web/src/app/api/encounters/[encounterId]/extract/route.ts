@@ -39,11 +39,12 @@ export const POST = withAuth(
         );
       }
 
-      // Fetch visit to get metadata and language (RLS enforces ownership)
+      // Fetch visit to get metadata and language, explicitly scoped to the authenticated user
       const { data: visit, error: visitError } = await supabase
         .from("visits")
         .select("id, language, metadata")
         .eq("id", visitId)
+        .eq("user_id", userId)
         .single();
 
       if (visitError || !visit) {

@@ -70,6 +70,7 @@ export const POST = withAuth(async (auth, request) => {
     .from("visits")
     .select("id, user_id, metadata")
     .eq("id", visitId)
+    .eq("user_id", userId)
     .single();
 
   if (visitError || !visit) {

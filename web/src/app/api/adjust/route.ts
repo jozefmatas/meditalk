@@ -78,6 +78,7 @@ export const POST = withAuth(async (auth, request) => {
     .from("visits")
     .select("id, language, metadata, encounter_note")
     .eq("id", visitId)
+    .eq("user_id", userId)
     .single();
   if (visitError || !visit) {
     return NextResponse.json({ error: "Visit not found" }, { status: 404 });
