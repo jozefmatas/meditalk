@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/supabase/auth";
+import { logAudit, createAuditContext } from "@/lib/audit";
+import { logUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
 import { getTranscript } from "@/lib/encounters/sources";
 
@@ -13,6 +15,19 @@ function anthropic() {
 }
 
 export async function POST(request: NextRequest) {
+  let userId: string;
+  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
+  let authResult: Awaited<ReturnType<typeof requireAuth>>;
+
+  try {
+    authResult = await requireAuth();
+    userId = authResult.userId;
+    supabase = authResult.supabase;
+  } catch (err) {
+    if (err instanceof Response) return err;
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const body = await request.json();
     const {
@@ -53,28 +68,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify user auth
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    logAudit({
+      ...createAuditContext(authResult, request),
+      action: "encounter.adjust_section",
+      resourceType: "encounter",
+      resourceId: visitId,
+      metadata: { sectionId },
+    });
 
     // Fetch visit with sources
     const { data: visit, error: visitError } = await supabase
       .from("visits")
       .select("id, user_id, metadata")
       .eq("id", visitId)
-      .eq("user_id", user.id)
       .single();
 
     if (visitError || !visit) {
       logger.error("[adjust-section] Visit not found:", {
         visitId,
-        userId: user.id,
+        userId,
         error: visitError,
       });
       return NextResponse.json({ error: "Visit not found" }, { status: 404 });
@@ -185,6 +197,16 @@ Return ONLY the JSON object, with no additional commentary or explanation.`;
         messages: [{ role: "user", content: prompt }],
       });
 
+      logUsage({
+        userId,
+        visitId,
+        provider: "anthropic",
+        model: response.model,
+        operation: "adjust_section",
+        inputTokens: response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+      });
+
       const responseText = response.content
         .map((block) => (block.type === "text" ? block.text : ""))
         .join("");
@@ -260,6 +282,16 @@ Return ONLY the adjusted section content, with no additional commentary or expla
       max_tokens: 4000,
       temperature: 0.3, // Lower temperature for precision
       messages: [{ role: "user", content: prompt }],
+    });
+
+    logUsage({
+      userId,
+      visitId,
+      provider: "anthropic",
+      model: response.model,
+      operation: "adjust_section",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
     });
 
     const adjustedContent =

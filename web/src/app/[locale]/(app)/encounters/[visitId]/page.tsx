@@ -38,8 +38,7 @@ import { useEncounterData } from "@/components/encounters/hooks/use-encounter-da
 import { useEncounterMetadata } from "@/components/encounters/hooks/use-encounter-metadata";
 import { useEncounterGeneration } from "@/components/encounters/hooks/use-encounter-generation";
 import { useSectionEditing } from "@/components/encounters/hooks/use-section-editing";
-import { useFeedback } from "@/components/encounters/hooks/use-feedback";
-import { useFeedbackRegeneration } from "@/components/encounters/hooks/use-feedback-regeneration";
+import { useSectionFeedback } from "@/components/encounters/hooks/use-section-feedback";
 
 interface PageProps {
   params: Promise<{ visitId: string }>;
@@ -188,9 +187,8 @@ export default function EncounterDetailPage({ params }: PageProps) {
     setVisit: data.setVisit,
   });
 
-  // --- Feedback hooks ---
-  const feedback = useFeedback(visitId);
-  const feedbackRegen = useFeedbackRegeneration({
+  // --- Feedback ---
+  const feedback = useSectionFeedback({
     visitId,
     sectionContentsRef: sections.sectionContentsRef,
     replaceSections: sections.replaceSections,
@@ -214,13 +212,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
 
   const handleSectionSubmitFeedback = useCallback(
     async (sectionId: string, detail: string, remember: boolean) => {
-      await feedbackRegen.handleSectionSubmitFeedback(
-        sectionId,
-        detail,
-        remember,
-      );
+      await feedback.handleSectionSubmitFeedback(sectionId, detail, remember);
     },
-    [feedbackRegen],
+    [feedback],
   );
 
   // --- Retry handler ---
@@ -385,7 +379,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               onSectionThumbsUp={handleSectionThumbsUp}
               onSectionRemoveFeedback={handleSectionRemoveFeedback}
               onSectionSubmitFeedback={handleSectionSubmitFeedback}
-              regeneratingSectionId={feedbackRegen.regeneratingSectionId}
+              regeneratingSectionId={feedback.regeneratingSectionId}
               t={t}
             />
             <div aria-hidden className="min-h-32 shrink-0" />
@@ -485,7 +479,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
                 onSectionThumbsUp={handleSectionThumbsUp}
                 onSectionRemoveFeedback={handleSectionRemoveFeedback}
                 onSectionSubmitFeedback={handleSectionSubmitFeedback}
-                regeneratingSectionId={feedbackRegen.regeneratingSectionId}
+                regeneratingSectionId={feedback.regeneratingSectionId}
                 t={t}
               />
               <div aria-hidden className="min-h-32 shrink-0" />

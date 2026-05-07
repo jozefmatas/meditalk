@@ -34,20 +34,13 @@ import { RecordingConsentDialog } from "@/components/encounters/recording-consen
 import { useRecordingConsent } from "@/hooks/use-recording-consent";
 import { useAudioDevices } from "@/components/encounters/hooks/use-audio-devices";
 import { useRecordingGuards } from "@/components/encounters/hooks/use-recording-guards";
-import {
-  useAudioRecorder,
-  audioMimeToExt,
-} from "@/components/encounters/hooks/use-audio-recorder";
-import { uploadToStorage } from "@/lib/supabase/upload";
-import {
-  transcribeBlob,
-  transcribeFromPath,
-} from "@/components/encounters/hooks/transcribe-blob";
+import { useAudioRecorder } from "@/components/encounters/hooks/use-audio-recorder";
+import { transcribeBlob } from "@/components/encounters/hooks/transcribe-blob";
+import { persistRecordingSnapshot } from "@/lib/encounters/persist-recording-snapshot";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
 import type { SupportedLanguage } from "@/lib/types";
-import { patchEncounter } from "@/lib/encounters/api";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -95,8 +88,7 @@ function formatDuration(seconds: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// Re-export for external consumers
-export { audioMimeToExt } from "@/components/encounters/hooks/use-audio-recorder";
+
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
@@ -261,53 +253,13 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
 
       setIsPersisting(true);
       try {
-        const ext = audioMimeToExt(snapshot.type);
-        const { path } = await uploadToStorage(snapshot, `recording${ext}`, {
-          encounterId: visitId,
+        await persistRecordingSnapshot({
+          blob: snapshot,
+          visitId,
+          durationSeconds: durationOffset + recorderRef.current.duration,
+          language,
+          isNative,
         });
-
-        await patchEncounter(visitId, {
-          metadata: {
-            recording_session: {
-              state: "paused",
-              durationAtPause: durationOffset + recorderRef.current.duration,
-              audioPath: path,
-            } satisfies RecordingSession,
-          },
-        });
-
-        logger.debug(`[recording] Blob uploaded at pause: ${path}`);
-
-        // Fire-and-forget: transcribe the cumulative blob and save to
-        // metadata.transcript. Within a session the blob is cumulative (native
-        // pause/resume = single container), so each pause transcription replaces
-        // the previous transcript.
-        //
-        // On native, the blob is already in storage at `path` — use
-        // transcribeFromPath to bypass the Vercel 4.5 MB body limit (a 13-min
-        // WAV at 16 kHz can be ~25 MB). Fall back to transcribeBlob for web
-        // where blobs are smaller (compressed webm/m4a).
-        if (language) {
-          const transcribePromise = isNative
-            ? transcribeFromPath(path, language, visitId)
-            : transcribeBlob(snapshot, language, visitId);
-
-          transcribePromise
-            .then((text) => {
-              if (!text) return;
-              patchEncounter(visitId, {
-                metadata: { transcript: text },
-              }).then((res) => {
-                if (!res?.ok) toast.error(t("transcriptSaveFailed"));
-              });
-              logger.debug(
-                `[recording] Pause-time transcription saved: ${text.length} chars`,
-              );
-            })
-            .catch(() => {
-              toast.error(t("transcriptSaveFailed"));
-            });
-        }
       } catch (err) {
         logger.warn("[recording] Blob upload at pause failed:", err);
         toast.error(t("pauseSaveFailed"));

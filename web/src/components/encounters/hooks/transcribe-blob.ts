@@ -11,28 +11,23 @@
  *    Used for full recordings (bypasses Vercel body limit).
  */
 import { logger } from "@/lib/logger";
+import {
+  isTransientNetworkError,
+  isTransientStatusCode,
+} from "@/lib/api/is-transient-error";
+import { audioMimeToExt } from "@/lib/audio/mime-utils";
 
 export interface TranscribeBlobDeps {
   /** fetch implementation — injectable so unit tests don't need global mocks. */
   fetch: typeof fetch;
 }
 
-/** Map blob MIME type to file extension for the upload filename. */
-function blobMimeToExt(mime: string): string {
-  if (mime.includes("mp4")) return ".m4a";
-  if (mime.includes("ogg")) return ".ogg";
-  if (mime.includes("wav")) return ".wav";
-  return ".webm";
-}
-
-const TRANSIENT_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
 const MAX_RETRIES = 2; // 3 attempts total
 const BASE_DELAY_MS = 3000; // 3s, 6s backoff
 
 function isTransient(err: unknown, status?: number): boolean {
-  if (err instanceof TypeError) return true; // network failure
-  if (status && TRANSIENT_STATUS_CODES.has(status)) return true;
-  return false;
+  if (status && isTransientStatusCode(status)) return true;
+  return isTransientNetworkError(err);
 }
 
 function retryDelay(attempt: number): number {
@@ -59,7 +54,7 @@ export async function transcribeBlob(
       // Derive filename from blob's actual MIME type — Safari records
       // audio/mp4, not audio/webm. Mismatched filename+content can
       // confuse server-side format detection (e.g. ElevenLabs).
-      const ext = blobMimeToExt(blob.type);
+      const ext = audioMimeToExt(blob.type);
       form.append("audio", blob, `recording${ext}`);
       form.append("language", language);
       form.append("visitId", visitId);

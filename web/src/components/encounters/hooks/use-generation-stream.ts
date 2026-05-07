@@ -3,6 +3,10 @@
 import { useState, useCallback, useEffect } from "react";
 import type { NoteSection } from "@/lib/parse-note-sections";
 import { parseSSEStream } from "@/lib/api/parse-sse-stream";
+import {
+  isTransientNetworkError,
+  isTransientStatusCode,
+} from "@/lib/api/is-transient-error";
 import { on } from "@/lib/events";
 import { generationTracker } from "@/lib/encounters/generation-tracker";
 import { logger } from "@/lib/logger";
@@ -21,14 +25,8 @@ const CLIENT_RETRY_DELAY = 3000;
 
 /** Classify whether an error is transient (worth retrying) or permanent. */
 function isTransientError(err: unknown, status?: number): boolean {
-  if (err instanceof TypeError) return true; // Network failure
-  if (status && [408, 429, 502, 503, 504].includes(status)) return true;
-  if (
-    err instanceof Error &&
-    /network|aborted|failed to fetch/i.test(err.message)
-  )
-    return true;
-  return false;
+  if (status && isTransientStatusCode(status)) return true;
+  return isTransientNetworkError(err);
 }
 
 // ── Public types ──────────────────────────────────────────────────
@@ -244,6 +242,3 @@ export function useGenerationStream(
     restoreFromCache,
   };
 }
-
-// Re-export for backward compatibility
-export { isTransientError };
