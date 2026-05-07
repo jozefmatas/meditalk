@@ -104,6 +104,126 @@ export function useEncounterGeneration({
     [visitId, setVisit, setFiles],
   );
 
+  // ── Shared stream-execute → completion → error-recovery ────────
+
+  /**
+   * Shared flow for handleGenerate and handleAdjustGenerate:
+   * pre-stream work → stream.executeStream → onComplete → error recovery.
+   *
+   * Callers do their own recording-finalize / processing-switch / prepareSource
+   * before handing off to this helper.
+   */
+  async function executeGenerationFlow(params: {
+    url: string;
+    body: Record<string, unknown>;
+    retry: boolean;
+    templateId: string;
+    transcriptText?: string;
+    /** Status to revert to on error ("started" for generate, "to_review" for adjust). */
+    errorRecoveryStatus: "started" | "to_review";
+    /** If true, clears generation_pending metadata on error (generate only). */
+    clearGenerationPending?: boolean;
+    /** Captured title at call time. If provided AND empty, enables auto-title. */
+    autoTitleCapture?: string;
+    /** Runs inside the try block before the stream starts (e.g. await saves). */
+    preStream?: () => Promise<void>;
+    /** Runs after a successful stream (e.g. merge doctor notes). */
+    postSuccess?: () => void;
+  }) {
+    try {
+      await params.preStream?.();
+
+      const completedEvent = await stream.executeStream({
+        url: params.url,
+        body: params.body,
+        retry: params.retry,
+        onComplete: (event) => {
+          setCachedTemplate(params.templateId, {
+            generatedNote: event.generatedNote as string,
+          });
+          setGeneratedNoteHtml(event.generatedNote as string);
+
+          const autoTitle =
+            params.autoTitleCapture !== undefined &&
+            !params.autoTitleCapture.trim()
+              ? (event.suggestedTitle as string)
+              : null;
+
+          setVisit((prev) => {
+            if (!prev) return prev;
+            const existingMeta = (prev.metadata ?? {}) as Record<
+              string,
+              unknown
+            >;
+            return {
+              ...prev,
+              encounter_note: event.generatedNote as string,
+              status: "to_review",
+              ...(autoTitle ? { title: autoTitle } : {}),
+              metadata: {
+                ...existingMeta,
+                ...(params.transcriptText
+                  ? { transcript: params.transcriptText }
+                  : {}),
+                ...(event.clinicalAnalysis
+                  ? { clinical_analysis: event.clinicalAnalysis }
+                  : {}),
+              },
+            };
+          });
+
+          if (autoTitle) updateTitleRef.current(autoTitle);
+
+          emit("encounter-update", {
+            id: visitId,
+            status: "to_review",
+            ...(autoTitle ? { title: autoTitle } : {}),
+          });
+        },
+      });
+
+      // Persist to database (fire-and-forget)
+      if (completedEvent) {
+        const autoTitle =
+          params.autoTitleCapture !== undefined &&
+          !params.autoTitleCapture.trim()
+            ? (completedEvent.suggestedTitle as string)
+            : null;
+        patchEncounter(visitId, {
+          status: "to_review",
+          ...(autoTitle ? { title: autoTitle } : {}),
+        });
+      }
+
+      params.postSuccess?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      const isKnownError =
+        msg === "insufficient_context" || msg === "save_failed";
+      if (isKnownError) setError(msg);
+
+      // Always reset status so the encounter never stays stuck on "processing"
+      setVisit((prev) =>
+        prev ? { ...prev, status: params.errorRecoveryStatus } : prev,
+      );
+
+      if (params.errorRecoveryStatus !== "started") {
+        emit("encounter-update", {
+          id: visitId,
+          status: params.errorRecoveryStatus,
+        });
+      }
+
+      patchEncounterStatus(
+        visitId,
+        params.errorRecoveryStatus,
+        params.clearGenerationPending
+          ? { metadata: { generation_pending: null } }
+          : undefined,
+      );
+    }
+  }
+
   // ── handleGenerate ──────────────────────────────────────────────
 
   const handleGenerate = useCallback(
@@ -112,9 +232,7 @@ export function useEncounterGeneration({
       const capturedDoctorNotes = doctorNotes;
       const capturedTitle = titleRef.current;
 
-      // 1. Finalize recording synchronously (fast, local-only)
-      //    Must happen BEFORE the UI switch — the recording bar unmounts
-      //    when status changes to "processing".
+      // 1. Finalize recording (fast, local-only — must happen before UI switch)
       const bar = recordingBarRef.current;
       const finalized = bar
         ? {
@@ -123,11 +241,11 @@ export function useEncounterGeneration({
           }
         : null;
 
-      // 2. Switch to processing UI immediately (user sees overlay now)
+      // 2. Switch to processing UI immediately
       setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       emit("encounter-update", { id: visitId, status: "processing" });
 
-      // 3. Upload blob + transcribe (slow, network) with pre-finalized blob
+      // 3. Upload blob + transcribe (slow, network)
       const { transcriptText, audioRecoveryPath, releaseGuards } =
         await prepareSource({
           recordingBarRef,
@@ -149,91 +267,30 @@ export function useEncounterGeneration({
         },
       });
 
-      // Tear down foreground service after transcription
       releaseGuards?.();
 
-      try {
-        setAudioBlob(null);
-        await awaitPendingContextSave(visitId);
-        await awaitPendingExtractions(visitId);
-
-        const completedEvent = await stream.executeStream({
-          url: "/api/generate",
-          body: {
-            visitId,
-            templateId: capturedTemplateId,
-            doctorNotes: capturedDoctorNotes || undefined,
-            transcriptText: transcriptText || undefined,
-            audioPath: audioRecoveryPath || undefined,
-            sendAsEmail: options?.sendAsEmail || false,
-          },
-          retry: true,
-          onComplete: (event) => {
-            setCachedTemplate(capturedTemplateId, {
-              generatedNote: event.generatedNote as string,
-            });
-            setGeneratedNoteHtml(event.generatedNote as string);
-
-            const autoTitle = !capturedTitle.trim()
-              ? (event.suggestedTitle as string)
-              : null;
-
-            setVisit((prev) => {
-              if (!prev) return prev;
-              const existingMeta = (prev.metadata ?? {}) as Record<
-                string,
-                unknown
-              >;
-              return {
-                ...prev,
-                encounter_note: event.generatedNote as string,
-                status: "to_review",
-                ...(autoTitle ? { title: autoTitle } : {}),
-                metadata: {
-                  ...existingMeta,
-                  ...(transcriptText ? { transcript: transcriptText } : {}),
-                  ...(event.clinicalAnalysis
-                    ? { clinical_analysis: event.clinicalAnalysis }
-                    : {}),
-                },
-              };
-            });
-
-            if (autoTitle) updateTitleRef.current(autoTitle);
-
-            emit("encounter-update", {
-              id: visitId,
-              status: "to_review",
-              ...(autoTitle ? { title: autoTitle } : {}),
-            });
-          },
-        });
-
-        // Persist to database (fire-and-forget)
-        if (completedEvent) {
-          const autoTitle = !capturedTitle.trim()
-            ? (completedEvent.suggestedTitle as string)
-            : null;
-          patchEncounter(visitId, {
-            status: "to_review",
-            ...(autoTitle ? { title: autoTitle } : {}),
-          });
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "";
-        const isKnownError =
-          msg === "insufficient_context" || msg === "save_failed";
-
-        if (isKnownError) {
-          setError(msg);
-        }
-
-        // Always reset status so the encounter never stays stuck on "processing"
-        setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
-        patchEncounterStatus(visitId, "started", {
-          metadata: { generation_pending: null },
-        });
-      }
+      await executeGenerationFlow({
+        url: "/api/generate",
+        body: {
+          visitId,
+          templateId: capturedTemplateId,
+          doctorNotes: capturedDoctorNotes || undefined,
+          transcriptText: transcriptText || undefined,
+          audioPath: audioRecoveryPath || undefined,
+          sendAsEmail: options?.sendAsEmail || false,
+        },
+        retry: true,
+        templateId: capturedTemplateId,
+        transcriptText: transcriptText ?? undefined,
+        errorRecoveryStatus: "started",
+        clearGenerationPending: true,
+        autoTitleCapture: capturedTitle,
+        preStream: async () => {
+          setAudioBlob(null);
+          await awaitPendingContextSave(visitId);
+          await awaitPendingExtractions(visitId);
+        },
+      });
     },
     [
       visitId,
@@ -293,69 +350,25 @@ export function useEncounterGeneration({
 
       releaseGuards?.();
 
-      try {
-        clearCache();
-        await awaitPendingContextSave(visitId);
-
-        const completedEvent = await stream.executeStream({
-          url: "/api/adjust",
-          body: {
-            visitId,
-            templateId: capturedTemplateId,
-            adjustmentTranscript: transcriptText || undefined,
-          },
-          retry: false,
-          onComplete: (event) => {
-            setCachedTemplate(capturedTemplateId, {
-              generatedNote: event.generatedNote as string,
-            });
-            setGeneratedNoteHtml(event.generatedNote as string);
-
-            setVisit((prev) => {
-              if (!prev) return prev;
-              const existingMeta = (prev.metadata ?? {}) as Record<
-                string,
-                unknown
-              >;
-              return {
-                ...prev,
-                encounter_note: event.generatedNote as string,
-                status: "to_review",
-                metadata: {
-                  ...existingMeta,
-                  ...(transcriptText ? { transcript: transcriptText } : {}),
-                  ...(event.clinicalAnalysis
-                    ? { clinical_analysis: event.clinicalAnalysis }
-                    : {}),
-                },
-              };
-            });
-
-            emit("encounter-update", { id: visitId, status: "to_review" });
-          },
-        });
-
-        if (completedEvent) {
-          patchEncounter(visitId, { status: "to_review" });
-        }
-
-        if (mergedNotes) {
-          setDoctorNotes(mergedNotes);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "";
-        const isKnownError =
-          msg === "insufficient_context" || msg === "save_failed";
-
-        if (isKnownError) {
-          setError(msg);
-        }
-
-        // Always reset status so the encounter never stays stuck on "processing"
-        setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-        emit("encounter-update", { id: visitId, status: "to_review" });
-        patchEncounterStatus(visitId, "to_review");
-      }
+      await executeGenerationFlow({
+        url: "/api/adjust",
+        body: {
+          visitId,
+          templateId: capturedTemplateId,
+          adjustmentTranscript: transcriptText || undefined,
+        },
+        retry: false,
+        templateId: capturedTemplateId,
+        transcriptText: transcriptText ?? undefined,
+        errorRecoveryStatus: "to_review",
+        preStream: async () => {
+          clearCache();
+          await awaitPendingContextSave(visitId);
+        },
+        postSuccess: () => {
+          if (mergedNotes) setDoctorNotes(mergedNotes);
+        },
+      });
     },
     [
       visitId,
