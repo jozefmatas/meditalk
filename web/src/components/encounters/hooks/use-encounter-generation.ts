@@ -221,16 +221,18 @@ export function useEncounterGeneration({
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
-        const isServerError =
+        const isKnownError =
           msg === "insufficient_context" || msg === "save_failed";
 
-        if (isServerError) {
+        if (isKnownError) {
           setError(msg);
-          setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
-          patchEncounterStatus(visitId, "started", {
-            metadata: { generation_pending: null },
-          });
         }
+
+        // Always reset status so the encounter never stays stuck on "processing"
+        setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
+        patchEncounterStatus(visitId, "started", {
+          metadata: { generation_pending: null },
+        });
       }
     },
     [
@@ -342,13 +344,17 @@ export function useEncounterGeneration({
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "";
-        const isServerError =
+        const isKnownError =
           msg === "insufficient_context" || msg === "save_failed";
-        if (isServerError) {
+
+        if (isKnownError) {
           setError(msg);
-          setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
-          emit("encounter-update", { id: visitId, status: "to_review" });
         }
+
+        // Always reset status so the encounter never stays stuck on "processing"
+        setVisit((prev) => (prev ? { ...prev, status: "to_review" } : prev));
+        emit("encounter-update", { id: visitId, status: "to_review" });
+        patchEncounterStatus(visitId, "to_review");
       }
     },
     [
