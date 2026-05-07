@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
 
       const prompt = `You are a medical documentation assistant. A doctor has provided feedback on a parent section that contains multiple subsections.
 
-${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}` : ""}**Current Subsections:**
+${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}**Current Subsections:**
 ${subsectionsList}
 
 **Doctor's Feedback:**
@@ -141,8 +141,8 @@ ${feedbackText}
   * If it's empty and feedback implies content should exist, generate appropriate content
   * If it has content and feedback requests changes, update it accordingly
   * Maintain consistent format and style with existing content
-- You have access to the original sources to verify facts
-- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)
+${sourcesSection ? "- You may cross-reference the original sources above to verify facts\n- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)" : "- Work with the current subsection contents as your sole reference"}
+- NEVER output meta-commentary, explanations, or apologies — return ONLY the JSON object
 
 Return a JSON object with ONLY the subsections that need updating. Use this format:
 {
@@ -209,7 +209,7 @@ Return ONLY the JSON object, with no additional commentary or explanation.`;
 
     const prompt = `You are a medical documentation assistant. A doctor has reviewed a section of a medical note and provided feedback to improve it.
 
-${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}` : ""}**Current Section Content:**
+${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}**Current Section Content:**
 ${currentContent}
 
 **Doctor's Feedback:**
@@ -217,15 +217,15 @@ ${feedbackText}
 
 **Instructions:**
 - Carefully read the doctor's feedback
-- You have access to the original sources (transcript, notes, files) to verify facts
 - Adjust ONLY what the feedback specifically requests
 - Keep all other information unchanged unless the feedback explicitly asks for changes
 - Maintain the same format and style as the original
-- If the feedback asks to remove something, check the sources first - only remove if it's truly incorrect
+${sourcesSection ? "- You may cross-reference the original sources above to verify facts\n- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)" : "- Work with the current section content as your sole reference"}
+- If the feedback asks to remove something, remove it
 - If the feedback asks to fix a typo or error, fix it precisely
-- If the feedback asks to add information, verify it against the sources and integrate naturally
+- If the feedback asks to add information, integrate it naturally into the existing content
 - Do not add, remove, or modify anything not mentioned in the feedback
-- If the feedback conflicts with the sources, trust the doctor's feedback (they know the patient best)
+- NEVER output meta-commentary, explanations, or apologies — return ONLY the adjusted medical content
 
 Return ONLY the adjusted section content, with no additional commentary or explanation.`;
 
