@@ -6,16 +6,9 @@ import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
 import type { NativeAudioStreamPlugin } from "@/lib/native-audio-stream";
 import { WavBuilder } from "@/lib/wav-builder";
+export { audioMimeToExt } from "@/lib/audio/mime-utils";
 
 type RecordingState = "idle" | "recording" | "paused";
-
-/** Map recording MIME type to file extension. */
-export function audioMimeToExt(mime: string): string {
-  if (mime.includes("mp4")) return ".m4a";
-  if (mime.includes("ogg")) return ".ogg";
-  if (mime.includes("wav")) return ".wav";
-  return ".webm";
-}
 
 function getSupportedMimeType(): string {
   const types = [
