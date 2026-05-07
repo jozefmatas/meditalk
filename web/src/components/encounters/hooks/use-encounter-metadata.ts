@@ -46,7 +46,8 @@ export function useEncounterMetadata({
     if (patientName !== (visit.patient_name || ""))
       updates.patient_name = patientName.trim() || null;
 
-    const storedPersonalId = (visit.metadata.patient_personal_id as string) || "";
+    const storedPersonalId =
+      (visit.metadata.patient_personal_id as string) || "";
     if (patientId !== storedPersonalId) {
       updates.metadata = {
         patient_personal_id: patientId.trim() || null,

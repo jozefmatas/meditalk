@@ -148,8 +148,7 @@ describe("useGenerationPolling", () => {
     it("polls when status=processing and not streaming", async () => {
       fetchMock.mockResolvedValue({
         ok: true,
-        json: () =>
-          Promise.resolve(makeVisit({ status: "processing" })),
+        json: () => Promise.resolve(makeVisit({ status: "processing" })),
       });
 
       const opts = defaultOptions();
@@ -206,8 +205,7 @@ describe("useGenerationPolling", () => {
     it("times out after 180s and resets status to started", async () => {
       fetchMock.mockResolvedValue({
         ok: true,
-        json: () =>
-          Promise.resolve(makeVisit({ status: "processing" })),
+        json: () => Promise.resolve(makeVisit({ status: "processing" })),
       });
 
       const opts = defaultOptions();

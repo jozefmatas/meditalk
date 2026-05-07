@@ -50,9 +50,7 @@ export const POST = withAuth(async (auth, request) => {
   const templateId: string | undefined = body.templateId;
   const adjustmentTranscript: string | undefined = body.adjustmentTranscript;
   const newFileIds: string[] = Array.isArray(body.newFileIds)
-    ? body.newFileIds.filter(
-        (x: unknown): x is string => typeof x === "string",
-      )
+    ? body.newFileIds.filter((x: unknown): x is string => typeof x === "string")
     : [];
 
   if (!visitId) {
@@ -61,8 +59,7 @@ export const POST = withAuth(async (auth, request) => {
   if (!adjustmentTranscript?.trim() && newFileIds.length === 0) {
     return NextResponse.json(
       {
-        error:
-          "Nothing to adjust — provide adjustmentTranscript or newFileIds",
+        error: "Nothing to adjust — provide adjustmentTranscript or newFileIds",
       },
       { status: 400 },
     );

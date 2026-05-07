@@ -200,8 +200,9 @@ export const POST = withAuth(async (auth, request) => {
       const pendingAudioPath =
         audioPath ||
         (
-          refreshedMetadata
-            ?.generation_pending as { audioPath?: string } | undefined
+          refreshedMetadata?.generation_pending as
+            | { audioPath?: string }
+            | undefined
         )?.audioPath;
       if (pendingAudioPath) {
         supabase.storage

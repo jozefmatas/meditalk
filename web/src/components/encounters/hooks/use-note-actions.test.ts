@@ -134,10 +134,7 @@ describe("useNoteActions", () => {
 
   describe("handleSendEmail", () => {
     it("POSTs to /api/send-note-email with visitId", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({ ok: true }),
-      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
       const params = defaultParams();
       const { result } = renderHook(() => useNoteActions(params));
 
@@ -153,10 +150,7 @@ describe("useNoteActions", () => {
     });
 
     it("transitions emailStatus: idle → sending → sent → idle", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({ ok: true }),
-      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
       const params = defaultParams();
       const { result } = renderHook(() => useNoteActions(params));
 
@@ -176,10 +170,7 @@ describe("useNoteActions", () => {
     });
 
     it("sets emailStatus to failed on error", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({ ok: false }),
-      );
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
       const params = defaultParams();
       const { result } = renderHook(() => useNoteActions(params));
 

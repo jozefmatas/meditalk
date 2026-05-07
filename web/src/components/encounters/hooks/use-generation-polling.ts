@@ -78,12 +78,7 @@ export function useGenerationPolling({
         }
       })();
     });
-  }, [
-    visitId,
-    setVisit,
-    updateTitleRef,
-    setGeneratedNoteHtml,
-  ]);
+  }, [visitId, setVisit, updateTitleRef, setGeneratedNoteHtml]);
 
   // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
   useEffect(() => {

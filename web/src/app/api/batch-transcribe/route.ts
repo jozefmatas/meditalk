@@ -93,15 +93,11 @@ export const POST = withAuth(async (auth, request) => {
   // ── Direct blob mode (FormData) ────────────────────────────
   const formData = await request.formData();
   const audioFile = formData.get("audio") as File | null;
-  const language =
-    (formData.get("language") as string) || undefined;
+  const language = (formData.get("language") as string) || undefined;
   const visitId = (formData.get("visitId") as string) || undefined;
 
   if (!audioFile || audioFile.size === 0) {
-    return NextResponse.json(
-      { error: "Missing audio file" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Missing audio file" }, { status: 400 });
   }
 
   logger.info(

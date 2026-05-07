@@ -83,7 +83,9 @@ describe("skeleton threading — critic", () => {
     expect(userMessage).toContain("Shared encounter context");
     expect(userMessage).toContain("Chief complaint: Chest pain");
     expect(userMessage).toContain("Encounter type: transfer");
-    expect(userMessage).toContain("Providers / facilities: Dr. Baldovský, CINRE");
+    expect(userMessage).toContain(
+      "Providers / facilities: Dr. Baldovský, CINRE",
+    );
     // Critical: source is still in the same message AFTER the skeleton.
     const skIdx = userMessage.indexOf("Shared encounter context");
     const srcIdx = userMessage.indexOf("# Raw source");

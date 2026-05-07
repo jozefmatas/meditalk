@@ -21,17 +21,15 @@ vi.mock("@/components/encounters/hooks/transcribe-blob", () => ({
 }));
 
 vi.mock("@/lib/audio/mime-utils", () => ({
-  audioMimeToExt: (mime: string) =>
-    mime.includes("mp4") ? ".m4a" : ".webm",
+  audioMimeToExt: (mime: string) => (mime.includes("mp4") ? ".m4a" : ".webm"),
 }));
 
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const { persistRecordingSnapshot } = await import(
-  "./persist-recording-snapshot"
-);
+const { persistRecordingSnapshot } =
+  await import("./persist-recording-snapshot");
 
 // ── Helpers ───────────────────────────────────────────────────────
 

@@ -88,8 +88,6 @@ function formatDuration(seconds: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-
-
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
     {

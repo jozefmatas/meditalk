@@ -10,7 +10,9 @@ import { withAuth } from "./with-auth";
 
 const mockAuth = requireAuth as ReturnType<typeof vi.fn>;
 
-function fakeAuth(overrides?: Partial<Awaited<ReturnType<typeof requireAuth>>>) {
+function fakeAuth(
+  overrides?: Partial<Awaited<ReturnType<typeof requireAuth>>>,
+) {
   return {
     userId: "user-1",
     supabase: {} as never,
@@ -29,9 +31,7 @@ describe("withAuth", () => {
   it("returns handler response when auth succeeds", async () => {
     mockAuth.mockResolvedValue(fakeAuth());
 
-    const handler = vi.fn().mockResolvedValue(
-      NextResponse.json({ ok: true }),
-    );
+    const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
     const wrapped = withAuth(handler);
     const request = new NextRequest("http://localhost/api/test");
 

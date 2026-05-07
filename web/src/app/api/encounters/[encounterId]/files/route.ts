@@ -39,144 +39,136 @@ export const GET = withAuth(
  * Register file metadata in visit.metadata.files[].
  * Accepts JSON (files already uploaded to storage by client) or FormData (legacy).
  */
-export const POST = withAuth(
-  async (auth, request, { params }: RouteParams) => {
-    const { userId, supabase } = auth;
-    const { encounterId } = await params;
+export const POST = withAuth(async (auth, request, { params }: RouteParams) => {
+  const { userId, supabase } = auth;
+  const { encounterId } = await params;
 
-    // Verify ownership
-    const { data: visit, error: visitError } = await supabase
-      .from("visits")
-      .select("metadata")
-      .eq("id", encounterId)
-      .eq("user_id", userId)
-      .single();
+  // Verify ownership
+  const { data: visit, error: visitError } = await supabase
+    .from("visits")
+    .select("metadata")
+    .eq("id", encounterId)
+    .eq("user_id", userId)
+    .single();
 
-    if (visitError || !visit) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (visitError || !visit) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const contentType = request.headers.get("content-type") || "";
+  let newFiles: Record<string, unknown>[];
+
+  if (contentType.includes("application/json")) {
+    // New path: files already in Supabase Storage, just register metadata
+    const body = await request.json();
+    const preUploaded = body.files as Array<{
+      id: string;
+      name: string;
+      size: number;
+      type: string;
+      path: string;
+      source?: string;
+    }>;
+
+    if (!preUploaded?.length) {
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
-    const contentType = request.headers.get("content-type") || "";
-    let newFiles: Record<string, unknown>[];
-
-    if (contentType.includes("application/json")) {
-      // New path: files already in Supabase Storage, just register metadata
-      const body = await request.json();
-      const preUploaded = body.files as Array<{
-        id: string;
-        name: string;
-        size: number;
-        type: string;
-        path: string;
-        source?: string;
-      }>;
-
-      if (!preUploaded?.length) {
+    // Validate each path belongs to the authenticated user.
+    // When an admin is impersonating, the client-side upload uses the
+    // admin's real userId (because client auth token is unchanged) so we
+    // accept paths starting with either the impersonated or real userId.
+    const { isImpersonating, realUserId } = auth;
+    for (const f of preUploaded) {
+      const ownsPath =
+        f.path.startsWith(`${userId}/`) ||
+        (isImpersonating && f.path.startsWith(`${realUserId}/`));
+      if (!ownsPath) {
         return NextResponse.json(
-          { error: "No files provided" },
-          { status: 400 },
+          { error: "Invalid file path" },
+          { status: 403 },
         );
       }
+    }
 
-      // Validate each path belongs to the authenticated user.
-      // When an admin is impersonating, the client-side upload uses the
-      // admin's real userId (because client auth token is unchanged) so we
-      // accept paths starting with either the impersonated or real userId.
-      const { isImpersonating, realUserId } = auth;
-      for (const f of preUploaded) {
-        const ownsPath =
-          f.path.startsWith(`${userId}/`) ||
-          (isImpersonating && f.path.startsWith(`${realUserId}/`));
-        if (!ownsPath) {
-          return NextResponse.json(
-            { error: "Invalid file path" },
-            { status: 403 },
-          );
-        }
-      }
+    newFiles = preUploaded.map((f) => ({
+      id: f.id,
+      name: f.name,
+      size: f.size,
+      type: f.type,
+      path: f.path,
+      extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
+      ...(f.source ? { source: f.source } : {}),
+    }));
+  } else {
+    // Legacy FormData path (fallback)
+    const formData = await request.formData();
+    const uploadedFiles = formData.getAll("files") as File[];
 
-      newFiles = preUploaded.map((f) => ({
-        id: f.id,
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        path: f.path,
-        extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
-        ...(f.source ? { source: f.source } : {}),
-      }));
-    } else {
-      // Legacy FormData path (fallback)
-      const formData = await request.formData();
-      const uploadedFiles = formData.getAll("files") as File[];
+    if (uploadedFiles.length === 0) {
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
+    }
 
-      if (uploadedFiles.length === 0) {
-        return NextResponse.json(
-          { error: "No files provided" },
-          { status: 400 },
-        );
-      }
+    newFiles = [];
 
-      newFiles = [];
+    for (const file of uploadedFiles) {
+      const fileId = crypto.randomUUID();
+      const storagePath = `${userId}/${encounterId}/${fileId}-${file.name}`;
 
-      for (const file of uploadedFiles) {
-        const fileId = crypto.randomUUID();
-        const storagePath = `${userId}/${encounterId}/${fileId}-${file.name}`;
-
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const { error: uploadError } = await supabase.storage
-          .from("encounter-files")
-          .upload(storagePath, buffer, {
-            contentType: file.type,
-            upsert: false,
-          });
-
-        if (uploadError) {
-          logger.error("File upload error:", uploadError);
-          continue;
-        }
-
-        newFiles.push({
-          id: fileId,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          path: storagePath,
-          extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const { error: uploadError } = await supabase.storage
+        .from("encounter-files")
+        .upload(storagePath, buffer, {
+          contentType: file.type,
+          upsert: false,
         });
+
+      if (uploadError) {
+        logger.error("File upload error:", uploadError);
+        continue;
       }
+
+      newFiles.push({
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        path: storagePath,
+        extraction_status: "pending" as const, // Set initial status to prevent duplicate extraction
+      });
     }
+  }
 
-    // Update visit metadata with new files
-    const meta = (visit.metadata ?? {}) as VisitMetadata;
-    const existingFiles = (meta.files ?? []) as FileMetadata[];
-    const updatedFiles = [...existingFiles, ...newFiles];
-    const { error: updateError } = await supabase
-      .from("visits")
-      .update({ metadata: { ...meta, files: updatedFiles } })
-      .eq("id", encounterId)
-      .eq("user_id", userId);
+  // Update visit metadata with new files
+  const meta = (visit.metadata ?? {}) as VisitMetadata;
+  const existingFiles = (meta.files ?? []) as FileMetadata[];
+  const updatedFiles = [...existingFiles, ...newFiles];
+  const { error: updateError } = await supabase
+    .from("visits")
+    .update({ metadata: { ...meta, files: updatedFiles } })
+    .eq("id", encounterId)
+    .eq("user_id", userId);
 
-    if (updateError) {
-      return NextResponse.json(
-        { error: "Failed to update metadata" },
-        { status: 500 },
-      );
-    }
+  if (updateError) {
+    return NextResponse.json(
+      { error: "Failed to update metadata" },
+      { status: 500 },
+    );
+  }
 
-    logAudit({
-      ...createAuditContext(auth, request),
-      action: "file.upload",
-      resourceType: "encounter",
-      resourceId: encounterId,
-      metadata: {
-        count: newFiles.length,
-        names: newFiles.map((f) => f.name),
-      },
-    });
+  logAudit({
+    ...createAuditContext(auth, request),
+    action: "file.upload",
+    resourceType: "encounter",
+    resourceId: encounterId,
+    metadata: {
+      count: newFiles.length,
+      names: newFiles.map((f) => f.name),
+    },
+  });
 
-    return NextResponse.json({ files: newFiles });
-  },
-);
+  return NextResponse.json({ files: newFiles });
+});
 
 /**
  * DELETE /api/encounters/[encounterId]/files?fileId=...

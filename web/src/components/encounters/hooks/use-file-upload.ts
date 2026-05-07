@@ -41,9 +41,8 @@ export function useFileUpload({
       if (fileList.length === 0) return;
 
       setIsUploading(true);
-      const { uploadWithRetry } = await import(
-        "@/lib/upload/upload-with-persistence"
-      );
+      const { uploadWithRetry } =
+        await import("@/lib/upload/upload-with-persistence");
 
       // Tag audio files uploaded during active recording
       const fileSources = fileList.map((file) =>
@@ -75,8 +74,11 @@ export function useFileUpload({
 
         const uploadResults = results
           .filter(
-            (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof uploadWithRetry>>> =>
-              r.status === "fulfilled",
+            (
+              r,
+            ): r is PromiseFulfilledResult<
+              Awaited<ReturnType<typeof uploadWithRetry>>
+            > => r.status === "fulfilled",
           )
           .map((r) => r.value);
 
@@ -138,9 +140,7 @@ export function useFileUpload({
 
               if (extractRes.ok) {
                 const result = await extractRes.json();
-                logger.debug(
-                  `[extract] Completed extraction for ${file.name}`,
-                );
+                logger.debug(`[extract] Completed extraction for ${file.name}`);
                 onFilesChange((prev) =>
                   prev.map((f) =>
                     f.id === file.id
@@ -157,7 +157,9 @@ export function useFileUpload({
                 logger.warn(
                   `[extract] Extraction failed for ${file.name}: ${extractRes.status}, retrying...`,
                 );
-                await new Promise((r) => setTimeout(r, extractConfig.retryDelayMs));
+                await new Promise((r) =>
+                  setTimeout(r, extractConfig.retryDelayMs),
+                );
                 return tryExtract(1);
               } else {
                 logger.warn(
@@ -177,7 +179,9 @@ export function useFileUpload({
                   `[extract] Extraction error for ${file.name}, retrying...`,
                   extractErr,
                 );
-                await new Promise((r) => setTimeout(r, extractConfig.retryDelayMs));
+                await new Promise((r) =>
+                  setTimeout(r, extractConfig.retryDelayMs),
+                );
                 return tryExtract(1);
               }
               logger.warn(

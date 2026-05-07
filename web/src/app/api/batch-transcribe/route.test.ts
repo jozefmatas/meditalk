@@ -98,12 +98,10 @@ describe("POST /api/batch-transcribe", () => {
     });
 
     it("returns 500 when storage download fails after retries", async () => {
-      mockSupabase.storage
-        .from("encounter-files")
-        .download.mockResolvedValue({
-          data: null,
-          error: { message: "not found" },
-        });
+      mockSupabase.storage.from("encounter-files").download.mockResolvedValue({
+        data: null,
+        error: { message: "not found" },
+      });
 
       const req = new NextRequest(
         "http://localhost:3000/api/batch-transcribe",

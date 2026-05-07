@@ -37,7 +37,10 @@ export function useEncounterData({
         const next = typeof update === "function" ? update(prev) : update;
         setVisit((v) => {
           if (!v) return v;
-          return { ...v, metadata: { ...v.metadata, files: next } } as Encounter;
+          return {
+            ...v,
+            metadata: { ...v.metadata, files: next },
+          } as Encounter;
         });
         return next;
       });

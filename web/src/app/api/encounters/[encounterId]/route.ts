@@ -104,10 +104,7 @@ export const PATCH = withAuth(
       }
 
       if (!visit) {
-        return NextResponse.json(
-          { error: "Visit not found" },
-          { status: 404 },
-        );
+        return NextResponse.json({ error: "Visit not found" }, { status: 404 });
       }
 
       logAudit({

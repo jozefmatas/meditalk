@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/supabase/with-auth";
 import { extractFileText } from "@/lib/extraction/extract-file";
-import type { SupportedLanguage, FileMetadata, VisitMetadata } from "@/lib/types";
+import type {
+  SupportedLanguage,
+  FileMetadata,
+  VisitMetadata,
+} from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
@@ -43,10 +47,7 @@ export const POST = withAuth(
         .single();
 
       if (visitError || !visit) {
-        return NextResponse.json(
-          { error: "Visit not found" },
-          { status: 404 },
-        );
+        return NextResponse.json({ error: "Visit not found" }, { status: 404 });
       }
 
       const language = (visit.language as SupportedLanguage) || "en";
@@ -56,17 +57,12 @@ export const POST = withAuth(
       // Find the file to extract
       const file = uploadedFiles.find((f) => f.id === fileId);
       if (!file) {
-        return NextResponse.json(
-          { error: "File not found" },
-          { status: 404 },
-        );
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
       }
 
       // Skip if already extracted
       if (file.extracted_text && file.extraction_status === "completed") {
-        logger.debug(
-          `[extract] File ${file.name} already has extracted text`,
-        );
+        logger.debug(`[extract] File ${file.name} already has extracted text`);
         return NextResponse.json({
           extracted: true,
           cached: true,
@@ -176,15 +172,12 @@ export const POST = withAuth(
       let rpcError: unknown = null;
 
       for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-        const { error } = await supabase.rpc(
-          "update_file_extraction_status",
-          {
-            p_visit_id: visitId,
-            p_file_id: fileId,
-            p_status: "completed",
-            p_extracted_text: extractedText,
-          },
-        );
+        const { error } = await supabase.rpc("update_file_extraction_status", {
+          p_visit_id: visitId,
+          p_file_id: fileId,
+          p_status: "completed",
+          p_extracted_text: extractedText,
+        });
 
         if (!error) {
           rpcError = null;

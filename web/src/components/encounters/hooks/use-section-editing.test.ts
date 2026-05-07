@@ -327,9 +327,7 @@ describe("useSectionEditing", () => {
       });
 
       const opts = defaultOptions();
-      const { result, rerender } = renderHook(() =>
-        useSectionEditing(opts),
-      );
+      const { result, rerender } = renderHook(() => useSectionEditing(opts));
 
       // Clear parseNoteToSectionMap calls from initial render
       (parseNoteToSectionMap as ReturnType<typeof vi.fn>).mockClear();

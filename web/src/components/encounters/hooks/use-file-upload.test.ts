@@ -171,9 +171,7 @@ describe("useFileUpload", () => {
       json: () => Promise.resolve({ text: "extracted" }),
     });
 
-    const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
-    );
+    const { result } = renderHook(() => useFileUpload(defaultProps()));
 
     await act(async () => {
       await result.current.uploadFiles([makeFile("report.pdf")]);
@@ -194,16 +192,12 @@ describe("useFileUpload", () => {
       ok: true,
       json: () =>
         Promise.resolve({
-          files: [
-            { id: "real-1", name: "recording.webm", type: "audio/webm" },
-          ],
+          files: [{ id: "real-1", name: "recording.webm", type: "audio/webm" }],
         }),
     });
     // No extraction for audio
 
-    const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
-    );
+    const { result } = renderHook(() => useFileUpload(defaultProps()));
 
     await act(async () => {
       await result.current.uploadFiles([
@@ -221,9 +215,7 @@ describe("useFileUpload", () => {
       json: () => Promise.resolve({ text: "extracted" }),
     });
 
-    const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
-    );
+    const { result } = renderHook(() => useFileUpload(defaultProps()));
 
     await act(async () => {
       await result.current.uploadFiles([makeFile("report.pdf")]);

@@ -72,9 +72,7 @@ describe("useSectionFeedback", () => {
           }),
       });
 
-      const { result } = renderHook(() =>
-        useSectionFeedback(defaultParams()),
-      );
+      const { result } = renderHook(() => useSectionFeedback(defaultParams()));
 
       await vi.waitFor(() => {
         expect(result.current.getRating("oa")).toBe("down");
@@ -87,9 +85,7 @@ describe("useSectionFeedback", () => {
     it("submits thumbs-up and updates local state", async () => {
       emptyFeedbackLoad();
 
-      const { result } = renderHook(() =>
-        useSectionFeedback(defaultParams()),
-      );
+      const { result } = renderHook(() => useSectionFeedback(defaultParams()));
       await vi.waitFor(() => expect(result.current.isLoaded).toBe(true));
 
       mockFetch.mockResolvedValueOnce({
@@ -112,9 +108,7 @@ describe("useSectionFeedback", () => {
     it("submits thumbs-down with categories and detail", async () => {
       emptyFeedbackLoad();
 
-      const { result } = renderHook(() =>
-        useSectionFeedback(defaultParams()),
-      );
+      const { result } = renderHook(() => useSectionFeedback(defaultParams()));
       await vi.waitFor(() => expect(result.current.isLoaded).toBe(true));
 
       mockFetch.mockResolvedValueOnce({
@@ -370,8 +364,7 @@ describe("useSectionFeedback", () => {
       });
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({ sectionId: "s1", content: "Updated." }),
+        json: () => Promise.resolve({ sectionId: "s1", content: "Updated." }),
       });
 
       const params = defaultParams();

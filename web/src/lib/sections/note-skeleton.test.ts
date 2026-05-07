@@ -176,13 +176,14 @@ describe("extractSkeleton — tolerant coercion", () => {
     mockCreate.mockResolvedValue(
       mockSkeletonResponse({
         ...FULL_INPUT,
-        keyDates: [{ iso: "2025-01-01" }, { label: "valid", iso: "2025-02-02" }],
+        keyDates: [
+          { iso: "2025-01-01" },
+          { label: "valid", iso: "2025-02-02" },
+        ],
       }),
     );
     const skeleton = await extractSkeleton(MIN_SOURCE, "sk");
-    expect(skeleton?.keyDates).toEqual([
-      { label: "valid", iso: "2025-02-02" },
-    ]);
+    expect(skeleton?.keyDates).toEqual([{ label: "valid", iso: "2025-02-02" }]);
   });
 });
 

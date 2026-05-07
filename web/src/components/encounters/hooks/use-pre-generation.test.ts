@@ -30,9 +30,8 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 const { usePreGeneration } = await import("./use-pre-generation");
-const { transcribeBlob, transcribeFromPath } = await import(
-  "./transcribe-blob"
-);
+const { transcribeBlob, transcribeFromPath } =
+  await import("./transcribe-blob");
 const { uploadToStorage } = await import("@/lib/supabase/upload");
 const { getTranscript } = await import("@/lib/encounters/sources");
 const { toast } = await import("sonner");
@@ -58,9 +57,7 @@ function makeVisit(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeRecordingBarRef(
-  overrides: Record<string, unknown> = {},
-) {
+function makeRecordingBarRef(overrides: Record<string, unknown> = {}) {
   return {
     current: {
       finalize: vi.fn().mockResolvedValue({

@@ -41,10 +41,7 @@ export const POST = withAuth(async (auth, request, { params }: RouteParams) => {
     .single();
 
   if (fetchError || !visit) {
-    return NextResponse.json(
-      { error: "Encounter not found" },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: "Encounter not found" }, { status: 404 });
   }
 
   const metadata = visit.metadata ?? {};

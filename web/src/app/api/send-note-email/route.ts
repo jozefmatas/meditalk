@@ -8,10 +8,7 @@ export const POST = withAuth(async (auth, request) => {
   const { visitId } = await request.json();
 
   if (!visitId) {
-    return NextResponse.json(
-      { error: "visitId is required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "visitId is required" }, { status: 400 });
   }
 
   // Fetch encounter
@@ -23,10 +20,7 @@ export const POST = withAuth(async (auth, request) => {
     .single();
 
   if (fetchError || !encounter) {
-    return NextResponse.json(
-      { error: "Encounter not found" },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: "Encounter not found" }, { status: 404 });
   }
 
   if (!encounter.encounter_note) {

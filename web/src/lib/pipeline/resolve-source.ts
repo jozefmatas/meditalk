@@ -24,7 +24,11 @@ import {
   EXTRACTION_POLL_INTERVAL_MS,
 } from "@/lib/extraction/constants";
 import type { RawSource } from "@/lib/sections/section-agent";
-import type { SupportedLanguage, FileMetadata, VisitMetadata } from "@/lib/types";
+import type {
+  SupportedLanguage,
+  FileMetadata,
+  VisitMetadata,
+} from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 // ── Public types ──────────────────────────────────────────────────
