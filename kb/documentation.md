@@ -167,7 +167,7 @@ When the doctor hits **Generate**:
 **Key files:**
 
 - [web/src/components/encounters/hooks/use-section-editing.ts](web/src/components/encounters/hooks/use-section-editing.ts) — inline section editing
-- [web/src/components/encounters/hooks/use-feedback.ts](web/src/components/encounters/hooks/use-feedback.ts) — feedback submission + rating state
+- [web/src/components/encounters/hooks/use-section-feedback.ts](web/src/components/encounters/hooks/use-section-feedback.ts) — feedback submission, rating state, and section regeneration via adjust-section API
 - [web/src/components/encounters/section-feedback-row.tsx](web/src/components/encounters/section-feedback-row.tsx) — thumbs-up/down buttons
 - [web/src/components/encounters/feedback-modal.tsx](web/src/components/encounters/feedback-modal.tsx) — category picker modal for thumbs-down
 - [web/src/lib/email/send-note-email.ts](web/src/lib/email/send-note-email.ts) — email dispatch
@@ -216,25 +216,23 @@ Clinical knowledge lives in three places: `template.styleExamples` (reference-no
 
 **Key files:**
 
-- [web/src/lib/pipeline/resolve-source.ts](../web/src/lib/pipeline/resolve-source.ts) — source pre-processing (audio recovery, extraction, PHI scrub, file-text assembly)
-- [web/src/lib/pipeline/session.ts](../web/src/lib/pipeline/session.ts) — shared orchestration core (file-focus → skeleton ∥ ICD → sections → Záver → HTML)
-- [web/src/lib/pipeline/persist.ts](../web/src/lib/pipeline/persist.ts) — shared persistence (column update + metadata merge + lost-note logging)
-- [web/src/lib/pipeline/adjust-helpers.ts](../web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
-- [web/src/app/api/generate/route.ts](../web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
-- [web/src/app/api/adjust/route.ts](../web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
-- [web/src/app/api/adjust-section/route.ts](../web/src/app/api/adjust-section/route.ts) — per-section feedback adjustment (single Sonnet call, receives other sections as context)
-- [web/src/components/encounters/hooks/use-feedback-regeneration.ts](../web/src/components/encounters/hooks/use-feedback-regeneration.ts) — client hook for section feedback → adjust-section API
-- [web/src/lib/phi-scrubber.ts](../web/src/lib/phi-scrubber.ts) — deterministic PHI regex
-- [web/src/lib/sections/suggest-icd.ts](../web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
-- [web/src/lib/sections/format-zaver.ts](../web/src/lib/sections/format-zaver.ts) — suggester → Záver formatter
-- [web/src/lib/sections/pipeline.ts](../web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection` + `runCriticAndReconcilers`)
-- [web/src/lib/sections/section-agent.ts](../web/src/lib/sections/section-agent.ts) — `renderSection` (injects `# Voice examples` block, includes `isAbsenceDescription` safety net)
-- [web/src/lib/sections/critic.ts](../web/src/lib/sections/critic.ts) — `criticPass` (opt-in per section, audits draft against source)
-- [web/src/lib/sections/reconcilers/index.ts](../web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
-- [web/src/lib/templates/reference-notes.ts](../web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
-- [web/src/lib/templates/html.ts](../web/src/lib/templates/html.ts) — `buildTemplateHtml`
-- [web/src/lib/parse-note-sections.ts](../web/src/lib/parse-note-sections.ts) — HTML → per-section map (label-based matching — fixes cascade shift when `skipEmpty` drops a middle subsection)
-- [web/src/lib/api/sse.ts](../web/src/lib/api/sse.ts) — SSE streaming helpers
+- [web/src/lib/pipeline/resolve-source.ts](web/src/lib/pipeline/resolve-source.ts) — source pre-processing (audio recovery, extraction, PHI scrub, file-text assembly)
+- [web/src/lib/pipeline/session.ts](web/src/lib/pipeline/session.ts) — shared orchestration core (file-focus → skeleton ∥ ICD → sections → Záver → HTML)
+- [web/src/lib/pipeline/persist.ts](web/src/lib/pipeline/persist.ts) — shared persistence (column update + metadata merge + lost-note logging)
+- [web/src/lib/pipeline/adjust-helpers.ts](web/src/lib/pipeline/adjust-helpers.ts) — adjust utilities (router input, vital-group expansion, Záver decision)
+- [web/src/app/api/generate/route.ts](web/src/app/api/generate/route.ts) — thin route shell (fresh + cached modes, replaces deleted `/api/regenerate`)
+- [web/src/app/api/adjust/route.ts](web/src/app/api/adjust/route.ts) — thin route shell (delta pipeline)
+- [web/src/app/api/adjust-section/route.ts](web/src/app/api/adjust-section/route.ts) — per-section feedback adjustment (single Sonnet call, receives other sections as context)
+- [web/src/lib/phi-scrubber.ts](web/src/lib/phi-scrubber.ts) — deterministic PHI regex
+- [web/src/lib/sections/suggest-icd.ts](web/src/lib/sections/suggest-icd.ts) — ICD-10 suggester
+- [web/src/lib/sections/pipeline.ts](web/src/lib/sections/pipeline.ts) — section-loop orchestrator (skips Záver leaf, exports `findZaverSection` + `runCriticAndReconcilers`)
+- [web/src/lib/sections/section-agent.ts](web/src/lib/sections/section-agent.ts) — `renderSection` (injects `# Voice examples` block, includes `isAbsenceDescription` safety net)
+- [web/src/lib/sections/critic.ts](web/src/lib/sections/critic.ts) — `criticPass` (opt-in per section, audits draft against source)
+- [web/src/lib/sections/reconcilers/index.ts](web/src/lib/sections/reconcilers/index.ts) — `drug-normalizer`, `icd-validator`
+- [web/src/lib/templates/reference-notes.ts](web/src/lib/templates/reference-notes.ts) — corpus parser / example-map builder
+- [web/src/lib/templates/html.ts](web/src/lib/templates/html.ts) — `buildTemplateHtml`
+- [web/src/lib/parse-note-sections.ts](web/src/lib/parse-note-sections.ts) — HTML → per-section map (label-based matching — fixes cascade shift when `skipEmpty` drops a middle subsection)
+- [web/src/lib/api/sse.ts](web/src/lib/api/sse.ts) — SSE streaming helpers
 
 See [prompt-pipeline.md](prompt-pipeline.md) for the deep dive.
 
@@ -506,10 +504,10 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ## 18. Testing
 
-- **760+ tests** across utilities, hooks, pipeline modules, and parsers
+- **846+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
-- A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
+- A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections
 
 ---
 
@@ -533,4 +531,4 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ---
 
-_For the detailed generation pipeline reference, see [kb/note-generation-engine.md](note-generation-engine.md)._
+_For the detailed generation pipeline reference, see [kb/prompt-pipeline.md](prompt-pipeline.md)._
