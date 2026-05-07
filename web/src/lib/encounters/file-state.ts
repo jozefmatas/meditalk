@@ -84,7 +84,7 @@ export function isFileExtracting(file: EncounterFile): boolean {
 }
 
 /** Returns true if any file is still waiting for OCR to land. */
-export function hasExtractingFiles(files: EncounterFile[]): boolean {
+function hasExtractingFiles(files: EncounterFile[]): boolean {
   return files.some(isFileExtracting);
 }
 
