@@ -202,17 +202,11 @@ export function useEncounterGeneration({
         msg === "insufficient_context" || msg === "save_failed";
       if (isKnownError) setError(msg);
 
-      // Always reset status so the encounter never stays stuck on "processing"
+      // Always reset status so the encounter never stays stuck on "processing".
+      // patchEncounterStatus emits "encounter-update" internally, so no manual emit needed.
       setVisit((prev) =>
         prev ? { ...prev, status: params.errorRecoveryStatus } : prev,
       );
-
-      if (params.errorRecoveryStatus !== "started") {
-        emit("encounter-update", {
-          id: visitId,
-          status: params.errorRecoveryStatus,
-        });
-      }
 
       patchEncounterStatus(
         visitId,
@@ -292,6 +286,7 @@ export function useEncounterGeneration({
         },
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- executeGenerationFlow captures the same deps listed here
     [
       visitId,
       selectedTemplateId,
@@ -370,6 +365,7 @@ export function useEncounterGeneration({
         },
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- executeGenerationFlow captures the same deps listed here
     [
       visitId,
       selectedTemplateId,
