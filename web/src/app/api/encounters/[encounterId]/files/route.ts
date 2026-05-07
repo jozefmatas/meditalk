@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/supabase/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
+import type { VisitMetadata, FileMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 interface RouteParams {
@@ -26,8 +27,8 @@ export const GET = withAuth(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const files = (meta.files ?? []) as Record<string, unknown>[];
+    const meta = (visit.metadata ?? {}) as VisitMetadata;
+    const files = (meta.files ?? []) as FileMetadata[];
 
     return NextResponse.json({ files });
   },
@@ -146,8 +147,8 @@ export const POST = withAuth(
     }
 
     // Update visit metadata with new files
-    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const existingFiles = (meta.files ?? []) as Record<string, unknown>[];
+    const meta = (visit.metadata ?? {}) as VisitMetadata;
+    const existingFiles = (meta.files ?? []) as FileMetadata[];
     const updatedFiles = [...existingFiles, ...newFiles];
     const { error: updateError } = await supabase
       .from("visits")
@@ -202,8 +203,8 @@ export const DELETE = withAuth(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const files = (meta.files ?? []) as Record<string, unknown>[];
+    const meta = (visit.metadata ?? {}) as VisitMetadata;
+    const files = (meta.files ?? []) as FileMetadata[];
     const fileToDelete = files.find((f) => f.id === fileId);
 
     if (!fileToDelete) {

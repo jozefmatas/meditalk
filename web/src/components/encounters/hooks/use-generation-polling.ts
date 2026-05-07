@@ -114,8 +114,7 @@ export function useGenerationPolling({
           if (updated.encounter_note) {
             setGeneratedNoteHtml(updated.encounter_note);
             const tid =
-              ((updated.metadata as Record<string, unknown>)
-                ?.template_id as string) || DEFAULT_TEMPLATE_ID;
+              (updated.metadata.template_id as string) || DEFAULT_TEMPLATE_ID;
             setCachedTemplate(tid, {
               generatedNote: updated.encounter_note,
             });

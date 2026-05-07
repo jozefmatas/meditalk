@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withAuth } from "@/lib/supabase/with-auth";
 import { extractFileText } from "@/lib/extraction/extract-file";
-import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import type { SupportedLanguage, FileMetadata, VisitMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 300;
@@ -50,7 +50,7 @@ export const POST = withAuth(
       }
 
       const language = (visit.language as SupportedLanguage) || "en";
-      const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+      const visitMeta = (visit.metadata ?? {}) as VisitMetadata;
       const uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
 
       // Find the file to extract

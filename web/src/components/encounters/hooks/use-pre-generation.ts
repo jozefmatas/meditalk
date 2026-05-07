@@ -116,9 +116,7 @@ export function usePreGeneration(visitId: string) {
           visitId,
         );
       } else {
-        finalTranscript = getTranscript(
-          visit?.metadata as Record<string, unknown>,
-        );
+        finalTranscript = getTranscript(visit?.metadata);
       }
 
       // Warn user on transcription failure
@@ -140,13 +138,8 @@ export function usePreGeneration(visitId: string) {
       }
 
       // Resolve audio recovery path for server-side
-      const meta = (visit?.metadata ?? {}) as Record<string, unknown>;
-      const pendingMeta = meta?.generation_pending as
-        | { audioPath?: string }
-        | undefined;
-      const sessionMeta = meta?.recording_session as
-        | { audioPath?: string }
-        | undefined;
+      const pendingMeta = visit?.metadata?.generation_pending;
+      const sessionMeta = visit?.metadata?.recording_session;
 
       let audioRecoveryPath: string | undefined;
       if (!blobToProcess) {

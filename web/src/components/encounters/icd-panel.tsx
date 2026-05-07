@@ -51,7 +51,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 
   // Selected codes from visit metadata
   const [selectedCodes, setSelectedCodes] = useState<IcdCode[]>(() => {
-    const meta = visit.metadata as Record<string, unknown>;
+    const meta = visit.metadata;
     return dedupeByCode((meta?.selected_icd_codes as IcdCode[]) || []);
   });
 
@@ -60,7 +60,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   // certain ones in the note. Falls back to candidateIcdCodes for older
   // encounters generated before this field existed.
   const suggestedCodesRaw: IcdCode[] = (() => {
-    const meta = visit.metadata as Record<string, unknown>;
+    const meta = visit.metadata;
     const analysis = meta?.clinical_analysis as
       | Record<string, unknown>
       | undefined;
@@ -96,7 +96,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 
   // Sync selected codes when visit metadata changes externally
   useEffect(() => {
-    const meta = visit.metadata as Record<string, unknown>;
+    const meta = visit.metadata;
     const stored = (meta?.selected_icd_codes as IcdCode[]) || [];
     setSelectedCodes(dedupeByCode(stored));
   }, [visit.metadata]);
@@ -168,7 +168,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
         if (res?.ok) {
           setVisit((prev) => {
             if (!prev) return prev;
-            const current = (prev.metadata || {}) as Record<string, unknown>;
+            const current = prev.metadata;
             return {
               ...prev,
               metadata: { ...current, ...partial },

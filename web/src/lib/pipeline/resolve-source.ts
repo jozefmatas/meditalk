@@ -24,7 +24,7 @@ import {
   EXTRACTION_POLL_INTERVAL_MS,
 } from "@/lib/extraction/constants";
 import type { RawSource } from "@/lib/sections/section-agent";
-import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import type { SupportedLanguage, FileMetadata, VisitMetadata } from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 // ── Public types ──────────────────────────────────────────────────
@@ -41,7 +41,7 @@ export interface ResolveSourceInput {
   /** Path to stored audio blob in Supabase storage (recovery). */
   audioPath?: string;
   visit: {
-    metadata: Record<string, unknown>;
+    metadata: VisitMetadata;
     patient_name?: string | null;
     patient_id?: string | null;
   };
@@ -65,7 +65,7 @@ export interface ResolvedSource {
   /** Total PHI redactions applied across all sources. */
   phiRedactionCount: number;
   /** Refreshed metadata after extraction (for downstream persistence). */
-  refreshedMetadata: Record<string, unknown>;
+  refreshedMetadata: VisitMetadata;
 }
 
 // ── Implementation ────────────────────────────────────────────────
@@ -203,7 +203,7 @@ export async function resolveSource(
     .eq("id", visitId)
     .single();
   const refreshedMetadata =
-    (refreshedVisit?.metadata as Record<string, unknown>) || visitMeta;
+    (refreshedVisit?.metadata as VisitMetadata) || visitMeta;
 
   // ── 5. Build raw source ───────────────────────────────────────
   const rawSource: RawSource = {
@@ -230,14 +230,10 @@ export async function resolveSource(
 
 function resolveAudioPath(
   clientAudioPath: string | undefined,
-  visitMeta: Record<string, unknown>,
+  visitMeta: VisitMetadata,
 ): string | undefined {
-  const sessionAudioPath = (
-    visitMeta.recording_session as { audioPath?: string } | undefined
-  )?.audioPath;
-  const pendingAudioPath = (
-    visitMeta.generation_pending as { audioPath?: string } | undefined
-  )?.audioPath;
+  const sessionAudioPath = visitMeta.recording_session?.audioPath;
+  const pendingAudioPath = visitMeta.generation_pending?.audioPath;
   return clientAudioPath || pendingAudioPath || sessionAudioPath;
 }
 
@@ -366,7 +362,7 @@ async function waitForExtractions(
       .single();
     if (!refreshed) break;
 
-    const meta = (refreshed.metadata ?? {}) as Record<string, unknown>;
+    const meta = (refreshed.metadata ?? {}) as VisitMetadata;
     files = (meta.files ?? []) as FileMetadata[];
 
     const stillPending = files.filter(

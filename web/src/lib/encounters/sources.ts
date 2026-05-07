@@ -1,4 +1,4 @@
-import type { FileMetadata } from "@/lib/types";
+import type { FileMetadata, VisitMetadata } from "@/lib/types";
 
 /**
  * Centralized access to encounter source material stored in visits.metadata.
@@ -10,7 +10,7 @@ import type { FileMetadata } from "@/lib/types";
 
 /** Get the recording transcript from encounter metadata. */
 export function getTranscript(
-  metadata: Record<string, unknown> | null | undefined,
+  metadata: VisitMetadata | null | undefined,
 ): string | null {
   const value = metadata?.transcript;
   if (typeof value === "string" && value.length > 0) return value;
@@ -19,7 +19,7 @@ export function getTranscript(
 
 /** Get doctor notes from encounter metadata. */
 export function getDoctorNotes(
-  metadata: Record<string, unknown> | null | undefined,
+  metadata: VisitMetadata | null | undefined,
 ): string | null {
   const value = metadata?.doctor_notes;
   if (typeof value === "string" && value.length > 0) return value;

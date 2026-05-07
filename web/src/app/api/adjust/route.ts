@@ -27,7 +27,7 @@ import {
 import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { RawSource } from "@/lib/sections/section-agent";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
 import { logger } from "@/lib/logger";
 
@@ -88,7 +88,7 @@ export const POST = withAuth(async (auth, request) => {
 
   const language =
     ((visit.language as string)?.trim() as SupportedLanguage) || "en";
-  const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+  const visitMeta = (visit.metadata ?? {}) as VisitMetadata;
   const priorSectionContents = (visitMeta.section_contents ?? {}) as Record<
     string,
     string

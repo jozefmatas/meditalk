@@ -29,7 +29,7 @@ export interface Encounter {
   visit_type: EncounterType;
   status: EncounterStatus;
   encounter_note: string | null;
-  metadata: Record<string, unknown>;
+  metadata: VisitMetadata;
   created_at: string;
 }
 
@@ -102,6 +102,55 @@ export interface FileMetadata {
    *   uses ONLY the passages matching the directive.
    */
   context?: string | null;
+}
+
+/**
+ * Typed contract for `visits.metadata` JSONB column.
+ *
+ * All metadata keys are optional because the column starts as `{}` and
+ * is populated incrementally by recording, upload, generation, and
+ * feedback flows. The `& Record<string, unknown>` intersection preserves
+ * backwards compat with code that still indexes by string.
+ */
+export interface VisitMetadata extends Record<string, unknown> {
+  // ── Source material ──────────────────────────────────────────
+  transcript?: string;
+  doctor_notes?: string;
+  files?: FileMetadata[];
+  uploaded_files_context?: string;
+
+  // ── Generation state ─────────────────────────────────────────
+  template_id?: string;
+  section_contents?: Record<string, string>;
+  generation_pending?: {
+    audioPath?: string;
+    startedAt?: string;
+  } | null;
+  recording_session?: {
+    state: "recording" | "paused";
+    durationAtPause: number;
+    audioPath?: string;
+  } | null;
+
+  // ── Analysis results ─────────────────────────────────────────
+  clinical_analysis?: {
+    suggestedIcdCodes?: Array<{
+      code: string;
+      label: string;
+      certainty: string;
+    }>;
+  };
+
+  // ── Caching ──────────────────────────────────────────────────
+  file_focus_cache?: Record<
+    string,
+    {
+      textHash: string;
+      directive: string;
+      output: string;
+      classifiedPassages?: unknown;
+    }
+  >;
 }
 
 // Encounter list query params

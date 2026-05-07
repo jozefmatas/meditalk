@@ -1,6 +1,32 @@
 import { describe, it, expect } from "vitest";
 import { getTranscript, getDoctorNotes, getFileTexts } from "./sources";
-import type { FileMetadata } from "@/lib/types";
+import type { FileMetadata, VisitMetadata } from "@/lib/types";
+
+describe("VisitMetadata type contract", () => {
+  it("accessors accept VisitMetadata without casting", () => {
+    const meta: VisitMetadata = {
+      transcript: "Patient has a headache",
+      doctor_notes: "Check BP",
+      files: [
+        {
+          id: "f1",
+          name: "labs.pdf",
+          size: 100,
+          type: "application/pdf",
+          extracted_text: "WBC 12",
+        },
+      ],
+      template_id: "tmpl-1",
+      section_contents: { s1: "Section content" },
+    };
+
+    expect(getTranscript(meta)).toBe("Patient has a headache");
+    expect(getDoctorNotes(meta)).toBe("Check BP");
+    expect(getFileTexts(meta.files!)).toEqual([
+      { name: "labs.pdf", type: "application/pdf", text: "WBC 12" },
+    ]);
+  });
+});
 
 describe("getTranscript", () => {
   it("returns null for null metadata", () => {

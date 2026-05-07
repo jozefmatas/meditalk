@@ -7,7 +7,7 @@ import { incrementCleanStreaks } from "@/lib/pipeline/feedback";
 import { flattenSectionIds } from "@/lib/templates/html";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
 import type { RawSource } from "@/lib/sections/section-agent";
 import { logger } from "@/lib/logger";
@@ -59,7 +59,7 @@ export const POST = withAuth(async (auth, request) => {
   }
 
   const language = (visit.language as SupportedLanguage) || "en";
-  const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+  const visitMeta = (visit.metadata ?? {}) as VisitMetadata;
 
   // Resolve template
   const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
@@ -200,7 +200,7 @@ export const POST = withAuth(async (auth, request) => {
       const pendingAudioPath =
         audioPath ||
         (
-          (refreshedMetadata as Record<string, unknown>)
+          refreshedMetadata
             ?.generation_pending as { audioPath?: string } | undefined
         )?.audioPath;
       if (pendingAudioPath) {

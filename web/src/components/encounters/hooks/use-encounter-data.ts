@@ -37,8 +37,7 @@ export function useEncounterData({
         const next = typeof update === "function" ? update(prev) : update;
         setVisit((v) => {
           if (!v) return v;
-          const meta = (v.metadata ?? {}) as Record<string, unknown>;
-          return { ...v, metadata: { ...meta, files: next } } as Encounter;
+          return { ...v, metadata: { ...v.metadata, files: next } } as Encounter;
         });
         return next;
       });
@@ -85,10 +84,7 @@ export function useEncounterData({
             patchEncounter(visitId, { status: "to_review" });
           } else {
             // No note — check if the generation is stale (server died mid-flight).
-            const meta = data.metadata as Record<string, unknown> | null;
-            const pending = meta?.generation_pending as
-              | { startedAt?: string }
-              | undefined;
+            const pending = data.metadata?.generation_pending;
             if (pending?.startedAt) {
               const elapsed =
                 Date.now() - new Date(pending.startedAt).getTime();
@@ -114,9 +110,8 @@ export function useEncounterData({
         }
         setVisit(data);
 
-        const meta = data.metadata as Record<string, unknown>;
-        if (meta?.files) {
-          setFilesState(meta.files as EncounterFile[]);
+        if (data.metadata?.files) {
+          setFilesState(data.metadata.files as EncounterFile[]);
         }
 
         onLoadedRef.current?.(data);
@@ -157,9 +152,8 @@ export function useEncounterData({
       if (!res.ok) return;
       const data: Encounter = await res.json();
       setVisit(data);
-      const meta = data.metadata as Record<string, unknown>;
-      if (meta?.files) {
-        setFilesState(meta.files as EncounterFile[]);
+      if (data.metadata?.files) {
+        setFilesState(data.metadata.files as EncounterFile[]);
       }
     } catch {
       // Silent fail — refresh is best-effort
