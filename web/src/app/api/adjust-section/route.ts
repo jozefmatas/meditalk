@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { requireAuth } from "@/lib/supabase/auth";
+import { withAuth } from "@/lib/supabase/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { logUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
@@ -14,150 +14,138 @@ function anthropic() {
   return _anthropic;
 }
 
-export async function POST(request: NextRequest) {
-  let userId: string;
-  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
+export const POST = withAuth(async (auth, request) => {
+  const { userId, supabase } = auth;
 
-  try {
-    authResult = await requireAuth();
-    userId = authResult.userId;
-    supabase = authResult.supabase;
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const body = await request.json();
+  const {
+    visitId,
+    sectionId,
+    currentContent,
+    feedbackText,
+    subsections,
+    subsectionLabels,
+    otherSectionContents,
+    sectionLabels,
+  } = body;
+
+  // Validate required fields
+  if (!visitId || !sectionId || !feedbackText) {
+    return NextResponse.json(
+      { error: "Missing required fields" },
+      { status: 400 },
+    );
   }
 
-  try {
-    const body = await request.json();
-    const {
+  // Either currentContent (single section) OR subsections (parent section) must be present
+  const isSingleSection =
+    currentContent !== undefined && typeof currentContent === "string";
+  const isParentSection =
+    subsections !== undefined &&
+    typeof subsections === "object" &&
+    subsections !== null &&
+    !Array.isArray(subsections);
+
+  if (!isSingleSection && !isParentSection) {
+    return NextResponse.json(
+      {
+        error:
+          "Either currentContent (string) or subsections (object) is required",
+      },
+      { status: 400 },
+    );
+  }
+
+  logAudit({
+    ...createAuditContext(auth, request),
+    action: "encounter.adjust_section",
+    resourceType: "encounter",
+    resourceId: visitId,
+    metadata: { sectionId },
+  });
+
+  // Fetch visit with sources
+  const { data: visit, error: visitError } = await supabase
+    .from("visits")
+    .select("id, user_id, metadata")
+    .eq("id", visitId)
+    .single();
+
+  if (visitError || !visit) {
+    logger.error("[adjust-section] Visit not found:", {
       visitId,
-      sectionId,
-      currentContent,
-      feedbackText,
-      subsections,
-      subsectionLabels,
-      otherSectionContents,
-      sectionLabels,
-    } = body;
+      userId,
+      error: visitError,
+    });
+    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+  }
 
-    // Validate required fields
-    if (!visitId || !sectionId || !feedbackText) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 },
-      );
+  // Gather sources for context
+  const metadata = (visit.metadata as Record<string, unknown>) || {};
+  const transcript = getTranscript(metadata);
+  const doctorNotes = (metadata.doctor_notes as string) || "";
+  const uploadedContext = (metadata.uploaded_files_context as string) || "";
+
+  // Build sources section
+  let sourcesSection = "";
+  if (transcript) {
+    sourcesSection += `**Consultation Transcript:**\n${transcript}\n\n`;
+  }
+  if (doctorNotes) {
+    sourcesSection += `**Doctor's Notes:**\n${doctorNotes}\n\n`;
+  }
+  if (uploadedContext) {
+    sourcesSection += `**Uploaded Files Context:**\n${uploadedContext}\n\n`;
+  }
+
+  // Build context from other sections of the note (lab results, findings, etc.)
+  let noteContext = "";
+  if (
+    otherSectionContents &&
+    typeof otherSectionContents === "object" &&
+    Object.keys(otherSectionContents).length > 0
+  ) {
+    const entries = Object.entries(
+      otherSectionContents as Record<string, string>,
+    )
+      .filter(([, content]) => content?.trim())
+      .map(([id, content]) => {
+        const label = sectionLabels?.[id] || id;
+        return `### ${label}\n${content}`;
+      })
+      .join("\n\n");
+    if (entries) {
+      noteContext = `**OTHER SECTIONS OF THE NOTE** (for reference — do NOT modify these):\n${entries}\n\n`;
     }
+  }
 
-    // Either currentContent (single section) OR subsections (parent section) must be present
-    const isSingleSection =
-      currentContent !== undefined && typeof currentContent === "string";
-    const isParentSection =
-      subsections !== undefined &&
-      typeof subsections === "object" &&
-      subsections !== null &&
-      !Array.isArray(subsections);
+  // Handle parent section regeneration
+  if (isParentSection) {
+    logger.info(
+      `[adjust-section] Adjusting parent section ${sectionId} for visit ${visitId}`,
+      {
+        sectionId,
+        subsectionCount: Object.keys(subsections).length,
+        subsectionIds: Object.keys(subsections),
+        feedbackLength: feedbackText.length,
+      },
+    );
 
-    if (!isSingleSection && !isParentSection) {
-      return NextResponse.json(
-        {
-          error:
-            "Either currentContent (string) or subsections (object) is required",
-        },
-        { status: 400 },
-      );
-    }
+    // Build subsections list for prompt with labels
+    const subsectionsList = Object.entries(subsections)
+      .map(([id, content]) => {
+        const label = subsectionLabels?.[id] || id;
+        return `### ${label} (ID: ${id})\n${content || "(empty)"}`;
+      })
+      .join("\n\n");
 
-    logAudit({
-      ...createAuditContext(authResult, request),
-      action: "encounter.adjust_section",
-      resourceType: "encounter",
-      resourceId: visitId,
-      metadata: { sectionId },
+    logger.info("[adjust-section] Sending parent section to Claude:", {
+      subsectionIds: Object.keys(subsections),
+      subsectionsContentLength: subsectionsList.length,
+      feedbackLength: feedbackText.length,
     });
 
-    // Fetch visit with sources
-    const { data: visit, error: visitError } = await supabase
-      .from("visits")
-      .select("id, user_id, metadata")
-      .eq("id", visitId)
-      .single();
-
-    if (visitError || !visit) {
-      logger.error("[adjust-section] Visit not found:", {
-        visitId,
-        userId,
-        error: visitError,
-      });
-      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-    }
-
-    // Gather sources for context
-    const metadata = (visit.metadata as Record<string, unknown>) || {};
-    const transcript = getTranscript(metadata);
-    const doctorNotes = (metadata.doctor_notes as string) || "";
-    const uploadedContext = (metadata.uploaded_files_context as string) || "";
-
-    // Build sources section
-    let sourcesSection = "";
-    if (transcript) {
-      sourcesSection += `**Consultation Transcript:**\n${transcript}\n\n`;
-    }
-    if (doctorNotes) {
-      sourcesSection += `**Doctor's Notes:**\n${doctorNotes}\n\n`;
-    }
-    if (uploadedContext) {
-      sourcesSection += `**Uploaded Files Context:**\n${uploadedContext}\n\n`;
-    }
-
-    // Build context from other sections of the note (lab results, findings, etc.)
-    let noteContext = "";
-    if (
-      otherSectionContents &&
-      typeof otherSectionContents === "object" &&
-      Object.keys(otherSectionContents).length > 0
-    ) {
-      const entries = Object.entries(
-        otherSectionContents as Record<string, string>,
-      )
-        .filter(([, content]) => content?.trim())
-        .map(([id, content]) => {
-          const label = sectionLabels?.[id] || id;
-          return `### ${label}\n${content}`;
-        })
-        .join("\n\n");
-      if (entries) {
-        noteContext = `**OTHER SECTIONS OF THE NOTE** (for reference — do NOT modify these):\n${entries}\n\n`;
-      }
-    }
-
-    // Handle parent section regeneration
-    if (isParentSection) {
-      logger.info(
-        `[adjust-section] Adjusting parent section ${sectionId} for visit ${visitId}`,
-        {
-          sectionId,
-          subsectionCount: Object.keys(subsections).length,
-          subsectionIds: Object.keys(subsections),
-          feedbackLength: feedbackText.length,
-        },
-      );
-
-      // Build subsections list for prompt with labels
-      const subsectionsList = Object.entries(subsections)
-        .map(([id, content]) => {
-          const label = subsectionLabels?.[id] || id;
-          return `### ${label} (ID: ${id})\n${content || "(empty)"}`;
-        })
-        .join("\n\n");
-
-      logger.info("[adjust-section] Sending parent section to Claude:", {
-        subsectionIds: Object.keys(subsections),
-        subsectionsContentLength: subsectionsList.length,
-        feedbackLength: feedbackText.length,
-      });
-
-      const prompt = `You are a medical documentation assistant. A doctor has provided feedback on a parent section that contains multiple subsections.
+    const prompt = `You are a medical documentation assistant. A doctor has provided feedback on a parent section that contains multiple subsections.
 
 ${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}${noteContext}**Current Subsections:**
 ${subsectionsList}
@@ -190,70 +178,70 @@ If no subsections need updating, return an empty object: {}
 
 Return ONLY the JSON object, with no additional commentary or explanation.`;
 
-      const response = await anthropic().messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4000,
-        temperature: 0.3,
-        messages: [{ role: "user", content: prompt }],
+    const response = await anthropic().messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4000,
+      temperature: 0.3,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    logUsage({
+      userId,
+      visitId,
+      provider: "anthropic",
+      model: response.model,
+      operation: "adjust_section",
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    });
+
+    const responseText = response.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("");
+
+    logger.info("[adjust-section] Claude response received:", {
+      responseLength: responseText.length,
+    });
+
+    // Parse JSON response
+    let updates: Record<string, string> = {};
+    try {
+      updates = JSON.parse(responseText.trim());
+      logger.info("[adjust-section] Parsed updates:", {
+        updateCount: Object.keys(updates).length,
+        updateKeys: Object.keys(updates),
       });
-
-      logUsage({
-        userId,
-        visitId,
-        provider: "anthropic",
-        model: response.model,
-        operation: "adjust_section",
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-      });
-
-      const responseText = response.content
-        .map((block) => (block.type === "text" ? block.text : ""))
-        .join("");
-
-      logger.info("[adjust-section] Claude response received:", {
+    } catch (error) {
+      logger.error("[adjust-section] Failed to parse Claude response:", {
+        error,
         responseLength: responseText.length,
       });
-
-      // Parse JSON response
-      let updates: Record<string, string> = {};
-      try {
-        updates = JSON.parse(responseText.trim());
-        logger.info("[adjust-section] Parsed updates:", {
-          updateCount: Object.keys(updates).length,
-          updateKeys: Object.keys(updates),
-        });
-      } catch (error) {
-        logger.error("[adjust-section] Failed to parse Claude response:", {
-          error,
-          responseLength: responseText.length,
-        });
-        throw new Error("Failed to parse subsection updates");
-      }
-
-      logger.info(
-        `[adjust-section] Parent section ${sectionId} adjusted successfully`,
-        {
-          sectionId,
-          updatedSubsectionCount: Object.keys(updates).length,
-          updatedSubsectionIds: Object.keys(updates),
-        },
-      );
-
-      return NextResponse.json({ updates });
+      throw new Error("Failed to parse subsection updates");
     }
 
-    // Handle single section regeneration
     logger.info(
-      `[adjust-section] Adjusting section ${sectionId} for visit ${visitId}`,
+      `[adjust-section] Parent section ${sectionId} adjusted successfully`,
       {
         sectionId,
-        currentContentLength: currentContent.length,
-        feedbackLength: feedbackText.length,
+        updatedSubsectionCount: Object.keys(updates).length,
+        updatedSubsectionIds: Object.keys(updates),
       },
     );
 
-    const prompt = `You are a medical documentation assistant. A doctor has reviewed a section of a medical note and provided feedback to improve it.
+    return NextResponse.json({ updates });
+  }
+
+  // Handle single section regeneration
+  logger.info(
+    `[adjust-section] Adjusting section ${sectionId} for visit ${visitId}`,
+    {
+      sectionId,
+      currentContentLength: currentContent.length,
+      feedbackLength: feedbackText.length,
+    },
+  );
+
+  const prompt = `You are a medical documentation assistant. A doctor has reviewed a section of a medical note and provided feedback to improve it.
 
 ${sourcesSection ? `**ORIGINAL SOURCES** (for reference and verification):\n${sourcesSection}\n` : ""}${noteContext}**Current Section Content:**
 ${currentContent}
@@ -276,44 +264,37 @@ ${noteContext ? "- You may reference the other sections of the note above for me
 
 Return ONLY the adjusted section content, with no additional commentary or explanation.`;
 
-    // Call Claude
-    const response = await anthropic().messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4000,
-      temperature: 0.3, // Lower temperature for precision
-      messages: [{ role: "user", content: prompt }],
-    });
+  // Call Claude
+  const response = await anthropic().messages.create({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 4000,
+    temperature: 0.3, // Lower temperature for precision
+    messages: [{ role: "user", content: prompt }],
+  });
 
-    logUsage({
-      userId,
-      visitId,
-      provider: "anthropic",
-      model: response.model,
-      operation: "adjust_section",
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-    });
+  logUsage({
+    userId,
+    visitId,
+    provider: "anthropic",
+    model: response.model,
+    operation: "adjust_section",
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+  });
 
-    const adjustedContent =
-      response.content
-        .map((block) => (block.type === "text" ? block.text : ""))
-        .join("") || currentContent;
+  const adjustedContent =
+    response.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join("") || currentContent;
 
-    logger.info(`[adjust-section] Section ${sectionId} adjusted successfully`, {
-      sectionId,
-      originalLength: currentContent.length,
-      adjustedLength: adjustedContent.length,
-    });
+  logger.info(`[adjust-section] Section ${sectionId} adjusted successfully`, {
+    sectionId,
+    originalLength: currentContent.length,
+    adjustedLength: adjustedContent.length,
+  });
 
-    return NextResponse.json({
-      sectionId,
-      content: adjustedContent,
-    });
-  } catch (error) {
-    logger.error("[adjust-section] Error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  return NextResponse.json({
+    sectionId,
+    content: adjustedContent,
+  });
+});

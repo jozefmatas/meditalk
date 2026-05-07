@@ -11,8 +11,8 @@
  *   3. Uses the file-focus cache so Past-mode documents don't get
  *      re-filtered on every adjust.
  */
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/supabase/with-auth";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
@@ -42,157 +42,141 @@ interface UploadedFile {
   context?: string | null;
 }
 
-export async function POST(request: NextRequest) {
-  let userId: string;
-  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
+export const POST = withAuth(async (auth, request) => {
+  const { userId, supabase } = auth;
 
-  try {
-    authResult = await requireAuth();
-    userId = authResult.userId;
-    supabase = authResult.supabase;
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const body = await request.json();
+  const visitId: string | undefined = body.visitId;
+  const templateId: string | undefined = body.templateId;
+  const adjustmentTranscript: string | undefined = body.adjustmentTranscript;
+  const newFileIds: string[] = Array.isArray(body.newFileIds)
+    ? body.newFileIds.filter(
+        (x: unknown): x is string => typeof x === "string",
+      )
+    : [];
+
+  if (!visitId) {
+    return NextResponse.json({ error: "Missing visitId" }, { status: 400 });
+  }
+  if (!adjustmentTranscript?.trim() && newFileIds.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Nothing to adjust — provide adjustmentTranscript or newFileIds",
+      },
+      { status: 400 },
+    );
   }
 
-  try {
-    const body = await request.json();
-    const visitId: string | undefined = body.visitId;
-    const templateId: string | undefined = body.templateId;
-    const adjustmentTranscript: string | undefined = body.adjustmentTranscript;
-    const newFileIds: string[] = Array.isArray(body.newFileIds)
-      ? body.newFileIds.filter(
-          (x: unknown): x is string => typeof x === "string",
-        )
-      : [];
+  logAudit({
+    ...createAuditContext(auth, request),
+    action: "encounter.adjust",
+    resourceType: "encounter",
+    resourceId: visitId,
+    metadata: { templateId, newFileIds: newFileIds.length },
+  });
 
-    if (!visitId) {
-      return NextResponse.json({ error: "Missing visitId" }, { status: 400 });
-    }
-    if (!adjustmentTranscript?.trim() && newFileIds.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "Nothing to adjust — provide adjustmentTranscript or newFileIds",
-        },
-        { status: 400 },
-      );
-    }
+  // Fetch visit
+  const { data: visit, error: visitError } = await supabase
+    .from("visits")
+    .select("id, language, metadata, encounter_note")
+    .eq("id", visitId)
+    .single();
+  if (visitError || !visit) {
+    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+  }
 
-    logAudit({
-      ...createAuditContext(authResult, request),
-      action: "encounter.adjust",
-      resourceType: "encounter",
-      resourceId: visitId,
-      metadata: { templateId, newFileIds: newFileIds.length },
-    });
+  const language =
+    ((visit.language as string)?.trim() as SupportedLanguage) || "en";
+  const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
+  const priorSectionContents = (visitMeta.section_contents ?? {}) as Record<
+    string,
+    string
+  >;
+  const uploadedFiles = (visitMeta.files ?? []) as UploadedFile[];
+  const existingTranscript = getTranscript(visitMeta) ?? "";
 
-    // Fetch visit
-    const { data: visit, error: visitError } = await supabase
-      .from("visits")
-      .select("id, language, metadata, encounter_note")
-      .eq("id", visitId)
-      .single();
-    if (visitError || !visit) {
-      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-    }
+  // Merge adjustment transcript into the stored transcript
+  const mergedTranscript = [existingTranscript, adjustmentTranscript]
+    .filter((s): s is string => !!s?.trim())
+    .join("\n\n");
 
-    const language =
-      ((visit.language as string)?.trim() as SupportedLanguage) || "en";
-    const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const priorSectionContents = (visitMeta.section_contents ?? {}) as Record<
-      string,
-      string
-    >;
-    const uploadedFiles = (visitMeta.files ?? []) as UploadedFile[];
-    const existingTranscript = getTranscript(visitMeta) ?? "";
+  const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
+  const sectionLabels = buildSectionLabelsFromTemplate(template, language);
 
-    // Merge adjustment transcript into the stored transcript
-    const mergedTranscript = [existingTranscript, adjustmentTranscript]
-      .filter((s): s is string => !!s?.trim())
-      .join("\n\n");
+  const allFiles = uploadedFiles
+    .filter((f) => f.extracted_text)
+    .map((f) => ({
+      id: f.id,
+      name: f.name,
+      text: f.extracted_text!,
+      context: f.context || undefined,
+    }));
 
-    const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
-    const sectionLabels = buildSectionLabelsFromTemplate(template, language);
+  const rawSource: RawSource = {
+    transcript: mergedTranscript.trim() || undefined,
+    files: allFiles.map((f) => ({
+      name: f.name,
+      text: f.text,
+      context: f.context,
+    })),
+  };
 
-    const allFiles = uploadedFiles
-      .filter((f) => f.extracted_text)
-      .map((f) => ({
-        id: f.id,
-        name: f.name,
-        text: f.extracted_text!,
-        context: f.context || undefined,
-      }));
+  // Router: which sections does the delta touch?
+  const leafSections = collectLeafSectionsForRouter(template, sectionLabels);
+  const newFileTexts = allFiles
+    .filter((f) => newFileIds.includes(f.id))
+    .map((f) => ({ name: f.name, text: f.text }));
 
-    const rawSource: RawSource = {
-      transcript: mergedTranscript.trim() || undefined,
-      files: allFiles.map((f) => ({
-        name: f.name,
-        text: f.text,
-        context: f.context,
-      })),
-    };
+  // Skeleton for router + downstream renderers
+  const skeleton = await extractSkeleton(
+    rawSource,
+    language === "cs" ? "cs" : language === "en" ? "en" : "sk",
+    { userId, visitId },
+  );
 
-    // Router: which sections does the delta touch?
-    const leafSections = collectLeafSectionsForRouter(template, sectionLabels);
-    const newFileTexts = allFiles
-      .filter((f) => newFileIds.includes(f.id))
-      .map((f) => ({ name: f.name, text: f.text }));
+  const { affectedSectionIds, reasoning } = await routeAdjustment({
+    sections: leafSections,
+    adjustmentTranscript,
+    newFileTexts,
+    language: language === "cs" ? "cs" : language === "en" ? "en" : "sk",
+    usage: { userId, visitId },
+    skeleton,
+  });
 
-    // Skeleton for router + downstream renderers
-    const skeleton = await extractSkeleton(
+  // Expand vital group
+  const affectedSet = expandVitalGroup(
+    new Set(affectedSectionIds),
+    template,
+    sectionLabels,
+  );
+
+  logger.debug(
+    `[adjust] router → ${affectedSectionIds.length} section(s) (reasoning="${reasoning ?? ""}"); expanded to ${affectedSet.size} after vital-group rule`,
+  );
+
+  return createPipelineStream({
+    sessionInput: {
+      supabase,
+      userId,
+      visitId,
+      language,
       rawSource,
-      language === "cs" ? "cs" : language === "en" ? "en" : "sk",
-      { userId, visitId },
-    );
-
-    const { affectedSectionIds, reasoning } = await routeAdjustment({
-      sections: leafSections,
-      adjustmentTranscript,
-      newFileTexts,
-      language: language === "cs" ? "cs" : language === "en" ? "en" : "sk",
-      usage: { userId, visitId },
-      skeleton,
-    });
-
-    // Expand vital group
-    const affectedSet = expandVitalGroup(
-      new Set(affectedSectionIds),
+      fileIds: allFiles.map((f) => f.id),
+      visitMetadata: visitMeta,
       template,
-      sectionLabels,
-    );
-
-    logger.debug(
-      `[adjust] router → ${affectedSectionIds.length} section(s) (reasoning="${reasoning ?? ""}"); expanded to ${affectedSet.size} after vital-group rule`,
-    );
-
-    return createPipelineStream({
-      sessionInput: {
-        supabase,
-        userId,
-        visitId,
-        language,
-        rawSource,
-        fileIds: allFiles.map((f) => f.id),
-        visitMetadata: visitMeta,
-        template,
-        leafIdFilter: affectedSet,
-        priorSectionContents,
-        skipFeedback: true,
-      },
-      persist: {
-        supabase,
-        visitId,
-        metadataPartial: mergedTranscript.trim()
-          ? { transcript: mergedTranscript.trim() }
-          : {},
-        label: "adjust",
-      },
+      leafIdFilter: affectedSet,
+      priorSectionContents,
+      skipFeedback: true,
+    },
+    persist: {
+      supabase,
+      visitId,
+      metadataPartial: mergedTranscript.trim()
+        ? { transcript: mergedTranscript.trim() }
+        : {},
       label: "adjust",
-    });
-  } catch (err) {
-    logger.error("[adjust] top-level error:", err);
-    return NextResponse.json({ error: "adjust_failed" }, { status: 500 });
-  }
-}
+    },
+    label: "adjust",
+  });
+});

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { withAuth } from "@/lib/supabase/with-auth";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import { logger } from "@/lib/logger";
 
@@ -18,120 +18,104 @@ export const maxDuration = 600;
  * 2. **Direct blob mode** (FormData) — for small blobs (pause-time snapshots).
  *    The blob is sent as multipart form data. Subject to Vercel body limit.
  */
-export async function POST(request: NextRequest) {
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
-  try {
-    authResult = await requireAuth();
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export const POST = withAuth(async (auth, request) => {
+  const contentType = request.headers.get("content-type") || "";
 
-  try {
-    const contentType = request.headers.get("content-type") || "";
+  // ── Storage path mode (JSON body) ──────────────────────────
+  if (contentType.includes("application/json")) {
+    const body = await request.json();
+    const storagePath: string | undefined = body.storagePath;
+    const language: string | undefined = body.language;
+    const visitId: string | undefined = body.visitId;
 
-    // ── Storage path mode (JSON body) ──────────────────────────
-    if (contentType.includes("application/json")) {
-      const body = await request.json();
-      const storagePath: string | undefined = body.storagePath;
-      const language: string | undefined = body.language;
-      const visitId: string | undefined = body.visitId;
-
-      if (!storagePath) {
-        return NextResponse.json(
-          { error: "Missing storagePath" },
-          { status: 400 },
-        );
-      }
-
-      logger.info(
-        `[batch-transcribe] Storage mode: downloading ${storagePath}, language=${language ?? "auto"}`,
-      );
-
-      // Retry storage downloads — Supabase can return transient errors on
-      // large files or under load. 3 attempts with exponential backoff.
-      let buffer: Buffer | null = null;
-      for (let dlAttempt = 0; dlAttempt <= 2; dlAttempt++) {
-        const { data: audioData, error: dlError } =
-          await authResult.supabase.storage
-            .from("encounter-files")
-            .download(storagePath);
-
-        if (dlError || !audioData) {
-          logger.error(
-            `[batch-transcribe] Failed to download from storage (attempt ${dlAttempt + 1}/3):`,
-            dlError,
-          );
-          if (dlAttempt < 2) {
-            await new Promise((r) => setTimeout(r, 3000 * (dlAttempt + 1)));
-            continue;
-          }
-          return NextResponse.json(
-            { error: "Failed to download audio from storage" },
-            { status: 500 },
-          );
-        }
-
-        buffer = Buffer.from(await audioData.arrayBuffer());
-        break;
-      }
-
-      if (!buffer) {
-        return NextResponse.json(
-          { error: "Failed to download audio from storage" },
-          { status: 500 },
-        );
-      }
-      const ext = storagePath.substring(storagePath.lastIndexOf("."));
-
-      logger.info(
-        `[batch-transcribe] Transcribing ${buffer.byteLength} bytes from storage`,
-      );
-
-      const text = await transcribeAudio(buffer, `recording${ext}`, language, {
-        userId: authResult.userId,
-        visitId: visitId ?? "",
-      });
-
-      logger.info(
-        `[batch-transcribe] Transcribed ${text.length} chars from storage`,
-      );
-
-      return NextResponse.json({ text });
-    }
-
-    // ── Direct blob mode (FormData) ────────────────────────────
-    const formData = await request.formData();
-    const audioFile = formData.get("audio") as File | null;
-    const language = (formData.get("language") as string) || undefined;
-    const visitId = (formData.get("visitId") as string) || undefined;
-
-    if (!audioFile || audioFile.size === 0) {
+    if (!storagePath) {
       return NextResponse.json(
-        { error: "Missing audio file" },
+        { error: "Missing storagePath" },
         { status: 400 },
       );
     }
 
     logger.info(
-      `[batch-transcribe] Direct mode: ${audioFile.size} bytes (${audioFile.type}), language=${language ?? "auto"}`,
+      `[batch-transcribe] Storage mode: downloading ${storagePath}, language=${language ?? "auto"}`,
     );
 
-    const text = await transcribeAudio(
-      audioFile,
-      audioFile.name || "recording.m4a",
-      language,
-      { userId: authResult.userId, visitId: visitId ?? "" },
+    // Retry storage downloads — Supabase can return transient errors on
+    // large files or under load. 3 attempts with exponential backoff.
+    let buffer: Buffer | null = null;
+    for (let dlAttempt = 0; dlAttempt <= 2; dlAttempt++) {
+      const { data: audioData, error: dlError } = await auth.supabase.storage
+        .from("encounter-files")
+        .download(storagePath);
+
+      if (dlError || !audioData) {
+        logger.error(
+          `[batch-transcribe] Failed to download from storage (attempt ${dlAttempt + 1}/3):`,
+          dlError,
+        );
+        if (dlAttempt < 2) {
+          await new Promise((r) => setTimeout(r, 3000 * (dlAttempt + 1)));
+          continue;
+        }
+        return NextResponse.json(
+          { error: "Failed to download audio from storage" },
+          { status: 500 },
+        );
+      }
+
+      buffer = Buffer.from(await audioData.arrayBuffer());
+      break;
+    }
+
+    if (!buffer) {
+      return NextResponse.json(
+        { error: "Failed to download audio from storage" },
+        { status: 500 },
+      );
+    }
+    const ext = storagePath.substring(storagePath.lastIndexOf("."));
+
+    logger.info(
+      `[batch-transcribe] Transcribing ${buffer.byteLength} bytes from storage`,
     );
 
-    logger.info(`[batch-transcribe] Transcribed ${text.length} chars`);
+    const text = await transcribeAudio(buffer, `recording${ext}`, language, {
+      userId: auth.userId,
+      visitId: visitId ?? "",
+    });
+
+    logger.info(
+      `[batch-transcribe] Transcribed ${text.length} chars from storage`,
+    );
 
     return NextResponse.json({ text });
-  } catch (err) {
-    logger.error("[batch-transcribe] Failed:", err);
+  }
+
+  // ── Direct blob mode (FormData) ────────────────────────────
+  const formData = await request.formData();
+  const audioFile = formData.get("audio") as File | null;
+  const language =
+    (formData.get("language") as string) || undefined;
+  const visitId = (formData.get("visitId") as string) || undefined;
+
+  if (!audioFile || audioFile.size === 0) {
     return NextResponse.json(
-      { error: "Transcription failed" },
-      { status: 500 },
+      { error: "Missing audio file" },
+      { status: 400 },
     );
   }
-}
+
+  logger.info(
+    `[batch-transcribe] Direct mode: ${audioFile.size} bytes (${audioFile.type}), language=${language ?? "auto"}`,
+  );
+
+  const text = await transcribeAudio(
+    audioFile,
+    audioFile.name || "recording.m4a",
+    language,
+    { userId: auth.userId, visitId: visitId ?? "" },
+  );
+
+  logger.info(`[batch-transcribe] Transcribed ${text.length} chars`);
+
+  return NextResponse.json({ text });
+});

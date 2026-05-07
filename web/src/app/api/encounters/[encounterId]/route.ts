@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { withAuth } from "@/lib/supabase/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { Encounter, UpdateEncounterRequest } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
@@ -14,52 +14,41 @@ interface RouteParams {
  * GET /api/encounters/[encounterId]
  * Get a single visit
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
-    const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+export const GET = withAuth(async (auth, request, { params }: RouteParams) => {
+  const { userId, supabase } = auth;
+  const { encounterId: visitId } = await params;
 
-    // Get visit
-    const { data: visit, error } = await supabase
-      .from("visits")
-      .select("*")
-      .eq("id", visitId)
-      .eq("user_id", userId)
-      .single();
+  // Get visit
+  const { data: visit, error } = await supabase
+    .from("visits")
+    .select("*")
+    .eq("id", visitId)
+    .eq("user_id", userId)
+    .single();
 
-    if (error || !visit) {
-      return NextResponse.json({ error: "Visit not found" }, { status: 404 });
-    }
-
-    logAudit({
-      ...createAuditContext(auth, request),
-      action: "encounter.view",
-      resourceType: "encounter",
-      resourceId: visitId,
-    });
-
-    return NextResponse.json({
-      ...visit,
-      status: normalizeStatus(visit.status),
-    } as Encounter);
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit fetch error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+  if (error || !visit) {
+    return NextResponse.json({ error: "Visit not found" }, { status: 404 });
   }
-}
+
+  logAudit({
+    ...createAuditContext(auth, request),
+    action: "encounter.view",
+    resourceType: "encounter",
+    resourceId: visitId,
+  });
+
+  return NextResponse.json({
+    ...visit,
+    status: normalizeStatus(visit.status),
+  } as Encounter);
+});
 
 /**
  * PATCH /api/encounters/[encounterId]
  * Update a visit
  */
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const PATCH = withAuth(
+  async (auth, request, { params }: RouteParams) => {
     const { userId, supabase } = auth;
     const { encounterId: visitId } = await params;
 
@@ -115,7 +104,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       }
 
       if (!visit) {
-        return NextResponse.json({ error: "Visit not found" }, { status: 404 });
+        return NextResponse.json(
+          { error: "Visit not found" },
+          { status: 404 },
+        );
       }
 
       logAudit({
@@ -155,27 +147,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json(visit as Encounter);
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit update error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+);
 
 /**
  * DELETE /api/encounters/[encounterId]
  * Delete a visit (soft delete by default, hard delete with ?hard=true)
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const DELETE = withAuth(
+  async (auth, request, { params }: RouteParams) => {
     const { userId, supabase } = auth;
     const { encounterId: visitId } = await params;
 
-    const searchParams = request.nextUrl.searchParams;
+    const searchParams = (request as NextRequest).nextUrl.searchParams;
     const hardDelete = searchParams.get("hard") === "true";
 
     if (hardDelete) {
@@ -266,12 +250,5 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit delete error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+);
