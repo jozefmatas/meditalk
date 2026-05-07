@@ -46,7 +46,7 @@ describe("getTranscript", () => {
   });
 
   it("returns null for non-string transcript", () => {
-    expect(getTranscript({ transcript: 42 })).toBeNull();
+    expect(getTranscript({ transcript: 42 as never })).toBeNull();
   });
 
   it("returns the transcript text", () => {

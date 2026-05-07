@@ -61,7 +61,7 @@ describe("useEncounterMetadata", () => {
 
     it("skips PATCH when visit is null", async () => {
       const opts = defaultOptions();
-      opts.visit = null;
+      opts.visit = null as never;
       const { result } = renderHook(() => useEncounterMetadata(opts));
 
       await act(async () => {
@@ -154,7 +154,7 @@ describe("useEncounterMetadata", () => {
   describe("handlePatientBlur", () => {
     it("skips PATCH when visit is null", async () => {
       const opts = defaultOptions();
-      opts.visit = null;
+      opts.visit = null as never;
       const { result } = renderHook(() => useEncounterMetadata(opts));
 
       await act(async () => {
