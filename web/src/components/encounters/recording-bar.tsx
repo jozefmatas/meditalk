@@ -95,8 +95,7 @@ function formatDuration(seconds: number) {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// Re-export for external consumers
-export { audioMimeToExt } from "@/components/encounters/hooks/use-audio-recorder";
+
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(

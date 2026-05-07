@@ -525,8 +525,6 @@ export function useEncounterGeneration({
     visit,
     setVisit,
     isStreaming: stream.isStreaming,
-    setIsGenerating: () => {}, // managed by stream hook
-    setIsStreaming: () => {}, // managed by stream hook
     updateTitleRef,
     setGeneratedNoteHtml,
     setCachedTemplate,

@@ -14,8 +14,6 @@ interface UseGenerationPollingOptions {
   visit: Encounter | null;
   setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
   isStreaming: boolean;
-  setIsGenerating: (v: boolean) => void;
-  setIsStreaming: (v: boolean) => void;
   updateTitleRef: React.RefObject<(title: string) => void>;
   setGeneratedNoteHtml: (html: string) => void;
   setCachedTemplate: (
@@ -40,8 +38,6 @@ export function useGenerationPolling({
   visit,
   setVisit,
   isStreaming,
-  setIsGenerating,
-  setIsStreaming,
   updateTitleRef,
   setGeneratedNoteHtml,
   setCachedTemplate,
@@ -75,8 +71,6 @@ export function useGenerationPolling({
           if (!res.ok) return;
           const data: Encounter = await res.json();
           setVisit(data);
-          setIsGenerating(false);
-          setIsStreaming(false);
           if (data.title) updateTitleRef.current(data.title);
           if (data.encounter_note) setGeneratedNoteHtml(data.encounter_note);
         } catch {
@@ -87,8 +81,6 @@ export function useGenerationPolling({
   }, [
     visitId,
     setVisit,
-    setIsGenerating,
-    setIsStreaming,
     updateTitleRef,
     setGeneratedNoteHtml,
   ]);
@@ -104,8 +96,6 @@ export function useGenerationPolling({
       // Timeout — server likely failed; reset to "started" so user can retry
       if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
         stopPolling();
-        setIsGenerating(false);
-        setIsStreaming(false);
         setVisit((prev) =>
           prev ? { ...prev, status: "started" as const } : prev,
         );
@@ -120,8 +110,6 @@ export function useGenerationPolling({
         const updated: Encounter = await res.json();
         if (updated.encounter_note || updated.status !== "processing") {
           stopPolling();
-          setIsGenerating(false);
-          setIsStreaming(false);
           setVisit(updated);
           if (updated.encounter_note) {
             setGeneratedNoteHtml(updated.encounter_note);
@@ -149,8 +137,6 @@ export function useGenerationPolling({
     isStreaming,
     visitId,
     setVisit,
-    setIsGenerating,
-    setIsStreaming,
     stopPolling,
     setGeneratedNoteHtml,
     setCachedTemplate,
