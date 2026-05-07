@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -19,13 +19,13 @@ import {
 } from "@/components/shared/table";
 import { cn } from "@/lib/utils";
 import type { FileMetadata } from "@/lib/types";
-import { emit } from "@/lib/events";
 import { logger } from "@/lib/logger";
 import { isAndroid } from "@/lib/platform";
 import {
   type EncounterFile,
   pendingContextSaves,
 } from "@/lib/encounters/file-state";
+import { useFileUpload } from "./hooks/use-file-upload";
 import { FileContextDialog } from "./file-context-dialog";
 import { FilePickerDrawer } from "./file-picker-drawer";
 
@@ -52,189 +52,27 @@ export function FilesContent({
   hasActiveRecording = false,
 }: FilesContentProps) {
   const t = useTranslations("encounters.detail");
-  const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [contextDialogOpen, setContextDialogOpen] = useState(false);
   const [pickerDrawerOpen, setPickerDrawerOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const uploadFiles = useCallback(
-    async (fileList: FileList | File[]) => {
-      const allFiles = Array.from(fileList);
-      if (allFiles.length === 0) return;
+  const { uploadFiles, isUploading, shouldPromptContext, clearContextPrompt } =
+    useFileUpload({ visitId, onFilesChange, hasActiveRecording });
 
-      setIsUploading(true);
-      const { uploadWithRetry } =
-        await import("@/lib/upload/upload-with-persistence");
+  // Open context dialog when non-audio files are uploaded
+  useEffect(() => {
+    if (shouldPromptContext) {
+      setContextDialogOpen(true);
+      clearContextPrompt();
+    }
+  }, [shouldPromptContext, clearContextPrompt]);
 
-      // Compute source tags once — audio files uploaded during an active
-      // recording get tagged so the server can use the real-time transcript
-      const fileSources = allFiles.map((file) =>
-        hasActiveRecording && file.type.startsWith("audio/")
-          ? ("recording-upload" as const)
-          : undefined,
-      );
-
-      // Add pending files to list immediately (before upload)
-      const pendingFiles: EncounterFile[] = allFiles.map((file, i) => ({
-        id: crypto.randomUUID(), // temporary ID
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        pending: true,
-        source: fileSources[i],
-      }));
-      onFilesChange([...files, ...pendingFiles]);
-
-      try {
-        // Upload all files with retry
-        const results = await Promise.allSettled(
-          allFiles.map(async (file, i) =>
-            uploadWithRetry(file, file.name, visitId, {
-              source: fileSources[i],
-            }),
-          ),
-        );
-
-        const uploadResults = results
-          .filter((r) => r.status === "fulfilled")
-          .map(
-            (r) =>
-              (
-                r as PromiseFulfilledResult<
-                  Awaited<ReturnType<typeof uploadWithRetry>>
-                >
-              ).value,
-          );
-
-        if (uploadResults.length === 0) {
-          // All uploads failed — remove pending files so spinners stop
-          onFilesChange((prevFiles) => {
-            const pendingIds = new Set(pendingFiles.map((f) => f.id));
-            return prevFiles.filter((f) => !pendingIds.has(f.id));
-          });
-          return;
-        }
-
-        // Register file metadata with the API
-        const res = await fetch(`/api/encounters/${visitId}/files`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: uploadResults }),
-        });
-
-        if (!res.ok) {
-          throw new Error(`Metadata registration failed: ${res.status}`);
-        }
-
-        const data = await res.json();
-
-        // Replace only the pending files that were just uploaded (preserve recording file)
-        onFilesChange((prevFiles) => {
-          const uploadedIds = new Set(pendingFiles.map((f) => f.id));
-          const withoutTheseUploads = prevFiles.filter(
-            (f) => !uploadedIds.has(f.id),
-          );
-          return [...withoutTheseUploads, ...(data.files as EncounterFile[])];
-        });
-
-        // Open context dialog if any uploaded files are non-audio
-        const uploadedFiles = data.files as EncounterFile[];
-        const hasNonAudioUploads = uploadedFiles.some(
-          (f) =>
-            !f.type.startsWith("audio/") &&
-            f.source !== "recording" &&
-            f.source !== "recording-upload",
-        );
-        if (hasNonAudioUploads) {
-          setContextDialogOpen(true);
-        }
-
-        // Trigger immediate extraction for each uploaded file (background).
-        // Track completion so we can update file state and notify other components.
-        // Includes a single retry (2s delay) for transient failures.
-        uploadedFiles.forEach((file) => {
-          const tryExtract = async (attempt: number): Promise<void> => {
-            try {
-              const extractRes = await fetch(
-                `/api/encounters/${visitId}/extract`,
-                {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ fileId: file.id }),
-                },
-              );
-
-              if (extractRes.ok) {
-                const result = await extractRes.json();
-                logger.debug(`[extract] Completed extraction for ${file.name}`);
-                onFilesChange((prev) =>
-                  prev.map((f) =>
-                    f.id === file.id
-                      ? {
-                          ...f,
-                          extraction_status: "completed" as const,
-                          extracted_text: result.text ?? f.extracted_text,
-                        }
-                      : f,
-                  ),
-                );
-                emit("extraction-complete", { visitId, fileId: file.id });
-              } else if (attempt === 0) {
-                logger.warn(
-                  `[extract] Extraction failed for ${file.name}: ${extractRes.status}, retrying...`,
-                );
-                await new Promise((r) => setTimeout(r, 2000));
-                return tryExtract(1);
-              } else {
-                logger.warn(
-                  `[extract] Extraction failed for ${file.name} after retry: ${extractRes.status}`,
-                );
-                onFilesChange((prev) =>
-                  prev.map((f) =>
-                    f.id === file.id
-                      ? { ...f, extraction_status: "failed" as const }
-                      : f,
-                  ),
-                );
-              }
-            } catch (extractErr) {
-              if (attempt === 0) {
-                logger.warn(
-                  `[extract] Extraction error for ${file.name}, retrying...`,
-                  extractErr,
-                );
-                await new Promise((r) => setTimeout(r, 2000));
-                return tryExtract(1);
-              }
-              logger.warn(
-                `[extract] Extraction failed for ${file.name} after retry:`,
-                extractErr,
-              );
-              onFilesChange((prev) =>
-                prev.map((f) =>
-                  f.id === file.id
-                    ? { ...f, extraction_status: "failed" as const }
-                    : f,
-                ),
-              );
-            }
-          };
-
-          tryExtract(0);
-        });
-      } catch (err) {
-        logger.error("File upload error:", err);
-        // Remove pending files so spinners stop
-        onFilesChange((prevFiles) => {
-          const pendingIds = new Set(pendingFiles.map((f) => f.id));
-          return prevFiles.filter((f) => !pendingIds.has(f.id));
-        });
-      } finally {
-        setIsUploading(false);
-      }
+  const handleUpload = useCallback(
+    (fileList: FileList | File[]) => {
+      uploadFiles(Array.from(fileList));
     },
-    [visitId, files, onFilesChange, hasActiveRecording],
+    [uploadFiles],
   );
 
   const handleDelete = useCallback(
@@ -261,10 +99,10 @@ export function FilesContent({
       e.preventDefault();
       setIsDragging(false);
       if (e.dataTransfer.files.length > 0) {
-        uploadFiles(e.dataTransfer.files);
+        handleUpload(e.dataTransfer.files);
       }
     },
-    [uploadFiles],
+    [handleUpload],
   );
 
   const handleContextSave = useCallback(
@@ -360,7 +198,7 @@ export function FilesContent({
         accept=".pdf,.png,.jpg,.jpeg,.mp3,.m4a,.mp4,.wav,.aac,.ogg,.webm,.caf,audio/*"
         className="hidden"
         onChange={(e) => {
-          if (e.target.files?.length) uploadFiles(e.target.files);
+          if (e.target.files?.length) handleUpload(e.target.files);
           e.target.value = "";
         }}
       />
@@ -380,14 +218,14 @@ export function FilesContent({
             setPickerDrawerOpen(false);
             const { takePhoto } = await import("@/lib/android-file-picker");
             const files = await takePhoto();
-            if (files.length > 0) uploadFiles(files);
+            if (files.length > 0) handleUpload(files);
           }}
           onChooseFromGallery={async () => {
             setPickerDrawerOpen(false);
             const { pickFromGallery } =
               await import("@/lib/android-file-picker");
             const files = await pickFromGallery();
-            if (files.length > 0) uploadFiles(files);
+            if (files.length > 0) handleUpload(files);
           }}
           onFileManager={async () => {
             setPickerDrawerOpen(false);
