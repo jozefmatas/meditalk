@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MediTalk — Web App
 
-## Getting Started
+AI-powered medical documentation platform. Records consultations, transcribes audio, extracts text from uploaded files (PDFs, images, audio), and generates structured medical notes using Claude.
 
-First, run the development server:
+Runs on **http://localhost:8111**.
+
+## Prerequisites
+
+- Node.js 22+
+- npm
+- Supabase CLI (`brew install supabase/tap/supabase`)
+- API keys: Anthropic, OpenAI, ElevenLabs, Resend (see `.env.local.example`)
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.local.example .env.local   # fill in your keys
+npm install
+npm run dev                         # http://localhost:8111
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+For HTTPS (needed for microphone on some browsers):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# generate certs with mkcert first
+npm run dev:https
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Key Commands
 
-## Learn More
+| Command | What it does |
+|---------|-------------|
+| `npm run dev` | Dev server (port 8111) |
+| `npm run build` | Production build |
+| `npm run test:unit` | Unit tests (vitest) |
+| `npm run lint` | ESLint |
+| `npm run eval` | Run generation eval harness (11 fixtures) |
+| `npm run storybook` | Component library (port 8001) |
+| `npm run db:push` | Push Supabase migrations |
+| `npm run db:reset` | Reset linked Supabase DB |
+| `npm run db:types` | Regenerate Supabase TypeScript types |
+| `npm run cap:ios` | Run on iOS via Capacitor |
+| `npm run cap:android` | Run on Android via Capacitor |
 
-To learn more about Next.js, take a look at the following resources:
+## Documentation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All system documentation lives in `/kb/` — see [kb/README.md](../kb/README.md) for the reading order.
