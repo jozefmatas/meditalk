@@ -39,4 +39,6 @@ export function validateServerEnv(
   return result.data;
 }
 
-export const serverEnv = validateServerEnv();
+export const serverEnv: ServerEnv = process.env.VITEST
+  ? ({} as ServerEnv)
+  : validateServerEnv();

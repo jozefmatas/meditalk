@@ -7,18 +7,22 @@ Runs on **http://localhost:8222**. Authenticated via password + session secret (
 ## Setup
 
 ```bash
-cp .env.local.example .env.local   # fill in your keys
-npm install
-npm run dev                         # http://localhost:8222
+vercel link             # link to the Vercel project (one-time)
+pnpm install
+pnpm run setup:env      # pulls env from Vercel (or copies example)
+pnpm run dev            # http://localhost:8222
 ```
+
+> If `vercel env pull` fails, `setup:env` falls back to copying `.env.local.example` — you'll need to fill in the values manually.
 
 ## Key Commands
 
 | Command | What it does |
 |---------|-------------|
-| `npm run dev` | Dev server (port 8222) |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
+| `pnpm run dev` | Dev server (port 8222) |
+| `pnpm run build` | Production build |
+| `pnpm run lint` | ESLint |
+| `pnpm run setup:env` | Pull env vars from Vercel (or copy example) |
 
 ## Environment Variables
 

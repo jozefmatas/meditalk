@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev -p 8111",
     "dev:https": "sh -c 'test -f ./certs/localhost+1-key.pem || pnpm run setup:https' && next dev -p 8111 --experimental-https --experimental-https-key ./certs/localhost+1-key.pem --experimental-https-cert ./certs/localhost+1.pem",
+    "setup": "pnpm run setup:env && pnpm run setup:https",
+    "setup:env": "test -f .env.local || (vercel env pull .env.local >/dev/null 2>&1 && echo '✅ Pulled env vars from Vercel.' || (cp .env.local.example .env.local && echo '⚠️  Could not pull from Vercel. Created .env.local from example — fill in the values manually.'))",
     "setup:https": "command -v mkcert >/dev/null || { echo 'mkcert not found. Install it: brew install mkcert' && exit 1; } && mkcert -install && mkdir -p ./certs && mkcert -key-file ./certs/localhost+1-key.pem -cert-file ./certs/localhost+1.pem localhost 127.0.0.1",
     "build": "next build",
     "cap:build": "npx cap sync",
@@ -94,6 +96,7 @@
     "@tailwindcss/vite": "^4.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
