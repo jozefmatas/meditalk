@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 8111",
-    "dev:https": "next dev -p 8111 --experimental-https --experimental-https-key ./certs/localhost+1-key.pem --experimental-https-cert ./certs/localhost+1.pem",
+    "dev:https": "sh -c 'test -f ./certs/localhost+1-key.pem || pnpm run setup:https' && next dev -p 8111 --experimental-https --experimental-https-key ./certs/localhost+1-key.pem --experimental-https-cert ./certs/localhost+1.pem",
+    "setup:https": "command -v mkcert >/dev/null || { echo 'mkcert not found. Install it: brew install mkcert' && exit 1; } && mkcert -install && mkdir -p ./certs && mkcert -key-file ./certs/localhost+1-key.pem -cert-file ./certs/localhost+1.pem localhost 127.0.0.1",
     "build": "next build",
     "cap:build": "npx cap sync",
     "start": "next start",

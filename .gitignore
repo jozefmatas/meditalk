@@ -21,6 +21,7 @@ build
 # misc
 .DS_Store
 *.pem
+web/certs/
 package-lock.json
 
 # debug
