@@ -303,14 +303,15 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
 
 | File Type | Extraction Method                | Model               |
 | --------- | -------------------------------- | ------------------- |
-| Images    | EXIF auto-rotate → Claude Vision | Sonnet 4.6 (temp=0) |
+| Images    | Signed URL → Claude Vision       | Sonnet 4.6 (temp=0) |
 | PDFs      | Signed URL → Claude document API | Sonnet 4.6 (temp=0) |
 | Audio     | Scribe v2 batch transcription    | ElevenLabs          |
 
-**Two extraction paths:**
+**Three extraction paths:**
 
 1. **Background** (right after upload) — [web/src/app/api/encounters/[encounterId]/extract/route.ts](web/src/app/api/encounters/[encounterId]/extract/route.ts)
 2. **Inline** (during generation) — if files arrive incomplete, extracted on-demand in the generate route
+3. **Re-extraction** (during adjust) — files with `extraction_status === "failed"` are re-extracted inline before rendering
 
 **Recovery:** Stuck extractions (>5 min) reset to "failed" for retry. RPC persist has 3-attempt retry with backoff.
 

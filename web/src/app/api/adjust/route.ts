@@ -29,6 +29,7 @@ import { logAudit, createAuditContext } from "@/lib/audit";
 import type { RawSource } from "@/lib/sections/section-agent";
 import type { SupportedLanguage } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
+import { extractFileText } from "@/lib/extraction/extract-file";
 import { logger } from "@/lib/logger";
 
 export const maxDuration = 600;
@@ -37,6 +38,7 @@ interface UploadedFile {
   id: string;
   name: string;
   type?: string;
+  path?: string;
   extracted_text?: string | null;
   extraction_status?: string;
   context?: string | null;
@@ -108,13 +110,60 @@ export async function POST(request: NextRequest) {
     const uploadedFiles = (visitMeta.files ?? []) as UploadedFile[];
     const existingTranscript = getTranscript(visitMeta) ?? "";
 
-    // Merge adjustment transcript into the stored transcript
-    const mergedTranscript = [existingTranscript, adjustmentTranscript]
-      .filter((s): s is string => !!s?.trim())
-      .join("\n\n");
+    // Deduplicate: only append adjustmentTranscript if it's genuinely new
+    // content. The client's prepareSource() re-sends the existing transcript
+    // when there's no new recording blob, so we must detect and skip that.
+    const isNewDelta =
+      !!adjustmentTranscript?.trim() &&
+      adjustmentTranscript.trim() !== existingTranscript.trim();
+
+    const mergedTranscript = isNewDelta
+      ? [existingTranscript, adjustmentTranscript]
+          .filter((s): s is string => !!s?.trim())
+          .join("\n\n")
+      : existingTranscript;
 
     const template = await resolveTemplate(templateId || DEFAULT_TEMPLATE_ID);
     const sectionLabels = buildSectionLabelsFromTemplate(template, language);
+
+    // Re-extract files with failed extraction_status (e.g. after a bug fix)
+    const failedFiles = uploadedFiles.filter(
+      (f) =>
+        f.extraction_status === "failed" &&
+        !f.extracted_text &&
+        f.type &&
+        f.path,
+    );
+    if (failedFiles.length > 0) {
+      logger.debug(
+        `[adjust] Re-extracting ${failedFiles.length} failed file(s)`,
+      );
+      await Promise.allSettled(
+        failedFiles.map(async (f) => {
+          try {
+            const result = await extractFileText({
+              file: {
+                id: f.id,
+                type: f.type!,
+                path: f.path!,
+                name: f.name,
+              },
+              supabase,
+              userId,
+              visitId,
+              language,
+            });
+            f.extracted_text = result.text;
+            f.extraction_status = "completed";
+            logger.debug(
+              `[adjust] Re-extracted ${f.name}: ${result.text.length} chars`,
+            );
+          } catch (err) {
+            logger.warn(`[adjust] Re-extraction failed for ${f.name}:`, err);
+          }
+        }),
+      );
+    }
 
     const allFiles = uploadedFiles
       .filter((f) => f.extracted_text)
@@ -184,7 +233,7 @@ export async function POST(request: NextRequest) {
       persist: {
         supabase,
         visitId,
-        metadataPartial: mergedTranscript.trim()
+        metadataPartial: isNewDelta
           ? { transcript: mergedTranscript.trim() }
           : {},
         label: "adjust",
