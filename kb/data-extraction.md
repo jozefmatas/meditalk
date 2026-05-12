@@ -129,7 +129,7 @@ interface FileMetadata {
 
 | Type              | Method                                  | Model / Library                                                                                                        |
 | ----------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `image/*`         | EXIF auto-rotate -> Claude Vision       | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
+| `image/*`         | 5-min signed URL -> Claude Vision       | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (via [file-extraction.ts](web/src/lib/file-extraction.ts)) |
 | `application/pdf` | 5-min signed URL -> Claude document API | `claude-sonnet-4-6` at `temperature: 0`, `max_tokens: 8192` (both URL-input and base64-input paths in the same file)   |
 | `audio/*`         | Scribe v2 batch transcription           | ElevenLabs                                                                                                             |
 

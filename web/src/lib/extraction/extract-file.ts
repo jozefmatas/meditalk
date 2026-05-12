@@ -35,9 +35,8 @@ export interface ExtractFileResult {
  * - /api/encounters/[encounterId]/extract/route.ts (background extraction)
  *
  * **Image files:**
- * - Download from storage
- * - Auto-rotate based on EXIF metadata
- * - OCR via Claude Vision
+ * - Create signed URL (5 min expiry)
+ * - OCR via Claude Vision (no 5 MB base64 limit)
  *
  * **PDF files:**
  * - Create signed URL (5 min expiry)
@@ -65,21 +64,23 @@ export async function extractFileText(
   let extractedText: string | null = null;
 
   if (isImage) {
-    // Images: download → EXIF auto-rotate → OCR
-    const { data: fileData, error: dlError } = await supabase.storage
+    // Images: use signed URL so Claude fetches directly (no 5 MB base64 limit)
+    const { data: urlData, error: urlError } = await supabase.storage
       .from("encounter-files")
-      .download(file.path);
+      .createSignedUrl(file.path, 300); // 5 min expiry
 
-    if (dlError || !fileData) {
-      logger.error(`[extract-file] Failed to download ${file.name}:`, dlError);
+    if (urlError || !urlData?.signedUrl) {
+      logger.error(
+        `[extract-file] Failed to create signed URL for ${file.name}:`,
+        urlError,
+      );
       throw new Error(
-        `File download failed: ${dlError?.message || "Unknown error"}`,
+        `Signed URL creation failed: ${urlError?.message || "Unknown error"}`,
       );
     }
 
-    const buffer = Buffer.from(await fileData.arrayBuffer());
     extractedText = await extractTextFromFile(
-      { imageBuffer: buffer },
+      { imageUrl: urlData.signedUrl },
       file.name,
       file.type,
       language,
