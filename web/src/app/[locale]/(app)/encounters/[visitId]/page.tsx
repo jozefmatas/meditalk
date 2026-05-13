@@ -337,8 +337,10 @@ export default function EncounterDetailPage({ params }: PageProps) {
         onAdjust={() => setAdjustDrawerOpen(true)}
       />
 
-      {/* Streaming generation view — show sections progressively */}
-      {generation.isStreaming ? (
+      {/* Streaming generation view — show sections progressively.
+       *  Also shown during progress phase (beforeSession transcription)
+       *  so the user sees "Transcribing..." instead of the generic overlay. */}
+      {generation.isStreaming || generation.progressStage ? (
         <div className="flex flex-1 justify-center overflow-y-auto px-4 pb-6 desktop:px-6">
           <div className="flex w-full max-w-5xl flex-col gap-6 min-h-full">
             <ReviewView
@@ -375,6 +377,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
               adjustDrawerOpen={adjustDrawerOpen}
               onAdjustDrawerOpenChange={setAdjustDrawerOpen}
               timerState={generation.timerState}
+              progressStage={generation.progressStage}
               getFeedbackRating={feedback.getRating}
               onSectionThumbsUp={handleSectionThumbsUp}
               onSectionRemoveFeedback={handleSectionRemoveFeedback}

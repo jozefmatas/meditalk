@@ -44,12 +44,16 @@ export async function persistRecordingSnapshot({
     encounterId: visitId,
   });
 
+  const snapshotVersion = Date.now();
+
   await patchEncounter(visitId, {
     metadata: {
       recording_session: {
         state: "paused",
         durationAtPause: durationSeconds,
         audioPath: path,
+        snapshotBytes: blob.size,
+        snapshotVersion,
       },
     },
   });
@@ -65,7 +69,12 @@ export async function persistRecordingSnapshot({
     transcribePromise
       .then((text) => {
         if (!text) return;
-        patchEncounter(visitId, { metadata: { transcript: text } });
+        patchEncounter(visitId, {
+          metadata: {
+            transcript: text,
+            transcriptSnapshotVersion: snapshotVersion,
+          },
+        });
         logger.debug(
           `[recording] Pause-time transcription saved: ${text.length} chars`,
         );

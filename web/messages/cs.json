@@ -157,6 +157,8 @@
       "lessThanMinute": "< 1 min",
       "minutesRemaining": "{minutes} min",
       "regenerating": "Regeneruji zprávu...",
+      "transcribing": "Přepisuji audio...",
+      "preparing": "Připravuji...",
       "note": "Zpráva",
       "addDocument": "Přidat dokument",
       "copyNote": "Kopírovat zprávu",

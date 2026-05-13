@@ -47,6 +47,8 @@ export interface UseGenerationStreamReturn {
   streamedSections: NoteSection[];
   streamingSectionIds: string[];
   streamingSectionLabels: Record<string, string>;
+  /** Current progress stage during source resolution (e.g. "preparing", "transcribing"). */
+  progressStage: string | null;
   executeStream: (
     params: ExecuteStreamParams,
   ) => Promise<Record<string, unknown> | null>;
@@ -67,12 +69,14 @@ export function useGenerationStream(
   const [streamingSectionLabels, setStreamingSectionLabels] = useState<
     Record<string, string>
   >({});
+  const [progressStage, setProgressStage] = useState<string | null>(null);
 
   const resetStream = useCallback(() => {
     setStreamedSections([]);
     setStreamingSectionIds([]);
     setStreamingSectionLabels({});
     setIsStreaming(false);
+    setProgressStage(null);
   }, []);
 
   const restoreFromCache = useCallback((): boolean => {
@@ -144,9 +148,13 @@ export function useGenerationStream(
             if (!res.body) throw new Error("generation_failed");
 
             await parseSSEStream(res.body, {
+              onProgress: (e) => {
+                setProgressStage(e.stage);
+              },
               onStreamingStart: (e) => {
                 ctx.streamingStarted = true;
                 setIsStreaming(true);
+                setProgressStage(null);
                 setStreamedSections([]);
                 setStreamingSectionIds(e.sectionIds);
                 setStreamingSectionLabels(e.sectionLabels);
@@ -237,6 +245,7 @@ export function useGenerationStream(
     streamedSections,
     streamingSectionIds,
     streamingSectionLabels,
+    progressStage,
     executeStream,
     resetStream,
     restoreFromCache,

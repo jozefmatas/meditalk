@@ -1,5 +1,24 @@
-import type { UpdateEncounterRequest, EncounterStatus } from "@/lib/types";
+import type {
+  Encounter,
+  UpdateEncounterRequest,
+  EncounterStatus,
+} from "@/lib/types";
 import { emit } from "@/lib/events";
+
+/**
+ * Fetch a single encounter by ID. Returns null on failure.
+ */
+export async function fetchEncounter(
+  visitId: string,
+): Promise<Encounter | null> {
+  try {
+    const res = await fetch(`/api/encounters/${visitId}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Fire-and-forget PATCH to /api/encounters/:id.

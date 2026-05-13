@@ -117,6 +117,30 @@ describe("parseSSEStream", () => {
     expect(callbacks.onComplete).toHaveBeenCalled();
   });
 
+  it("dispatches progress events via onProgress", async () => {
+    const callbacks: SSECallbacks = {
+      onProgress: vi.fn(),
+      onComplete: vi.fn(),
+    };
+
+    const stream = mockStream([
+      'data: {"type":"progress","stage":"transcribing"}\n',
+      'data: {"type":"progress","stage":"generating"}\n',
+      'data: {"type":"complete","generatedNote":"<p>Done</p>"}\n',
+    ]);
+
+    await parseSSEStream(stream, callbacks);
+
+    expect(callbacks.onProgress).toHaveBeenCalledTimes(2);
+    expect(callbacks.onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "transcribing" }),
+    );
+    expect(callbacks.onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: "generating" }),
+    );
+    expect(callbacks.onComplete).toHaveBeenCalled();
+  });
+
   it("works with no callbacks provided", async () => {
     const stream = mockStream([
       'data: {"type":"streaming_start","sectionIds":[],"sectionLabels":{}}\n',

@@ -234,6 +234,59 @@ describe("createPipelineStream", () => {
     expect(typeof call.sendEvent).toBe("function");
   });
 
+  it("sends error event and skips pipeline when beforeSession throws", async () => {
+    mockRunPipeline.mockResolvedValue(dummyResult);
+    mockPersist.mockResolvedValue({ success: true });
+
+    const response = createPipelineStream({
+      sessionInput: dummySessionInput,
+      persist: dummyPersist,
+      beforeSession: async () => {
+        throw new Error("transcription failed");
+      },
+      label: "test",
+    });
+
+    const events = await collectSSEEvents(response);
+    const error = events.find(
+      (e) => (e as Record<string, unknown>).type === "error",
+    ) as Record<string, unknown>;
+
+    expect(error).toBeDefined();
+    expect(error.error).toBe("transcription failed");
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it("runs beforeSession before pipeline and merges overrides", async () => {
+    mockRunPipeline.mockResolvedValue(dummyResult);
+    mockPersist.mockResolvedValue({ success: true });
+
+    const response = createPipelineStream({
+      sessionInput: dummySessionInput,
+      persist: dummyPersist,
+      beforeSession: async ({ sendEvent }) => {
+        sendEvent({ type: "progress", stage: "transcribing" });
+        return { rawSource: { transcript: "overridden transcript" } };
+      },
+      label: "test",
+    });
+
+    const events = await collectSSEEvents(response);
+
+    // Progress event appears in the stream
+    const progress = events.find(
+      (e) => (e as Record<string, unknown>).type === "progress",
+    ) as Record<string, unknown>;
+    expect(progress).toBeDefined();
+    expect(progress.stage).toBe("transcribing");
+
+    // Pipeline receives the overridden rawSource
+    const call = mockRunPipeline.mock.calls[0][0];
+    expect(call.rawSource).toEqual({ transcript: "overridden transcript" });
+    // Other fields from original sessionInput are preserved
+    expect(call.userId).toBe("u1");
+  });
+
   it("passes pipeline result fields to persistGeneration", async () => {
     mockRunPipeline.mockResolvedValue(dummyResult);
     mockPersist.mockResolvedValue({ success: true });

@@ -24,3 +24,10 @@ export const EXTRACTION_POLL_INTERVAL_MS = 500;
 
 /** RPC retry delays for persisting extracted text (losing OCR output is expensive). */
 export const EXTRACTION_RPC_RETRY_DELAYS = [500, 1000, 2000] as const;
+
+/** Max time to wait for an in-flight pause-time transcript before falling
+ *  back to inline audio recovery. Typical batch-transcribe takes 5-15s. */
+export const TRANSCRIPT_WAIT_TIMEOUT_MS = 30_000; // 30 seconds
+
+/** How often to poll for transcript completion inside resolve-source. */
+export const TRANSCRIPT_POLL_INTERVAL_MS = 1_000; // 1 second

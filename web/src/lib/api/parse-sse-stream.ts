@@ -13,6 +13,8 @@ export interface SSECallbacks {
   onSection?: (event: { id: string; title: string; content: string }) => void;
   onComplete?: (event: Record<string, unknown>) => void;
   onError?: (error: string) => void;
+  /** Progress events during source resolution (transcription, extraction). */
+  onProgress?: (event: { stage: string; message?: string }) => void;
 }
 
 export async function parseSSEStream(
@@ -41,6 +43,8 @@ export async function parseSSEStream(
 
         if (event.type === "streaming_start") {
           callbacks.onStreamingStart?.(event);
+        } else if (event.type === "progress") {
+          callbacks.onProgress?.(event);
         } else if (event.type === "section") {
           callbacks.onSection?.(event);
         } else if (event.type === "complete") {

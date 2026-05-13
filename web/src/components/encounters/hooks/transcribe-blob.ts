@@ -23,6 +23,7 @@ export interface TranscribeBlobDeps {
 }
 
 const MAX_RETRIES = 2; // 3 attempts total
+const PATH_MAX_RETRIES = 4; // 5 attempts — this is the only viable path for large recordings
 const BASE_DELAY_MS = 3000; // 3s, 6s backoff
 
 function isTransient(err: unknown, status?: number): boolean {
@@ -113,7 +114,9 @@ export async function transcribeBlob(
  * through Vercel's body size limit.
  *
  * Preferred path for full recordings (which can be 5-50+ MB).
- * Retries up to MAX_RETRIES times for transient errors with exponential backoff.
+ * Retries up to PATH_MAX_RETRIES times for transient errors with exponential
+ * backoff — more generous than transcribeBlob because this is the only viable
+ * client-side path for large recordings (blob exceeds Vercel's 4.5 MB limit).
  */
 export async function transcribeFromPath(
   storagePath: string,
@@ -121,7 +124,7 @@ export async function transcribeFromPath(
   visitId: string,
   deps: TranscribeBlobDeps = { fetch: globalThis.fetch.bind(globalThis) },
 ): Promise<string | null> {
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= PATH_MAX_RETRIES; attempt++) {
     try {
       const res = await deps.fetch("/api/batch-transcribe", {
         method: "POST",
@@ -130,16 +133,16 @@ export async function transcribeFromPath(
       });
 
       if (!res.ok) {
-        if (isTransient(null, res.status) && attempt < MAX_RETRIES) {
+        if (isTransient(null, res.status) && attempt < PATH_MAX_RETRIES) {
           const delay = retryDelay(attempt);
           logger.warn(
-            `[transcribe-path] Transient error ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
+            `[transcribe-path] Transient error ${res.status}, retrying in ${delay}ms (attempt ${attempt + 1}/${PATH_MAX_RETRIES + 1})`,
           );
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }
         logger.warn(
-          `[transcribe-path] Transcription from storage failed: ${res.status} (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
+          `[transcribe-path] Transcription from storage failed: ${res.status} (attempt ${attempt + 1}/${PATH_MAX_RETRIES + 1})`,
         );
         return null;
       }
@@ -157,10 +160,10 @@ export async function transcribeFromPath(
       );
       return text;
     } catch (err) {
-      if (isTransient(err) && attempt < MAX_RETRIES) {
+      if (isTransient(err) && attempt < PATH_MAX_RETRIES) {
         const delay = retryDelay(attempt);
         logger.warn(
-          `[transcribe-path] Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES + 1})`,
+          `[transcribe-path] Network error, retrying in ${delay}ms (attempt ${attempt + 1}/${PATH_MAX_RETRIES + 1})`,
         );
         await new Promise((r) => setTimeout(r, delay));
         continue;

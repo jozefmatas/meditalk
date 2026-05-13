@@ -21,17 +21,15 @@ vi.mock("@/components/encounters/hooks/transcribe-blob", () => ({
 }));
 
 vi.mock("@/lib/audio/mime-utils", () => ({
-  audioMimeToExt: (mime: string) =>
-    mime.includes("mp4") ? ".m4a" : ".webm",
+  audioMimeToExt: (mime: string) => (mime.includes("mp4") ? ".m4a" : ".webm"),
 }));
 
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const { persistRecordingSnapshot } = await import(
-  "./persist-recording-snapshot"
-);
+const { persistRecordingSnapshot } =
+  await import("./persist-recording-snapshot");
 
 // ── Helpers ───────────────────────────────────────────────────────
 
@@ -71,6 +69,8 @@ describe("persistRecordingSnapshot", () => {
           state: "paused",
           durationAtPause: 120,
           audioPath: "recordings/v1/recording.webm",
+          snapshotBytes: expect.any(Number),
+          snapshotVersion: expect.any(Number),
         },
       },
     });
@@ -161,10 +161,16 @@ describe("persistRecordingSnapshot", () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    // First call: session metadata. Second call: transcript.
+    // First call: session metadata. Second call: transcript + version.
     expect(mockPatchEncounter).toHaveBeenCalledTimes(2);
+    const sessionCall = mockPatchEncounter.mock.calls[0][1];
+    const snapshotVersion =
+      sessionCall.metadata.recording_session.snapshotVersion;
     expect(mockPatchEncounter).toHaveBeenLastCalledWith("v1", {
-      metadata: { transcript: "the transcript" },
+      metadata: {
+        transcript: "the transcript",
+        transcriptSnapshotVersion: snapshotVersion,
+      },
     });
   });
 

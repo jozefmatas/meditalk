@@ -90,7 +90,7 @@ describe("POST /api/batch-transcribe", () => {
       const body = await res.json();
       expect(body.text).toBe("transcribed text");
       expect(mockTranscribeAudio).toHaveBeenCalledWith(
-        expect.any(Buffer),
+        expect.any(File),
         "recording.m4a",
         "sk",
         { userId: "user-123", visitId: "v1" },

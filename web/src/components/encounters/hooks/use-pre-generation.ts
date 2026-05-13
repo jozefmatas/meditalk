@@ -2,13 +2,9 @@
 
 import { useCallback } from "react";
 import type { RecordingBarRef } from "@/components/encounters/recording-bar";
-import type { SupportedLanguage } from "@/lib/types";
-import type { Encounter } from "@/lib/types";
-import { transcribeBlob, transcribeFromPath } from "./transcribe-blob";
+import type { SupportedLanguage, Encounter } from "@/lib/types";
 import { uploadToStorage } from "@/lib/supabase/upload";
 import { audioMimeToExt } from "./use-audio-recorder";
-import { getTranscript } from "@/lib/encounters/sources";
-import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 
 export interface PreGenerationResult {
@@ -42,28 +38,20 @@ export function usePreGeneration(visitId: string) {
        *  so the caller can switch to processing UI in between. */
       finalized?: FinalizedRecording | null;
     }): Promise<PreGenerationResult> => {
-      const {
-        recordingBarRef,
-        language,
-        visit,
-        finalized: preFinalized,
-      } = params;
+      const { recordingBarRef, visit, finalized: preFinalized } = params;
 
       let releaseGuards: (() => void) | undefined;
       let blobToProcess: Blob | null;
-      let isRestoredSession: boolean;
 
       if (preFinalized !== undefined) {
         // Caller already finalized the recording
         blobToProcess = preFinalized?.blob ?? null;
-        isRestoredSession = preFinalized?.isRestoredSession ?? false;
         releaseGuards = preFinalized?.releaseGuards;
       } else {
         // Legacy path: finalize inline
         releaseGuards = recordingBarRef.current?.releaseGuards;
         const result = await recordingBarRef.current?.finalize();
         blobToProcess = result?.blob ?? null;
-        isRestoredSession = result?.isRestoredSession ?? false;
       }
 
       logger.debug(
@@ -90,56 +78,8 @@ export function usePreGeneration(visitId: string) {
         }
       }
 
-      // Transcribe: prefer storage-path (no body limit) when uploaded
-      let finalTranscript: string | null;
-      if (uploadedPath) {
-        finalTranscript = await transcribeFromPath(
-          uploadedPath,
-          language,
-          visitId,
-        );
-        // Fallback to direct blob if storage-path transcription failed
-        if (!finalTranscript && blobToProcess) {
-          logger.warn(
-            "[pre-gen] Storage-path transcription failed, trying direct blob",
-          );
-          finalTranscript = await transcribeBlob(
-            blobToProcess,
-            language,
-            visitId,
-          );
-        }
-      } else if (blobToProcess) {
-        finalTranscript = await transcribeBlob(
-          blobToProcess,
-          language,
-          visitId,
-        );
-      } else {
-        finalTranscript = getTranscript(
-          visit?.metadata as Record<string, unknown>,
-        );
-      }
-
-      // Warn user on transcription failure
-      if (blobToProcess && !finalTranscript) {
-        logger.error(
-          `[pre-gen] Client transcription failed for ${blobToProcess.size} byte blob (uploaded=${!!uploadedPath})`,
-        );
-        if (uploadedPath) {
-          toast.info(
-            "Transcription is taking longer than usual. The server will process your recording automatically.",
-            { duration: 8_000 },
-          );
-        } else {
-          toast.warning(
-            "Recording transcription failed. The note will be generated from uploaded files only.",
-            { duration: 10_000 },
-          );
-        }
-      }
-
-      // Resolve audio recovery path for server-side
+      // Resolve audio recovery path — server decides whether to use it
+      // (server-side waitForTranscript polls for in-flight transcripts)
       const meta = (visit?.metadata ?? {}) as Record<string, unknown>;
       const pendingMeta = meta?.generation_pending as
         | { audioPath?: string }
@@ -149,19 +89,19 @@ export function usePreGeneration(visitId: string) {
         | undefined;
 
       let audioRecoveryPath: string | undefined;
-      if (!blobToProcess) {
+      if (blobToProcess && uploadedPath) {
+        audioRecoveryPath = uploadedPath;
+      } else if (blobToProcess && sessionMeta?.audioPath) {
+        // Upload failed — fall back to session audio path
+        audioRecoveryPath = sessionMeta.audioPath;
+      } else if (!blobToProcess) {
+        // No new recording — use existing audio path from metadata
         audioRecoveryPath =
           pendingMeta?.audioPath || sessionMeta?.audioPath || undefined;
-      } else if (!finalTranscript && uploadedPath) {
-        audioRecoveryPath = uploadedPath;
-      } else if (!finalTranscript && !uploadedPath && sessionMeta?.audioPath) {
-        audioRecoveryPath = sessionMeta.audioPath;
-      } else if (isRestoredSession && sessionMeta?.audioPath) {
-        audioRecoveryPath = sessionMeta.audioPath;
       }
 
       return {
-        transcriptText: finalTranscript,
+        transcriptText: null,
         audioRecoveryPath,
         releaseGuards,
       };

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { transcribeBlob } from "./transcribe-blob";
+import { transcribeBlob, transcribeFromPath } from "./transcribe-blob";
 
 /** Build a fake Blob of the given byte size. */
 function makeBlob(size: number): Blob {
@@ -189,5 +189,120 @@ describe("transcribeBlob", () => {
 
     expect(result).toBe("after retry");
     expect(fetchStub).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("transcribeFromPath", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function runPathWithTimers(
+    storagePath: string,
+    lang: string,
+    visitId: string,
+    deps: { fetch: typeof fetch },
+  ): Promise<string | null> {
+    const promise = transcribeFromPath(storagePath, lang, visitId, deps);
+    // Advance past all retry delays (3+6+9+12+15 = 45s, add buffer)
+    for (let i = 0; i < 20; i++) {
+      await vi.advanceTimersByTimeAsync(3000);
+    }
+    return promise;
+  }
+
+  it("POSTs storagePath as JSON and returns transcript", async () => {
+    const fetchStub = okFetch("transcribed text");
+
+    const result = await transcribeFromPath(
+      "user/v1/recovery.webm",
+      "sk",
+      "visit-abc",
+      { fetch: fetchStub },
+    );
+
+    expect(result).toBe("transcribed text");
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    const [url, init] = (fetchStub as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(url).toBe("/api/batch-transcribe");
+    expect(init.method).toBe("POST");
+    expect(init.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(init.body)).toEqual({
+      storagePath: "user/v1/recovery.webm",
+      language: "sk",
+      visitId: "visit-abc",
+    });
+  });
+
+  it("retries up to 5 times on transient network errors", async () => {
+    const fetchStub = throwingFetch();
+
+    const result = await runPathWithTimers(
+      "user/v1/recovery.webm",
+      "sk",
+      "visit-abc",
+      { fetch: fetchStub },
+    );
+
+    expect(result).toBeNull();
+    // PATH_MAX_RETRIES = 4, so 5 attempts total
+    expect(fetchStub).toHaveBeenCalledTimes(5);
+  });
+
+  it("retries on transient HTTP errors with 5 total attempts", async () => {
+    const fetchStub = errorFetch(502);
+
+    const result = await runPathWithTimers(
+      "user/v1/recovery.webm",
+      "sk",
+      "visit-abc",
+      { fetch: fetchStub },
+    );
+
+    expect(result).toBeNull();
+    expect(fetchStub).toHaveBeenCalledTimes(5);
+  });
+
+  it("succeeds on retry after transient failures", async () => {
+    const fetchStub = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ text: "recovered on attempt 4" }),
+      }) as unknown as typeof fetch;
+
+    const result = await runPathWithTimers(
+      "user/v1/recovery.webm",
+      "sk",
+      "visit-abc",
+      { fetch: fetchStub },
+    );
+
+    expect(result).toBe("recovered on attempt 4");
+    expect(fetchStub).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry on non-transient errors (400)", async () => {
+    const fetchStub = errorFetch(400);
+
+    const result = await transcribeFromPath(
+      "user/v1/recovery.webm",
+      "sk",
+      "visit-abc",
+      { fetch: fetchStub },
+    );
+
+    expect(result).toBeNull();
+    expect(fetchStub).toHaveBeenCalledTimes(1);
   });
 });

@@ -34,6 +34,16 @@ export interface CreatePipelineStreamOptions {
    * (e.g. email dispatch, audio cleanup).
    */
   afterPersist?: (result: PipelineSessionResult) => void | Promise<void>;
+  /**
+   * Runs inside the SSE stream BEFORE the pipeline session starts.
+   * Use to perform slow async work (e.g. source resolution, transcription)
+   * while sending progress events to keep the connection alive.
+   *
+   * May return partial overrides that are merged into `sessionInput`.
+   */
+  beforeSession?: (ctx: {
+    sendEvent: (data: Record<string, unknown>) => void;
+  }) => Promise<Partial<Omit<PipelineSessionInput, "sendEvent">> | void>;
   /** Label for error logging (e.g. "generate", "adjust"). */
   label: string;
 }
@@ -47,13 +57,28 @@ export interface CreatePipelineStreamOptions {
 export function createPipelineStream(
   options: CreatePipelineStreamOptions,
 ): Response {
-  const { sessionInput, persist, completeEventExtras, afterPersist, label } =
-    options;
+  const {
+    sessionInput,
+    persist,
+    completeEventExtras,
+    afterPersist,
+    beforeSession,
+    label,
+  } = options;
 
   const readable = createSSEStream(async ({ sendEvent, safeClose }) => {
     try {
+      // Run beforeSession (e.g. resolve source with progress events)
+      let finalInput = sessionInput;
+      if (beforeSession) {
+        const overrides = await beforeSession({ sendEvent });
+        if (overrides) {
+          finalInput = { ...sessionInput, ...overrides };
+        }
+      }
+
       const result = await runPipelineSession({
-        ...sessionInput,
+        ...finalInput,
         sendEvent: sendEvent as (data: Record<string, unknown>) => void,
       });
 

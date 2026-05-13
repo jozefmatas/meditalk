@@ -141,7 +141,7 @@ describe("POST /api/generate", () => {
     expect(body.error).toBe("insufficient_context");
   });
 
-  it("calls resolveSource in fresh mode (with transcriptText)", async () => {
+  it("defers resolveSource into beforeSession in fresh mode", async () => {
     const mockResponse = new Response("ok");
     mockCreatePipelineStream.mockReturnValue(mockResponse);
     mockResolveSource.mockResolvedValue({
@@ -156,13 +156,40 @@ describe("POST /api/generate", () => {
     const res = await POST(
       makeRequest({
         visitId: "v1",
-        transcriptText: "hello doctor",
+        audioPath: "user-123/v1/recovery.webm",
       }),
     );
 
-    expect(mockResolveSource).toHaveBeenCalledOnce();
+    // resolveSource is NOT called directly — deferred to beforeSession
+    expect(mockResolveSource).not.toHaveBeenCalled();
     expect(mockCreatePipelineStream).toHaveBeenCalledOnce();
     expect(res).toBe(mockResponse);
+
+    // beforeSession callback is provided
+    const call = mockCreatePipelineStream.mock.calls[0][0];
+    expect(call.beforeSession).toBeDefined();
+
+    // Simulate what the stream does: call beforeSession
+    const sendEvent = vi.fn();
+    const overrides = await call.beforeSession!({ sendEvent });
+
+    // Now resolveSource should have been called
+    expect(mockResolveSource).toHaveBeenCalledOnce();
+    expect(mockResolveSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audioPath: "user-123/v1/recovery.webm",
+        visitId: "v1",
+      }),
+    );
+
+    // beforeSession should have sent progress events
+    expect(sendEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "progress", stage: "preparing" }),
+    );
+
+    // Overrides contain the resolved source data
+    expect(overrides).toBeDefined();
+    expect(overrides!.rawSource).toEqual({ transcript: "hello doctor" });
   });
 
   it("uses cached mode when no transcriptText/audioPath", async () => {

@@ -1,8 +1,14 @@
 # MediTalk — End-to-End System Documentation
 
-_Last updated: 2026-04-29_
+_Last updated: 2026-05-13_
 
 This document provides a comprehensive overview of how MediTalk works from end to end — authentication through note generation to finalization.
+
+## What's new (2026-05-13)
+
+- **Server-side transcript polling** — `waitForTranscript` in `resolve-source.ts` polls DB for in-flight pause-time transcripts (matching `transcriptSnapshotVersion` to `recording_session.snapshotVersion`). Eliminates redundant ElevenLabs calls when Generate fires while batch-transcribe is in-flight or already completed. Same pattern as `waitForExtractions` for file OCR.
+- **Client simplification** — `usePreGeneration` no longer transcribes or does blob-size/version matching. Always returns `transcriptText: null` + `audioRecoveryPath`. Server decides whether to poll for transcript or fall back to audio recovery.
+- **Version markers** — `persistRecordingSnapshot` now writes `snapshotVersion` (epoch) to `recording_session` and `transcriptSnapshotVersion` to transcript metadata, linking pause snapshots to their transcripts.
 
 ## What's new (2026-05-07)
 
@@ -133,9 +139,10 @@ The main page at `/encounters/[visitId]` is where all the work happens. It has t
 When the doctor hits **Generate**:
 
 1. Recording finalizes → full blob returned
-2. Client-side batch transcription via Scribe v2 (20-60s)
-3. `POST /api/generate` with transcript text + metadata
-4. Overlay shows progressive SSE events: analysis complete → facts extracted → streaming sections
+2. Blob uploaded to Supabase storage (for crash recovery / audio recovery)
+3. `POST /api/generate` with `audioRecoveryPath` (no `transcriptText` — server resolves transcript via DB polling or audio recovery)
+4. Server polls for in-flight pause-time transcript (up to 30s), falls back to audio recovery if needed
+5. Overlay shows progressive SSE events: preparing → analysis complete → facts extracted → streaming sections
 
 **Recovery mechanisms:**
 
@@ -147,7 +154,7 @@ When the doctor hits **Generate**:
 
 - [web/src/components/encounters/hooks/use-encounter-generation.ts](web/src/components/encounters/hooks/use-encounter-generation.ts) — coordinator hook (composes the three hooks below)
 - [web/src/components/encounters/hooks/use-generation-stream.ts](web/src/components/encounters/hooks/use-generation-stream.ts) — SSE streaming consumer, module-level caches, client retry
-- [web/src/components/encounters/hooks/use-pre-generation.ts](web/src/components/encounters/hooks/use-pre-generation.ts) — recording finalization, blob upload, transcription
+- [web/src/components/encounters/hooks/use-pre-generation.ts](web/src/components/encounters/hooks/use-pre-generation.ts) — recording finalization, blob upload, audio recovery path resolution (no client-side transcription)
 - [web/src/components/encounters/hooks/use-doctor-notes.ts](web/src/components/encounters/hooks/use-doctor-notes.ts) — 2s debounced auto-save with retry
 - [web/src/components/encounters/hooks/use-generation-polling.ts](web/src/components/encounters/hooks/use-generation-polling.ts) — recovery polling
 - [web/src/components/encounters/hooks/use-encounter-data.ts](web/src/components/encounters/hooks/use-encounter-data.ts) — status auto-corrections
@@ -291,8 +298,8 @@ All transcription uses **ElevenLabs Scribe v2** (not Whisper) — better SK/CS a
 
 **Transcript flow:**
 
-1. Normal: record → finalize → full blob → transcribe → text sent to `/api/generate`
-2. Restored session (page refresh): pre-refresh audio at `audioPath` in storage + post-refresh blob transcribed separately; server prepends pre-refresh transcript
+1. Normal (pause → generate): pause-time `persistRecordingSnapshot` uploads blob + fires batch-transcribe (saves transcript + `transcriptSnapshotVersion` to metadata). At generate time, client uploads final blob + sends `audioRecoveryPath`. Server-side `waitForTranscript` polls for matching `transcriptSnapshotVersion` — reuses the pause-time transcript without re-transcribing.
+2. Audio recovery (fallback): if transcript polling times out or no `snapshotVersion` exists (user never paused, or recorded more after last pause), server downloads audio from `audioRecoveryPath` and transcribes inline.
 3. No blob: falls back to `metadata.transcript` (from pause-time transcription) or doctor notes + files alone
 
 ---
@@ -348,10 +355,13 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
   ],
   "template_id": "soap_v1",
   "doctor_notes": "...",
+  "transcriptSnapshotVersion": 1778669587066, // links transcript to its snapshot
   "recording_session": {
     "state": "paused",
     "durationAtPause": 127,
     "audioPath": "...",
+    "snapshotBytes": 204800,
+    "snapshotVersion": 1778669587066, // epoch — matched by transcriptSnapshotVersion
   },
   "generation_pending": {
     "templateId": "soap_v1",
@@ -507,7 +517,7 @@ Section-agent model is configurable per template via `section.model: "haiku" | "
 
 ## 18. Testing
 
-- **760+ tests** across utilities, hooks, pipeline modules, and parsers
+- **870+ tests** across utilities, hooks, pipeline modules, and parsers
 - Lint (ESLint) + Prettier enforced on every commit
 - Build verification (`npm run build`) before pushing
 - A live end-to-end section-agent proof lives at [web/src/lib/sections/la-proof.test.ts](../web/src/lib/sections/la-proof.test.ts), gated behind `LIVE_LLM=1` — runs a real Anthropic call against a fixture transcript and prints the LA + OA sections

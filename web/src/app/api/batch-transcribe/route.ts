@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
 
       // Retry storage downloads — Supabase can return transient errors on
       // large files or under load. 3 attempts with exponential backoff.
-      let buffer: Buffer | null = null;
+      let audioBlob: Blob | null = null;
       for (let dlAttempt = 0; dlAttempt <= 2; dlAttempt++) {
         const { data: audioData, error: dlError } =
           await authResult.supabase.storage
@@ -72,26 +72,48 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        buffer = Buffer.from(await audioData.arrayBuffer());
+        audioBlob = audioData;
         break;
       }
 
-      if (!buffer) {
+      if (!audioBlob) {
         return NextResponse.json(
           { error: "Failed to download audio from storage" },
           { status: 500 },
         );
       }
+
       const ext = storagePath.substring(storagePath.lastIndexOf("."));
 
+      // Build a File from the Blob directly — avoids the intermediate
+      // Blob → ArrayBuffer → Buffer → Uint8Array → File copy chain that
+      // triples memory usage for large recordings.
+      const mimeMap: Record<string, string> = {
+        ".webm": "audio/webm",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+      };
+      const audioFile = new File([audioBlob], `recording${ext}`, {
+        type: mimeMap[ext] || "audio/mpeg",
+      });
+
       logger.info(
-        `[batch-transcribe] Transcribing ${buffer.byteLength} bytes from storage`,
+        `[batch-transcribe] Transcribing ${audioFile.size} bytes from storage`,
       );
 
-      const text = await transcribeAudio(buffer, `recording${ext}`, language, {
-        userId: authResult.userId,
-        visitId: visitId ?? "",
-      });
+      const text = await transcribeAudio(
+        audioFile,
+        `recording${ext}`,
+        language,
+        {
+          userId: authResult.userId,
+          visitId: visitId ?? "",
+        },
+      );
 
       logger.info(
         `[batch-transcribe] Transcribed ${text.length} chars from storage`,

@@ -90,6 +90,8 @@ interface ReviewViewProps {
   timerState?:
     | import("@/hooks/use-generation-timer").GenerationTimerState
     | null;
+  /** Progress stage during source resolution (e.g. "preparing", "transcribing"). */
+  progressStage?: string | null;
   // Feedback
   getFeedbackRating?: (sectionId: string) => "up" | "down" | null;
   onSectionThumbsUp?: (sectionId: string) => void;
@@ -138,6 +140,7 @@ export function ReviewView({
   adjustDrawerOpen = false,
   onAdjustDrawerOpenChange,
   timerState,
+  progressStage,
   getFeedbackRating,
   onSectionThumbsUp,
   onSectionRemoveFeedback,
@@ -354,11 +357,13 @@ export function ReviewView({
   ) : null;
 
   // Streaming timer label (shared between mobile and desktop)
-  const streamingTimerLabel = timerState
-    ? tDetail("generatingReadyIn", { time: timerState.formattedTime })
-    : isStreamingGeneration
-      ? t("detail.generatingEncounter")
-      : t("detail.regenerating");
+  const streamingTimerLabel = progressStage
+    ? tDetail(progressStage === "transcribing" ? "transcribing" : "preparing")
+    : timerState
+      ? tDetail("generatingReadyIn", { time: timerState.formattedTime })
+      : isStreamingGeneration
+        ? t("detail.generatingEncounter")
+        : t("detail.regenerating");
 
   // Email button icon + label
   const emailIcon =

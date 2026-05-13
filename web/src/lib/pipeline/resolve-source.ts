@@ -22,6 +22,8 @@ import {
   EXTRACTION_STUCK_THRESHOLD_MS,
   EXTRACTION_WAIT_TIMEOUT_MS,
   EXTRACTION_POLL_INTERVAL_MS,
+  TRANSCRIPT_WAIT_TIMEOUT_MS,
+  TRANSCRIPT_POLL_INTERVAL_MS,
 } from "@/lib/extraction/constants";
 import type { RawSource } from "@/lib/sections/section-agent";
 import type { SupportedLanguage, FileMetadata } from "@/lib/types";
@@ -86,15 +88,37 @@ export async function resolveSource(
   const patientId =
     typeof visit.patient_id === "string" ? visit.patient_id : undefined;
 
+  // ── 0. Server-side transcript polling ─────────────────────────
+  // When a recording_session.snapshotVersion exists and no client
+  // transcript was provided, check if the in-flight pause-time
+  // transcription has landed in metadata. This avoids re-downloading
+  // and re-transcribing the same audio blob.
+  if (!transcriptText) {
+    const session = visitMeta.recording_session as
+      | { snapshotVersion?: number }
+      | undefined;
+    if (typeof session?.snapshotVersion === "number") {
+      const { transcript } = await waitForTranscript(
+        supabase,
+        visitId,
+        session.snapshotVersion,
+      );
+      if (transcript) {
+        transcriptText = transcript;
+        logger.debug(
+          `[resolve-source] Using polled transcript (${transcript.length} chars) — skipping audio recovery`,
+        );
+      }
+    }
+  }
+
   // ── 1. Audio recovery ──────────────────────────────────────────
   const effectiveAudioPath = resolveAudioPath(clientAudioPath, visitMeta);
 
-  // Only enter recovery when:
-  // 1. The client explicitly asked for it (audioPath param set)
-  // 2. OR there is no transcriptText yet — full recovery needed.
-  // Skip when client sent transcriptText AND did NOT pass audioPath
-  // (the metadata audioPath is the same blob already transcribed).
-  if (effectiveAudioPath && (clientAudioPath || !transcriptText)) {
+  // Only enter recovery when audio exists but NO transcript was provided.
+  // When the client sends transcriptText (e.g. from a pause-snapshot match),
+  // skip the expensive download + re-transcription entirely.
+  if (effectiveAudioPath && !transcriptText) {
     logger.debug(
       `[resolve-source] Recovery audio — client: ${clientAudioPath || "NONE"}, effective: ${effectiveAudioPath}`,
     );
@@ -106,9 +130,9 @@ export async function resolveSource(
       visitId,
       transcriptText,
     );
-  } else if (effectiveAudioPath && transcriptText && !clientAudioPath) {
+  } else if (effectiveAudioPath && transcriptText) {
     logger.debug(
-      `[resolve-source] Skipping recovery audio — client already sent ${transcriptText.length} char transcript`,
+      `[resolve-source] Skipping recovery — transcript already provided (${transcriptText.length} chars)`,
     );
   }
 
@@ -269,13 +293,25 @@ async function recoverAudioTranscript(
         break;
       }
 
-      const buffer = Buffer.from(await audioData.arrayBuffer());
-      logger.debug(
-        `[resolve-source] Recovery audio downloaded: ${buffer.byteLength} bytes`,
-      );
       const ext = audioPath.substring(audioPath.lastIndexOf("."));
+      const mimeMap: Record<string, string> = {
+        ".webm": "audio/webm",
+        ".ogg": "audio/ogg",
+        ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".flac": "audio/flac",
+      };
+      // Build File directly from Blob — avoids Blob→ArrayBuffer→Buffer copy.
+      const audioFile = new File([audioData], `recovery${ext}`, {
+        type: mimeMap[ext] || "audio/mpeg",
+      });
+      logger.debug(
+        `[resolve-source] Recovery audio downloaded: ${audioFile.size} bytes`,
+      );
       const recovered = await transcribeAudio(
-        buffer,
+        audioFile,
         `recovery${ext}`,
         language,
         { userId, visitId },
@@ -435,6 +471,87 @@ async function extractUnprocessedFiles(
       }
     }),
   );
+}
+
+// ── Transcript polling ────────────────────────────────────────────
+
+export interface TranscriptPollResult {
+  /** The transcript text if found, undefined if polling timed out. */
+  transcript: string | undefined;
+  /** Whether we obtained the transcript from polling (true) or it was already there (false). */
+  polled: boolean;
+}
+
+/**
+ * Poll for an in-flight pause-time transcript to land in metadata.
+ *
+ * Similar to `waitForExtractions` — polls the DB for
+ * `transcriptSnapshotVersion` matching the given `snapshotVersion`.
+ */
+export async function waitForTranscript(
+  supabase: SupabaseClient,
+  visitId: string,
+  snapshotVersion: number,
+): Promise<TranscriptPollResult> {
+  // Immediate check — transcript may already be there
+  const initialMeta = await fetchVisitMetadata(supabase, visitId);
+  const initialTranscript = checkTranscriptReady(initialMeta, snapshotVersion);
+  if (initialTranscript) {
+    return { transcript: initialTranscript, polled: false };
+  }
+
+  // Poll for in-flight transcript
+  logger.debug(
+    `[resolve-source] Waiting for transcript (snapshotVersion: ${snapshotVersion})`,
+  );
+  const pollStart = Date.now();
+  while (Date.now() - pollStart < TRANSCRIPT_WAIT_TIMEOUT_MS) {
+    await sleep(TRANSCRIPT_POLL_INTERVAL_MS);
+    const meta = await fetchVisitMetadata(supabase, visitId);
+    const transcript = checkTranscriptReady(meta, snapshotVersion);
+    if (transcript) {
+      logger.debug(
+        `[resolve-source] Transcript arrived after ${Date.now() - pollStart}ms polling (${transcript.length} chars)`,
+      );
+      return { transcript, polled: true };
+    }
+  }
+
+  logger.debug(
+    `[resolve-source] Transcript polling timed out after ${TRANSCRIPT_WAIT_TIMEOUT_MS}ms`,
+  );
+  return { transcript: undefined, polled: false };
+}
+
+function checkTranscriptReady(
+  meta: Record<string, unknown>,
+  snapshotVersion: number,
+): string | undefined {
+  const transcriptVersion = meta?.transcriptSnapshotVersion as
+    | number
+    | undefined;
+  if (
+    typeof transcriptVersion !== "number" ||
+    transcriptVersion !== snapshotVersion
+  ) {
+    return undefined;
+  }
+  const transcript = meta?.transcript;
+  return typeof transcript === "string" && transcript.length > 0
+    ? transcript
+    : undefined;
+}
+
+async function fetchVisitMetadata(
+  supabase: SupabaseClient,
+  visitId: string,
+): Promise<Record<string, unknown>> {
+  const { data } = await supabase
+    .from("visits")
+    .select("metadata")
+    .eq("id", visitId)
+    .single();
+  return (data?.metadata ?? {}) as Record<string, unknown>;
 }
 
 function sleep(ms: number): Promise<void> {

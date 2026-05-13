@@ -239,7 +239,8 @@ export function useEncounterGeneration({
       setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
       emit("encounter-update", { id: visitId, status: "processing" });
 
-      // 3. Upload blob + transcribe (slow, network)
+      // 3. Upload blob + resolve audio recovery path
+      // (server-side waitForTranscript handles transcript reuse)
       const { transcriptText, audioRecoveryPath, releaseGuards } =
         await prepareSource({
           recordingBarRef,
@@ -533,7 +534,7 @@ export function useEncounterGeneration({
     visitId,
     visit,
     setVisit,
-    isStreaming: stream.isStreaming,
+    isStreaming: stream.isStreaming || stream.isGenerating,
     updateTitleRef,
     setGeneratedNoteHtml,
     setCachedTemplate,
@@ -689,6 +690,7 @@ export function useEncounterGeneration({
     handleTemplateChange,
     handleRegenerate,
     handleAdjustGenerate,
+    progressStage: stream.progressStage,
     timerState,
     saveStatus,
   };
