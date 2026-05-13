@@ -375,7 +375,7 @@ describe("useEncounterGeneration", () => {
 
     it("skips PATCH when visit is null", () => {
       const opts = defaultOptions();
-      opts.visit = null;
+      opts.visit = null as never;
       const { result } = renderHook(() => useEncounterGeneration(opts));
 
       act(() => {

@@ -60,7 +60,7 @@ const mockIsAdminEmail = vi.mocked(isAdminEmail);
 beforeEach(() => {
   vi.clearAllMocks();
   mockIsAdminEmail.mockImplementation(
-    (email: string) => email === "admin@meditalk.com",
+    (email) => email === "admin@meditalk.com",
   );
 });
 

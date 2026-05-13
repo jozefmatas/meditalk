@@ -307,7 +307,7 @@ describe("POST /api/adjust", () => {
 
     const call = mockCreatePipelineStream.mock.calls[0][0];
     // Both files should be in rawSource — the failed one re-extracted
-    expect(call.sessionInput.rawSource.files.length).toBeGreaterThanOrEqual(2);
+    expect(call.sessionInput.rawSource.files!.length).toBeGreaterThanOrEqual(2);
   });
 
   it("includes files with extracted_text in rawSource", async () => {
@@ -341,6 +341,6 @@ describe("POST /api/adjust", () => {
 
     const call = mockCreatePipelineStream.mock.calls[0][0];
     expect(call.sessionInput.rawSource.files).toHaveLength(1);
-    expect(call.sessionInput.rawSource.files[0].name).toBe("lab.pdf");
+    expect(call.sessionInput.rawSource.files![0].name).toBe("lab.pdf");
   });
 });

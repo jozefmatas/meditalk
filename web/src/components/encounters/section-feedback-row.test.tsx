@@ -168,6 +168,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={onSubmit}
       />,
     );
@@ -189,6 +190,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={onSubmit}
       />,
     );
@@ -248,6 +250,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={vi.fn()}
         isRegenerating={true}
       />,
@@ -268,6 +271,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={vi.fn()}
         storageKey={storageKey}
       />,
@@ -296,6 +300,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={vi.fn()}
         storageKey={storageKey}
       />,
@@ -319,6 +324,7 @@ describe("SectionFeedbackRow", () => {
       <SectionFeedbackRow
         rating={null}
         onThumbsUp={vi.fn()}
+        onRemoveFeedback={vi.fn()}
         onSubmitFeedback={vi.fn()}
         storageKey={storageKey}
       />,
