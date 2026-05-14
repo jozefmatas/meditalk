@@ -105,6 +105,12 @@ export function isValidMedication(name: string, locale = "en"): boolean {
   return byName.has(name.toLowerCase());
 }
 
+/** Check if a string is a known active ingredient in the CSV. */
+export function isActiveIngredient(name: string, locale = "en"): boolean {
+  const { byActiveIngredient } = loadIndex(locale);
+  return byActiveIngredient.has(name.toLowerCase().trim());
+}
+
 /**
  * Look up the active (INN / generic) ingredient for a medication brand
  * name. Used by the drug-normalizer for generic-level deduplication —

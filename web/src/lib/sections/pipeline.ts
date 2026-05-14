@@ -40,6 +40,7 @@ import { normalizeLabel } from "../parse-note-sections";
 import { criticPass, type CriticModel } from "./critic";
 import type { NoteSkeleton } from "./note-skeleton";
 import { RECONCILERS } from "./reconcilers";
+import { drugSubstitutionGuard } from "./reconcilers/drug-substitution-guard";
 import { logger } from "@/lib/logger";
 
 // ─── Legacy label-matching fallback ──────────────────────────────────
@@ -771,7 +772,10 @@ function applyReconcilers(
   source: RawSource,
   language: Language,
 ): string {
-  let out = content;
+  // Universal first-pass: revert any brand↔generic drug name
+  // substitutions the LLM made. Runs before per-section reconcilers
+  // so the drug-normalizer sees source-faithful names.
+  let out = drugSubstitutionGuard(content, source, { language });
   for (const name of names ?? []) {
     const reconciler = RECONCILERS[name];
     if (!reconciler) throw new Error(`Unknown reconciler: ${name}`);
