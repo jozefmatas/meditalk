@@ -20,34 +20,8 @@ import {
   getActiveIngredient,
   isActiveIngredient,
 } from "../../lookup/medications";
+import { extractDrugPrefixes } from "./drug-text-parsing";
 import { logger } from "@/lib/logger";
-
-// Same regex as drug-normalizer — extracts the drug name prefix before
-// the first digit, dose notation, or mg/ml marker.
-const PREFIX_RE =
-  /^\s*([A-Za-zÁ-žÀ-ÿ][A-Za-zÁ-žÀ-ÿ0-9\-\s]*?)(?=\s+\d|\s+mg\b|\s+ml\b|\s+tbl\b|\s+podľa\b|\s+ráno\b|\s+večer\b|,|$)/i;
-
-/**
- * Extract drug name prefixes from medication-formatted text (one drug per
- * line or comma-separated). Used for the draft output which is structured.
- */
-function extractDrugPrefixes(text: string): Map<string, string> {
-  const prefixes = new Map<string, string>();
-  for (const line of text.split("\n")) {
-    // Handle comma-separated entries on one line
-    for (const entry of line.split(/,(?=\s+[A-Za-zÁ-žÀ-ÿ])/)) {
-      const m = entry.match(PREFIX_RE);
-      if (!m) continue;
-      const prefix = m[1].trim();
-      if (prefix.length < 3) continue;
-      const key = prefix.toLowerCase();
-      if (!prefixes.has(key)) {
-        prefixes.set(key, prefix);
-      }
-    }
-  }
-  return prefixes;
-}
 
 // Matches capitalized words (potential drug names) followed by dose info,
 // even mid-sentence. Broader than PREFIX_RE — used for source scanning.

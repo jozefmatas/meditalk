@@ -40,31 +40,48 @@ export interface ClassifiedPassage {
   category: PassageCategory;
 }
 
+/**
+ * A file attached to an encounter.
+ *
+ * Lifecycle stages:
+ *   1. **Raw input** (`resolve-source.ts`): `name` + `text` + optional
+ *      `context` are set from the DB row. `text` is the full OCR/extracted
+ *      content.
+ *
+ *   2. **File-focus enrichment** (`file-focus.ts`): when a directive
+ *      (`context`) is present, the file-focus extractor runs Haiku to
+ *      select relevant passages. After enrichment:
+ *      - `originalText` is set to the pre-filter `text`
+ *      - `text` is replaced with the joined passage output
+ *      - `classifiedPassages` carries category-tagged passages for routing
+ *
+ *   3. **Pipeline consumption**: section agents see the (possibly filtered)
+ *      `text`. Reconcilers like `drug-substitution-guard` use `originalText`
+ *      to compare against the true source when available.
+ */
+export interface SourceFile {
+  /** File name from the upload (e.g. "echokg.pdf"). */
+  name: string;
+  /** File text content — full OCR initially, replaced by passage output
+   *  after file-focus filtering. */
+  text: string;
+  /** Doctor's per-file directive from the upload dialog (e.g. "focus on
+   *  liver markers, ignore old diagnosis"). When present, triggers
+   *  file-focus extraction. */
+  context?: string;
+  /** Category-tagged passages extracted by file-focus. Only set when
+   *  `context` is present and file-focus ran successfully. */
+  classifiedPassages?: ClassifiedPassage[];
+  /** Original OCR text before file-focus replaced `text` with passage
+   *  output. Used by drug-substitution-guard to compare against the true
+   *  source. Only set on directive-filtered files. */
+  originalText?: string;
+}
+
 export interface RawSource {
   transcript?: string;
   doctorNotes?: string;
-  /**
-   * Files attached to the encounter. `context` is the doctor's optional
-   * per-file instruction captured in the upload dialog ("focus on liver
-   * markers, ignore old diagnosis") — surfaces to the LLM alongside the
-   * file's text. When present, the pipeline has already filtered the
-   * file via the file-focus extractor before the agent sees it.
-   *
-   * `classifiedPassages` is populated by the file-focus extractor when
-   * a directive is present. Each passage carries a `category` tag; the
-   * pipeline uses it to route passages to relevant sections only.
-   */
-  files?: Array<{
-    name: string;
-    text: string;
-    context?: string;
-    classifiedPassages?: ClassifiedPassage[];
-    /** Original OCR/extracted text before file-focus filtering replaced
-     *  it with Haiku's passage output. Used by the drug-substitution-guard
-     *  to compare against the true source, not Haiku's (potentially
-     *  name-substituted) passages. Only set on directive-filtered files. */
-    originalText?: string;
-  }>;
+  files?: SourceFile[];
 }
 
 export interface SectionConfig {

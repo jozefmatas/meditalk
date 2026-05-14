@@ -19,14 +19,7 @@ import {
   isActiveIngredient,
   isValidMedication,
 } from "../../lookup/medications";
-
-// Matches the drug-name prefix at the start of a line OR entry:
-//   "Paretic 1-0-0"           → "Paretic"
-//   "Betaloc ZOK 25 mg, ..."  → "Betaloc ZOK"
-//   "Co-Prenessa 4 mg/1,25 mg"→ "Co-Prenessa"
-// Stops at the first digit, dash-dose notation, mg/ml marker, or comma.
-const PREFIX_RE =
-  /^\s*([A-Za-zÁ-žÀ-ÿ][A-Za-zÁ-žÀ-ÿ0-9\-\s]*?)(?=\s+\d|\s+mg\b|\s+ml\b|\s+tbl\b|\s+podľa\b|\s+ráno\b|\s+večer\b|,|$)/i;
+import { PREFIX_RE, splitEntries } from "./drug-text-parsing";
 
 /**
  * Slovak clinical abbreviations that the fuzzy matcher otherwise
@@ -38,17 +31,6 @@ const ABBREVIATION_ALIASES: Record<string, string> = {
   ASA: "Aspirin", // acetylsalicylic acid
   NTG: "Nitroglycerín",
 };
-
-/**
- * Splits a medication-section line into individual entries. Handles
- * both one-per-line (single entry) and comma-separated (multiple meds
- * on one line, LA's new preferred format). Comma splits only when the
- * next character is whitespace + letter — so "Arixtra 2,5 mg" stays
- * intact (inner decimal comma is NOT an entry boundary).
- */
-function splitEntries(line: string): string[] {
-  return line.split(/,(?=\s+[A-Za-zÁ-žÀ-ÿ])/);
-}
 
 function normalizeEntry(
   entry: string,
