@@ -370,6 +370,144 @@ describe("POST /api/adjust-section", () => {
     expect(prompt).toContain("Lab Results");
   });
 
+  // ── Uploaded file context ────────────────────────────────────────
+
+  it("includes uploaded file text in prompt from metadata.files", async () => {
+    authedUser();
+    visitExists({
+      files: [
+        {
+          id: "f1",
+          name: "cardiology.pdf",
+          size: 200,
+          type: "application/pdf",
+          extracted_text: "Echo: LVEF 55%, no wall motion abnormalities",
+        },
+      ],
+    });
+    claudeReturns("Updated with echo data.");
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        currentContent: "Old",
+        feedbackText: "Include echo findings",
+      }),
+    );
+
+    const prompt = capturedPrompt();
+    expect(prompt).toContain("cardiology.pdf");
+    expect(prompt).toContain("LVEF 55%");
+  });
+
+  it("includes doctor's file directive in prompt when set", async () => {
+    authedUser();
+    visitExists({
+      files: [
+        {
+          id: "f1",
+          name: "cardiology.pdf",
+          size: 200,
+          type: "application/pdf",
+          extracted_text: "Full report content with echo and ECG data",
+          context: "echo",
+        },
+      ],
+    });
+    claudeReturns("Updated.");
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        currentContent: "Old",
+        feedbackText: "Add echo",
+      }),
+    );
+
+    const prompt = capturedPrompt();
+    expect(prompt).toContain("Doctor's focus: echo");
+    expect(prompt).toContain("cardiology.pdf");
+  });
+
+  it("excludes files without extracted text from prompt", async () => {
+    authedUser();
+    visitExists({
+      files: [
+        {
+          id: "f1",
+          name: "lab.pdf",
+          size: 200,
+          type: "application/pdf",
+          extracted_text: "WBC 7.8",
+        },
+        {
+          id: "f2",
+          name: "pending.pdf",
+          size: 300,
+          type: "application/pdf",
+          extracted_text: null,
+        },
+        {
+          id: "f3",
+          name: "empty.pdf",
+          size: 100,
+          type: "application/pdf",
+          extracted_text: "   ",
+        },
+      ],
+    });
+    claudeReturns("Updated.");
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "s1",
+        currentContent: "Old",
+        feedbackText: "Check labs",
+      }),
+    );
+
+    const prompt = capturedPrompt();
+    expect(prompt).toContain("lab.pdf");
+    expect(prompt).toContain("WBC 7.8");
+    expect(prompt).not.toContain("pending.pdf");
+    expect(prompt).not.toContain("empty.pdf");
+  });
+
+  it("includes file context in parent section prompt too", async () => {
+    authedUser();
+    visitExists({
+      files: [
+        {
+          id: "f1",
+          name: "echo-report.pdf",
+          size: 500,
+          type: "application/pdf",
+          extracted_text: "LVEF 60%, mitral regurgitation grade I",
+          context: "echo",
+        },
+      ],
+    });
+    claudeReturns('{"bp": "120/80"}');
+
+    await POST(
+      makeRequest({
+        visitId: "v1",
+        sectionId: "vitals",
+        feedbackText: "Add echo findings",
+        subsections: { bp: "120/80", echo: "" },
+        subsectionLabels: { bp: "Blood Pressure", echo: "Echocardiography" },
+      }),
+    );
+
+    const prompt = capturedPrompt();
+    expect(prompt).toContain("echo-report.pdf");
+    expect(prompt).toContain("LVEF 60%");
+    expect(prompt).toContain("Doctor's focus: echo");
+  });
+
   // ── Audit logging ──────────────────────────────────────────────
 
   it("calls logAudit on successful adjustment", async () => {

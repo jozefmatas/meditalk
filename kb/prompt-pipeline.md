@@ -124,7 +124,7 @@ The heaviest work is clinician review of prompt examples + template curation, no
 
 Per section: RENDER → CRITIC (opt-in) → RECONCILERS. Model tier is driven by `KIND_POLICY` in `pipeline.ts`: Sonnet renders narrative kinds (`history-narrative`, `exam-narrative`), Haiku renders structural kinds (`default`, `medication-list`, `vital-numeric`). Haiku critics everything. **Conclusion is deterministic** — `formatConclusionContent` maps ICD suggestions to canonical descriptions (one per line, no code numbers). No LLM call, no critic, no reconcilers for conclusion. Conclusion sections render last — after the ICD suggester resolves.
 
-**Passage classification** — file-focus extraction tags each passage with a `PassageCategory` (`medication`, `diagnosis`, `finding`, `procedure`, `vital`, `history`, `general`). `CATEGORY_ROUTING` in `pipeline.ts` maps `SectionKind` → allowed categories, and `filterSourceForKind` creates a kind-filtered copy of `RawSource` before each section render. Transcript and doctorNotes are never filtered.
+**Passage classification** — file-focus extraction tags each passage with a `PassageCategory` (`medication`, `diagnosis`, `finding`, `procedure`, `vital`, `history`, `general`). `CATEGORY_ROUTING` in `pipeline.ts` maps `SectionKind` → allowed categories, and `filterSourceForKind` creates a kind-filtered copy of `RawSource` before each section render. Transcript and doctorNotes are never filtered. **Current-visit-only sections** (`exam-narrative`, `vital-numeric`) exclude all past-mode files (those with a `context` directive) entirely — they only see transcript, doctor notes, and "Actual" mode files. Past-mode detection uses the `context` field (not `classifiedPassages`, which can be empty when the fallback triggers).
 
 **Note skeleton** — a parallel Sonnet call (`note-skeleton.ts`) extracts encounter structure: `chiefComplaint`, `encounterType`, `keyDates`, `providers`, `criticalFindings`, `confidence`, `suggestedTitle`. The `suggestedTitle` (3–6 words, locale-aware, no PHI) is sent in the SSE `complete` event for client-side auto-titling.
 
@@ -160,10 +160,12 @@ Per section: RENDER → CRITIC (opt-in) → RECONCILERS. Model tier is driven by
                |        filterSourceForKind(source, kind)     sections/pipeline.ts
                |          * CATEGORY_ROUTING maps kind → allowed categories
                |          * medication-list → medication + general only
-               |          * vital-numeric → vital + general only
+               |          * vital-numeric → vital + general only (past-mode files excluded)
                |          * history-narrative → history + finding + diagnosis + general
-               |          * default / exam-narrative → all categories
+               |          * exam-narrative → finding + vital + general (past-mode files excluded)
+               |          * default → all categories
                |          * transcript + doctorNotes always unfiltered
+               |          * "past-mode" = file has context (directive), detected via context field
                |        renderSection (Haiku or Sonnet per KIND_POLICY)
                |                                              sections/section-agent.ts
                |          * system prompt: role + worldview + corpus examples + contract
@@ -484,7 +486,8 @@ See the commit history if you need to understand why a specific piece was remove
 - **Section rendered empty** — check the `context`: did the "output ZERO characters" rule fire? If a critic-enabled section is empty, the critic also checks — look for `[pipeline] critic modified "<title>"` in the logs.
 - **Section content leaking between sections** — tighten the `NEVER OWNS` list in both sections' contexts. The critic pass will enforce the rule on subsequent runs.
 - **Wrong dose/drug name in LA** — the `drug-normalizer` alias map in [`reconcilers/drug-normalizer.ts`](../web/src/lib/sections/reconcilers/drug-normalizer.ts) catches known Slovak shortforms (ANP, ASA, NTG). Add to `ABBREVIATION_ALIASES` when a new one surfaces. If a generic name (e.g. "Ramipril") is being expanded to a branded variant with manufacturer (e.g. "Ramipril Actavis"), the guard in `correctMedicationBaseName` (`medications.ts`) should prevent this — check the `startsWith` logic.
-- **File-focus leaking content to wrong sections** — the directive is an EXCLUSIVE filter. If "Postup a plán" gets content from a file where the directive was "DG a LA", the file-focus prompt may be extracting too broadly. Check the synonym expansion rules and the "EXCLUSIVE" framing in `file-focus.ts`.
+- **File-focus leaking content to wrong sections** — the directive is an EXCLUSIVE filter. If "Postup a plán" gets content from a file where the directive was "DG a LA", the file-focus prompt may be extracting too broadly. Check the synonym expansion rules and the "EXCLUSIVE" framing in `file-focus.ts`. For `exam-narrative` / `vital-numeric` sections, past-mode files are excluded entirely by `CURRENT_VISIT_ONLY` in `pipeline.ts` — these sections should only show current-visit data.
+- **File-focus dropping all passages as ungrounded** — the grounding validation uses two tiers: (1) whitespace-normalized substring match, (2) word-overlap fallback (≥80% of passage words present in source). If both fail, the passage is dropped. When ALL passages are dropped, the full text is returned as fallback (not empty). Check logs for `[file-focus] all N passage(s) ungrounded` — if this fires frequently, the OCR text may have unusual characters that need additional normalization in `extractWords()`.
 - **Wrong ICD in Conclusion** — conclusion is deterministic from ICD suggestions, so the suggester is the sole root cause. Tighten the suggester's prompt in [`suggest-icd.ts`](../web/src/lib/sections/suggest-icd.ts) — especially the "anatomy / severity / subtype / etiology" trap list — or confirm the ICD CSV has the right subcode.
 - **Cascade-shift in rendered note** — section content appears under the wrong heading: the culprit is [`parseNoteToSectionMap`](../web/src/lib/parse-note-sections.ts). It must match by label, not by index. Tested in `parse-note-sections.test.ts`.
 - **Agent output doesn't sound like an attending** — the template needs a corpus. Upload 2–5 real notes via the admin template editor's Reference Notes Corpus panel.

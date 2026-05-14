@@ -205,12 +205,35 @@ ${text}`;
       }
     }
 
-    const sourceFolded = text.toLowerCase();
+    const normalizeWs = (s: string) => s.replace(/\s+/g, " ");
+    const sourceFolded = normalizeWs(text.toLowerCase());
+
+    // Word-overlap fallback: when substring match fails (OCR punctuation,
+    // dashes, number formatting differ from Haiku's output), check if ≥80%
+    // of the passage's significant words appear in the source. This catches
+    // formatting differences while still rejecting hallucinated content.
+    const WORD_OVERLAP_THRESHOLD = 0.8;
+    const extractWords = (s: string) =>
+      s
+        .toLowerCase()
+        .split(/[\s,.;:!?()\[\]{}"'„""–—\-/\\]+/)
+        .filter((w) => w.length >= 2);
+    const sourceWords = new Set(extractWords(text));
+
+    const isGrounded = (span: string): boolean => {
+      // Primary: whitespace-normalized substring match.
+      if (sourceFolded.includes(normalizeWs(span.toLowerCase()))) return true;
+      // Fallback: word-overlap check.
+      const passageWords = extractWords(span);
+      if (passageWords.length < 3) return false; // Too short for word overlap.
+      const matched = passageWords.filter((w) => sourceWords.has(w)).length;
+      return matched / passageWords.length >= WORD_OVERLAP_THRESHOLD;
+    };
+
     const classifiedPassages: ClassifiedPassage[] = [];
     for (const p of passages) {
       const span = p.text.trim();
-      // Substring match in source (case-insensitive, preserves diacritics).
-      if (sourceFolded.includes(span.toLowerCase())) {
+      if (isGrounded(span)) {
         const category: PassageCategory =
           p.category && VALID_CATEGORIES.has(p.category as PassageCategory)
             ? (p.category as PassageCategory)
@@ -221,6 +244,15 @@ ${text}`;
           `[file-focus] dropped ungrounded passage (${span.length}ch) from ${fileName}`,
         );
       }
+    }
+
+    // If Haiku found passages but ALL failed validation, fall back to full
+    // text — same as the API-error fallback — to prevent silent data loss.
+    if (passages.length > 0 && classifiedPassages.length === 0) {
+      logger.warn(
+        `[file-focus] all ${passages.length} passage(s) ungrounded for "${fileName}" — using full text`,
+      );
+      return { text, classifiedPassages: [] };
     }
 
     const extracted = classifiedPassages.map((p) => p.text).join("\n\n");

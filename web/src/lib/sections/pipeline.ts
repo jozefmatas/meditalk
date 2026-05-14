@@ -180,23 +180,47 @@ export const CATEGORY_ROUTING: Record<SectionKind, Set<PassageCategory>> = {
 };
 
 /**
+ * Section kinds that should only see current-visit data. Files that
+ * went through file-focus (Past mode — directive present) are excluded
+ * entirely so past vitals/exam findings don't leak into today's exam.
+ */
+const CURRENT_VISIT_ONLY: Set<SectionKind> = new Set([
+  "exam-narrative",
+  "vital-numeric",
+]);
+
+/**
  * Build a kind-filtered copy of source for a specific section. File
  * passages with `classifiedPassages` are filtered to only the
  * categories relevant to the section's kind. Transcript and doctor
  * notes are always included in full.
  *
- * When files lack `classifiedPassages` (no directive / old cache),
- * the source is returned as-is — no filtering.
+ * "Past" mode detection uses the `context` field (doctor's directive)
+ * — NOT `classifiedPassages`, which can be empty when the file-focus
+ * fallback triggers (all passages failed validation → full text returned).
+ *
+ * For current-visit-only sections (exam-narrative, vital-numeric),
+ * past-mode files are excluded entirely — these sections should only
+ * reflect today's data (transcript, doctor notes, "Actual" mode files).
  */
 export function filterSourceForKind(
   source: RawSource,
   kind: SectionKind,
 ): RawSource {
-  if (!source.files?.some((f) => f.classifiedPassages?.length)) return source;
+  const hasPastFiles = source.files?.some(
+    (f) => f.classifiedPassages?.length || f.context?.trim(),
+  );
+  if (!hasPastFiles) return source;
 
   const allowed = CATEGORY_ROUTING[kind];
+  const excludePastFiles = CURRENT_VISIT_ONLY.has(kind);
   const filteredFiles = source.files!.map((f) => {
-    if (!f.classifiedPassages?.length) return f;
+    const isPastMode = !!(f.classifiedPassages?.length || f.context?.trim());
+    if (!isPastMode) return f; // "Actual" mode — pass through.
+    // Past-mode files should not contribute to current-visit sections.
+    if (excludePastFiles) return { ...f, text: "" };
+    // Category filter for sections that accept past-file data.
+    if (!f.classifiedPassages?.length) return f; // Fallback: no passages to filter.
     const kept = f.classifiedPassages.filter((p) => allowed.has(p.category));
     return { ...f, text: kept.map((p) => p.text).join("\n\n") };
   });

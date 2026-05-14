@@ -5,6 +5,7 @@ import { logAudit, createAuditContext } from "@/lib/audit";
 import { logUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
 import { getTranscript } from "@/lib/encounters/sources";
+import type { FileMetadata } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -96,7 +97,9 @@ export async function POST(request: NextRequest) {
     const metadata = (visit.metadata as Record<string, unknown>) || {};
     const transcript = getTranscript(metadata);
     const doctorNotes = (metadata.doctor_notes as string) || "";
-    const uploadedContext = (metadata.uploaded_files_context as string) || "";
+    const uploadedFiles = ((metadata.files ?? []) as FileMetadata[]).filter(
+      (f) => f.extracted_text?.trim(),
+    );
 
     // Build sources section
     let sourcesSection = "";
@@ -106,8 +109,11 @@ export async function POST(request: NextRequest) {
     if (doctorNotes) {
       sourcesSection += `**Doctor's Notes:**\n${doctorNotes}\n\n`;
     }
-    if (uploadedContext) {
-      sourcesSection += `**Uploaded Files Context:**\n${uploadedContext}\n\n`;
+    for (const f of uploadedFiles) {
+      const header = f.context?.trim()
+        ? `**File: ${f.name}** (Doctor's focus: ${f.context.trim()})`
+        : `**File: ${f.name}**`;
+      sourcesSection += `${header}\n${f.extracted_text}\n\n`;
     }
 
     // Build context from other sections of the note (lab results, findings, etc.)

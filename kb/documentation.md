@@ -10,6 +10,12 @@ This document provides a comprehensive overview of how MediTalk works from end t
 - **Client simplification** — `usePreGeneration` no longer transcribes or does blob-size/version matching. Always returns `transcriptText: null` + `audioRecoveryPath`. Server decides whether to poll for transcript or fall back to audio recovery.
 - **Version markers** — `persistRecordingSnapshot` now writes `snapshotVersion` (epoch) to `recording_session` and `transcriptSnapshotVersion` to transcript metadata, linking pause snapshots to their transcripts.
 
+## What's new (2026-05-13)
+
+- **File-focus grounding robustness** — passage validation now uses two tiers: (1) whitespace-normalized substring match, (2) word-overlap fallback (≥80% of passage words in source). When ALL passages fail, returns full text as fallback instead of empty (prevents silent data loss). 5 new tests in `file-focus.test.ts`.
+- **Current-visit-only routing** — `exam-narrative` and `vital-numeric` sections now exclude past-mode files (those with a `context` directive) entirely via `CURRENT_VISIT_ONLY` in `pipeline.ts`. Past-mode detection uses the `context` field, not `classifiedPassages`. Prevents past-file vitals/findings from leaking into the current physical exam section. 4 new routing tests.
+- **Adjust-section file context** — `POST /api/adjust-section` now reads actual `metadata.files[]` with `extracted_text` and per-file `context` directives (was reading dead `uploaded_files_context` field). 4 new tests.
+
 ## What's new (2026-05-07)
 
 - **`POST /api/adjust-section`** — per-section LLM adjustment from doctor feedback. Handles both leaf sections (returns adjusted content) and parent sections (returns JSON map of subsection updates). Now receives `otherSectionContents` from the client so the LLM can reference lab results, findings, etc. when adjusting sections like conclusions — critical for encounters where raw sources (transcript, notes, files) are missing. Source-related prompt instructions are conditional on sources actually being present (prevents meta-commentary). 12 new tests.
