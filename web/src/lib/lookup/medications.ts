@@ -329,6 +329,12 @@ export function correctMedicationBaseName(
   const baseName = extractBaseName(normalizedName);
   if (isValidMedication(baseName, locale)) return null;
 
+  // If the name is a known active ingredient (INN/generic), it's legitimate
+  // and must not be "corrected" to a branded product name. Without this,
+  // "Tamsulosín" (INN) gets replaced with "Fokusin" (brand) because the
+  // substring search finds Fokusin via its active ingredient column.
+  if (isActiveIngredient(baseName, locale)) return null;
+
   // Try substring match — but return only the base name portion
   const substringMatches = searchMedications(baseName, 1, locale);
   if (substringMatches.length > 0) {

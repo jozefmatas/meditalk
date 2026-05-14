@@ -201,4 +201,14 @@ describe("drug-normalizer", () => {
     expect(out).toBe("Silodosin 8 mg 0-0-1");
     expect(out).not.toContain("Stada");
   });
+
+  it("does NOT replace an active ingredient (INN) name with a brand name", () => {
+    // "Tamsulosín" is the INN/generic name; "Fokusin" is a brand with
+    // tamsulosín as active ingredient. The normalizer must not "correct"
+    // the generic to the brand — the doctor wrote the INN name deliberately.
+    const input = "Tamsulosín 0,4 mg 0-0-1";
+    const out = drugNormalizer(input, src, ctx);
+    expect(out).toBe("Tamsulosín 0,4 mg 0-0-1");
+    expect(out).not.toContain("Fokusin");
+  });
 });

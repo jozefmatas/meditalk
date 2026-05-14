@@ -16,6 +16,7 @@ import type { Reconciler } from "./index";
 import {
   correctMedicationBaseName,
   getActiveIngredient,
+  isActiveIngredient,
   isValidMedication,
 } from "../../lookup/medications";
 
@@ -78,6 +79,11 @@ function normalizeEntry(
 
   // If the brand is already valid, leave it alone.
   if (isValidMedication(originalPrefix, locale)) return entry;
+
+  // Don't "correct" known active ingredient names (INN/generic) — they're
+  // legitimate. Otherwise the normalizer replaces e.g. "Tamsulosín" with
+  // "Fokusin" via active-ingredient search in the CSV.
+  if (isActiveIngredient(originalPrefix, locale)) return entry;
 
   const correction = correctMedicationBaseName(originalPrefix, locale);
   if (!correction) return entry;

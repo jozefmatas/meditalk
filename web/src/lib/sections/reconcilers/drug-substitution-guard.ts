@@ -146,13 +146,6 @@ export const drugSubstitutionGuard: Reconciler = (text, source, ctx) => {
   // Draft: structured extraction only (LA section is always formatted)
   const draftPrefixes = extractDrugPrefixes(text);
 
-  logger.info(
-    `[drug-guard] source prefixes: [${[...sourcePrefixes.keys()].join(", ")}]`,
-  );
-  logger.info(
-    `[drug-guard] draft prefixes: [${[...draftPrefixes.keys()].join(", ")}]`,
-  );
-
   // Build ingredient → source-prefix lookup
   const ingredientToSource = buildIngredientToSourceMap(sourcePrefixes, locale);
 
@@ -187,7 +180,7 @@ export const drugSubstitutionGuard: Reconciler = (text, source, ctx) => {
 
     // Substitution detected — replace the draft prefix with the source
     // prefix. Use case-insensitive replacement.
-    logger.info(
+    logger.debug(
       `[drug-guard] substitution detected: "${draftPrefix}" → "${sourcePrefix}"`,
     );
     const escaped = draftPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
