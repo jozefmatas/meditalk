@@ -775,6 +775,10 @@ function applyReconcilers(
   // Universal first-pass: revert any brand↔generic drug name
   // substitutions the LLM made. Runs before per-section reconcilers
   // so the drug-normalizer sees source-faithful names.
+  const hasOriginal = source.files?.some((f) => f.originalText);
+  logger.info(
+    `[reconcilers] applyReconcilers called — ${content.length}ch, files=${source.files?.length ?? 0}, hasOriginalText=${hasOriginal}`,
+  );
   let out = drugSubstitutionGuard(content, source, { language });
   for (const name of names ?? []) {
     const reconciler = RECONCILERS[name];
