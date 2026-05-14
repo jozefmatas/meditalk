@@ -323,6 +323,7 @@ export async function applyFileFocusDirectives(
             ...f,
             text: entry.output,
             classifiedPassages: entry.classifiedPassages,
+            originalText: f.text,
           };
         }
       }
@@ -351,6 +352,7 @@ export async function applyFileFocusDirectives(
         ...f,
         text: result.text,
         classifiedPassages: result.classifiedPassages,
+        originalText: f.text,
       };
     }),
   );

@@ -59,6 +59,11 @@ export interface RawSource {
     text: string;
     context?: string;
     classifiedPassages?: ClassifiedPassage[];
+    /** Original OCR/extracted text before file-focus filtering replaced
+     *  it with Haiku's passage output. Used by the drug-substitution-guard
+     *  to compare against the true source, not Haiku's (potentially
+     *  name-substituted) passages. Only set on directive-filtered files. */
+    originalText?: string;
   }>;
 }
 

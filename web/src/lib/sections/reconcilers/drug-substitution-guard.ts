@@ -20,6 +20,7 @@ import {
   getActiveIngredient,
   isActiveIngredient,
 } from "../../lookup/medications";
+import { logger } from "@/lib/logger";
 
 // Same regex as drug-normalizer — extracts the drug name prefix before
 // the first digit, dose notation, or mg/ml marker.
@@ -112,6 +113,9 @@ function buildIngredientToSourceMap(
 
 /**
  * Collect all text from a RawSource (transcript + doctor notes + files).
+ * Prefers `originalText` (pre-file-focus OCR text) when available, so the
+ * guard compares against the true source — not Haiku's passage output
+ * which may already contain substituted drug names.
  */
 function collectSourceText(
   source: import("../section-agent").RawSource,
@@ -120,7 +124,8 @@ function collectSourceText(
   if (source.transcript) parts.push(source.transcript);
   if (source.doctorNotes) parts.push(source.doctorNotes);
   for (const f of source.files ?? []) {
-    if (f.text) parts.push(f.text);
+    if (f.originalText) parts.push(f.originalText);
+    else if (f.text) parts.push(f.text);
   }
   return parts.join("\n");
 }
@@ -175,6 +180,9 @@ export const drugSubstitutionGuard: Reconciler = (text, source, ctx) => {
 
     // Substitution detected — replace the draft prefix with the source
     // prefix. Use case-insensitive replacement.
+    logger.info(
+      `[drug-guard] substitution detected: "${draftPrefix}" → "${sourcePrefix}"`,
+    );
     const escaped = draftPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(escaped, "gi");
     result = result.replace(re, sourcePrefix);
