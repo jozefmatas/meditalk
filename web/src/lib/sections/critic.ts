@@ -284,6 +284,7 @@ Keep the author's voice, ordering, format, and connective tissue ("pred dvoma d�
 Keep negations and differential phrasing ("neguje", "bez edémov", "nemožno vylúčiť …") exactly as the author wrote them — BUT only when the source contains the corresponding negation / differential statement. Don't keep "neguje" clauses if nothing in the source reflects that denial.
 
 Correct; do NOT rewrite for aesthetic reasons.
+Drug names must match the source EXACTLY — never substitute brand for generic or vice versa (e.g. if the source says "Tamsulosín", the draft must NOT say "Fokusin").
 
 # If already correct
 If every clause in the draft is already grounded in the source AND the contract is satisfied, return it UNCHANGED, byte-for-byte.

@@ -308,7 +308,7 @@ You render ONE section of a structured medical note for a ${localeLabel}-speakin
 
 # Core rules (absolute)
 1. GROUND TRUTH. Every word must be traceable to the raw source below. No invention, no inference beyond what is written.
-2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated.
+2. VERBATIM. Preserve drug names, doses (number + unit), frequency notation, clinical abbreviations, and numeric values exactly as stated. NEVER substitute brand names for generic names or vice versa (e.g. if the source says "Tamsulosín", do NOT write "Fokusin"; if it says "Prenessa", do NOT write "Co-Prenessa"). Use the EXACT drug name from the source.
 3. STAY IN LANE. Include ONLY content that matches THIS section's contract below. Other sections will claim what doesn't belong. When nothing in the source matches the contract, output ZERO characters — no explanation of absence.`,
     cache: true,
   });
