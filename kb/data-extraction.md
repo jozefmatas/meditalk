@@ -110,6 +110,8 @@ The resolved transcript text is stored in `visits.metadata.transcript` (JSONB). 
 
 Files are uploaded through signed URLs to the `encounter-files` Supabase storage bucket (see [004_encounter_files_bucket.sql](web/supabase/migrations/004_encounter_files_bucket.sql)). File metadata is persisted into the visit row's JSONB metadata, not a separate table:
 
+The `visits.metadata` JSONB column is typed as [`VisitMetadata`](../web/src/lib/types.ts) — see that interface for the full set of keys (transcript, files, recording_session, generation_pending, …). The `files` field is a `FileMetadata[]`:
+
 ```ts
 // visits.metadata.files: FileMetadata[]
 interface FileMetadata {

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { retrySupabaseCall } from "./retry";
 import { logger } from "@/lib/logger";
+import type { VisitMetadata } from "@/lib/types";
 
 /**
  * Atomically merge partial metadata into a visit's metadata JSONB.
@@ -22,8 +23,8 @@ import { logger } from "@/lib/logger";
 export async function mergeVisitMetadata(
   supabase: SupabaseClient,
   visitId: string,
-  partial: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+  partial: Partial<VisitMetadata>,
+): Promise<VisitMetadata> {
   const result = await retrySupabaseCall(
     async () =>
       await supabase.rpc("merge_visit_metadata", {
@@ -50,7 +51,7 @@ export async function mergeVisitMetadata(
       : new Error(String(result.error));
   }
 
-  return (result.data ?? {}) as Record<string, unknown>;
+  return (result.data ?? {}) as VisitMetadata;
 }
 
 /**
@@ -60,8 +61,8 @@ export async function mergeVisitMetadata(
 async function fallbackMerge(
   supabase: SupabaseClient,
   visitId: string,
-  partial: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+  partial: Partial<VisitMetadata>,
+): Promise<VisitMetadata> {
   const { data: current, error: readError } = await supabase
     .from("visits")
     .select("metadata")
@@ -72,8 +73,8 @@ async function fallbackMerge(
     throw readError instanceof Error ? readError : new Error(String(readError));
   }
 
-  const currentMeta = (current?.metadata ?? {}) as Record<string, unknown>;
-  const merged = { ...currentMeta, ...partial };
+  const currentMeta = (current?.metadata ?? {}) as VisitMetadata;
+  const merged: Record<string, unknown> = { ...currentMeta, ...partial };
 
   // Delete keys explicitly set to null (same semantics as the RPC)
   for (const [key, value] of Object.entries(partial)) {
@@ -93,5 +94,5 @@ async function fallbackMerge(
       : new Error(String(writeError));
   }
 
-  return merged;
+  return merged as VisitMetadata;
 }

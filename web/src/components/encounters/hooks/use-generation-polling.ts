@@ -78,12 +78,7 @@ export function useGenerationPolling({
         }
       })();
     });
-  }, [
-    visitId,
-    setVisit,
-    updateTitleRef,
-    setGeneratedNoteHtml,
-  ]);
+  }, [visitId, setVisit, updateTitleRef, setGeneratedNoteHtml]);
 
   // Reactive polling: auto-poll when visit.status is "processing" and SSE isn't active
   useEffect(() => {
@@ -113,9 +108,7 @@ export function useGenerationPolling({
           setVisit(updated);
           if (updated.encounter_note) {
             setGeneratedNoteHtml(updated.encounter_note);
-            const tid =
-              ((updated.metadata as Record<string, unknown>)
-                ?.template_id as string) || DEFAULT_TEMPLATE_ID;
+            const tid = updated.metadata?.template_id || DEFAULT_TEMPLATE_ID;
             setCachedTemplate(tid, {
               generatedNote: updated.encounter_note,
             });

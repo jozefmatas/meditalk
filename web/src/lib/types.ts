@@ -1,5 +1,13 @@
 // DB row types (matching supabase/migrations)
 
+// ─── ICD codes ──────────────────────────────────────────────────────
+
+export interface IcdCode {
+  code: string;
+  description: string;
+  confidence?: string;
+}
+
 // Encounter types
 export type EncounterStatus =
   | "started"
@@ -29,7 +37,7 @@ export interface Encounter {
   visit_type: EncounterType;
   status: EncounterStatus;
   encounter_note: string | null;
-  metadata: Record<string, unknown>;
+  metadata: VisitMetadata;
   created_at: string;
 }
 
@@ -50,7 +58,7 @@ export interface CreateEncounterRequest {
   visit_type?: EncounterType;
   visit_date?: string;
   language?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Partial<VisitMetadata>;
 }
 
 export interface UpdateEncounterRequest {
@@ -62,7 +70,7 @@ export interface UpdateEncounterRequest {
   status?: EncounterStatus;
   language?: SupportedLanguage;
   encounter_note?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Partial<VisitMetadata>;
 }
 
 // API response types
@@ -102,6 +110,48 @@ export interface FileMetadata {
    *   uses ONLY the passages matching the directive.
    */
   context?: string | null;
+}
+
+// ─── Visit metadata (JSONB in visits.metadata) ──────────────────────
+
+export interface RecordingSessionMeta {
+  state: "recording" | "paused";
+  durationAtPause: number;
+  audioPath?: string;
+  snapshotBytes?: number;
+  snapshotVersion?: number;
+}
+
+export interface GenerationPending {
+  templateId?: string;
+  doctorNotes?: string;
+  audioPath?: string;
+  startedAt?: string;
+}
+
+/**
+ * Typed shape of the `visits.metadata` JSONB column.
+ * All fields are optional — the column starts as `{}` and is populated
+ * incrementally during the encounter lifecycle.
+ */
+export interface VisitMetadata {
+  transcript?: string | null;
+  doctor_notes?: string;
+  files?: FileMetadata[];
+  template_id?: string;
+  section_contents?: Record<string, string>;
+  recording_session?: RecordingSessionMeta | null;
+  transcriptSnapshotVersion?: number;
+  generation_pending?: GenerationPending | null;
+  clinical_analysis?: {
+    suggestedIcdCodes?: Array<IcdCode & { differential?: string }>;
+  };
+  /** Keyed by file ID — pipeline-managed cache, typed loosely here. */
+  file_focus_cache?: Record<string, unknown>;
+  recording_consent?: boolean;
+  recording_consent_date?: string;
+  patient_personal_id?: string;
+  selected_icd_codes?: IcdCode[];
 }
 
 // Encounter list query params

@@ -40,7 +40,7 @@ import { persistRecordingSnapshot } from "@/lib/encounters/persist-recording-sna
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 import { isNative } from "@/lib/platform";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "paused";
 
@@ -69,7 +69,7 @@ interface RecordingBarProps {
   templateId?: string;
   onTemplateChange?: (id: string) => void;
   visitId: string;
-  metadata?: Record<string, unknown>;
+  metadata?: VisitMetadata;
   /** Language for pause-time transcription (e.g. "sk", "en", "cs"). */
   language?: SupportedLanguage;
   /** Skip consent dialog (assumes consent already obtained). Default: false */
@@ -87,8 +87,6 @@ function formatDuration(seconds: number) {
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
-
-
 
 export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
   function RecordingBar(
@@ -121,14 +119,11 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
     // Skip session restoration when skipSessionPersistence is true
     const restoredSession = skipSessionPersistence
       ? undefined
-      : (metadata?.recording_session as RecordingSession | undefined);
+      : (metadata?.recording_session ?? undefined);
 
     // Recording consent hook
-    const consentMetadata = metadata as
-      | { recording_consent?: boolean; recording_consent_date?: string }
-      | undefined;
     const { showConsentDialog, setShowConsentDialog, saveConsent } =
-      useRecordingConsent(visitId, consentMetadata);
+      useRecordingConsent(visitId, metadata);
 
     // Device selection
     const { devices, selectedDeviceId, selectDevice } = useAudioDevices();

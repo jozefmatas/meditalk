@@ -80,13 +80,9 @@ export function usePreGeneration(visitId: string) {
 
       // Resolve audio recovery path — server decides whether to use it
       // (server-side waitForTranscript polls for in-flight transcripts)
-      const meta = (visit?.metadata ?? {}) as Record<string, unknown>;
-      const pendingMeta = meta?.generation_pending as
-        | { audioPath?: string }
-        | undefined;
-      const sessionMeta = meta?.recording_session as
-        | { audioPath?: string }
-        | undefined;
+      const meta = visit?.metadata;
+      const pendingMeta = meta?.generation_pending;
+      const sessionMeta = meta?.recording_session;
 
       let audioRecoveryPath: string | undefined;
       if (blobToProcess && uploadedPath) {

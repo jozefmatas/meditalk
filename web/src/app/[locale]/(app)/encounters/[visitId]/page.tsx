@@ -91,10 +91,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
       metadataSettersRef.current.setVisitType(
         visit.visit_type || "consultation",
       );
-      const meta = visit.metadata as Record<string, unknown>;
-      if (meta?.patient_personal_id) {
+      if (visit.metadata.patient_personal_id) {
         metadataSettersRef.current.setPatientId(
-          meta.patient_personal_id as string,
+          visit.metadata.patient_personal_id,
         );
       }
       initGenerationRef.current(visit);
@@ -232,7 +231,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
   const filesUploading = hasUploadingFiles(data.files);
   const canGenerate =
     !!(
-      getTranscript(data.visit?.metadata as Record<string, unknown> | null) ||
+      getTranscript(data.visit?.metadata ?? null) ||
       generation.audioBlob ||
       generation.doctorNotes.trim() ||
       data.files.length > 0 ||

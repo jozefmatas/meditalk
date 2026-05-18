@@ -82,11 +82,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // each other. Handle it separately from the regular column update.
     const hasMetadata = body.metadata !== undefined;
     if (hasMetadata) {
-      await mergeVisitMetadata(
-        supabase,
-        visitId,
-        body.metadata as Record<string, unknown>,
-      );
+      await mergeVisitMetadata(supabase, visitId, body.metadata!);
     }
 
     if (Object.keys(updateData).length === 0 && !hasMetadata) {

@@ -522,8 +522,7 @@ export function useEncounterGeneration({
   const handlePollTimeout = useCallback(() => {
     if (pollTimeoutResumedRef.current) return;
     const v = visitRef.current;
-    const meta = (v?.metadata ?? {}) as Record<string, unknown>;
-    if (meta?.generation_pending && !v?.encounter_note) {
+    if (v?.metadata?.generation_pending && !v?.encounter_note) {
       pollTimeoutResumedRef.current = true;
       logger.debug("[generate] Poll timeout — auto-resuming lost generation");
       handleGenerateRef.current();
@@ -549,16 +548,15 @@ export function useEncounterGeneration({
   const initFromVisit = useCallback(
     (data: Encounter) => {
       setGenerationLanguage((data.language as SupportedLanguage) || "sk");
-      const meta = data.metadata as Record<string, unknown>;
-      if (meta?.template_id) {
-        setSelectedTemplateId(meta.template_id as string);
+      if (data.metadata?.template_id) {
+        setSelectedTemplateId(data.metadata.template_id);
       }
-      if (meta?.doctor_notes) {
-        initDoctorNotes(meta.doctor_notes as string);
+      if (data.metadata?.doctor_notes) {
+        initDoctorNotes(data.metadata.doctor_notes);
       }
       if (data.encounter_note) {
         setGeneratedNoteHtml(data.encounter_note);
-        const tid = (meta?.template_id as string) || DEFAULT_TEMPLATE_ID;
+        const tid = data.metadata?.template_id || DEFAULT_TEMPLATE_ID;
         setCachedTemplate(tid, {
           generatedNote: data.encounter_note,
         });
@@ -569,7 +567,7 @@ export function useEncounterGeneration({
       }
 
       if (
-        meta?.generation_pending &&
+        data.metadata?.generation_pending &&
         !data.encounter_note &&
         data.status !== "processing"
       ) {
@@ -593,18 +591,11 @@ export function useEncounterGeneration({
       return;
     }
 
-    const meta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const pending = meta?.generation_pending as
-      | { audioPath?: string }
-      | undefined;
-    const session = meta?.recording_session as
-      | { audioPath?: string }
-      | undefined;
-    const hasTranscript = !!getTranscript(meta);
-    const metaFiles = (meta?.files ?? []) as {
-      extracted_text?: string | null;
-      source?: string;
-    }[];
+    const meta = visit.metadata;
+    const pending = meta?.generation_pending;
+    const session = meta?.recording_session;
+    const hasTranscript = !!getTranscript(meta ?? null);
+    const metaFiles = meta?.files ?? [];
     const hasExtractedFiles = metaFiles.some(
       (f) => f.extracted_text && f.source !== "recording",
     );
@@ -644,9 +635,7 @@ export function useEncounterGeneration({
 
   // ── Timer ───────────────────────────────────────────────────────
 
-  const visitTranscript = getTranscript(
-    visit?.metadata as Record<string, unknown>,
-  );
+  const visitTranscript = getTranscript(visit?.metadata ?? null);
   const contentMetrics = useMemo(
     () => ({
       transcriptLength: visitTranscript?.length || 0,

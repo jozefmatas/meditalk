@@ -51,8 +51,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 
   // Selected codes from visit metadata
   const [selectedCodes, setSelectedCodes] = useState<IcdCode[]>(() => {
-    const meta = visit.metadata as Record<string, unknown>;
-    return dedupeByCode((meta?.selected_icd_codes as IcdCode[]) || []);
+    return dedupeByCode(visit.metadata.selected_icd_codes || []);
   });
 
   // Suggested codes from clinical analysis — prefer the full pre-filter list
@@ -60,13 +59,12 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   // certain ones in the note. Falls back to candidateIcdCodes for older
   // encounters generated before this field existed.
   const suggestedCodesRaw: IcdCode[] = (() => {
-    const meta = visit.metadata as Record<string, unknown>;
-    const analysis = meta?.clinical_analysis as
-      | Record<string, unknown>
-      | undefined;
+    const analysis = visit.metadata.clinical_analysis;
     const source =
-      (analysis?.suggestedIcdCodes as IcdCode[] | undefined) ??
-      (analysis?.candidateIcdCodes as IcdCode[] | undefined);
+      analysis?.suggestedIcdCodes ??
+      ((analysis as Record<string, unknown> | undefined)?.candidateIcdCodes as
+        | IcdCode[]
+        | undefined);
     if (!source) return [];
     // Dedupe by code — older encounters persisted duplicates before the
     // suggester learned to dedup, and React uses `code` as the list key.
@@ -96,9 +94,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 
   // Sync selected codes when visit metadata changes externally
   useEffect(() => {
-    const meta = visit.metadata as Record<string, unknown>;
-    const stored = (meta?.selected_icd_codes as IcdCode[]) || [];
-    setSelectedCodes(dedupeByCode(stored));
+    setSelectedCodes(dedupeByCode(visit.metadata.selected_icd_codes || []));
   }, [visit.metadata]);
 
   // Resolve codes + descriptions for selected + suggested codes in the current locale

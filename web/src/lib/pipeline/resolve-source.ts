@@ -26,7 +26,11 @@ import {
   TRANSCRIPT_POLL_INTERVAL_MS,
 } from "@/lib/extraction/constants";
 import type { RawSource } from "@/lib/sections/section-agent";
-import type { SupportedLanguage, FileMetadata } from "@/lib/types";
+import type {
+  SupportedLanguage,
+  FileMetadata,
+  VisitMetadata,
+} from "@/lib/types";
 import { logger } from "@/lib/logger";
 
 // ── Public types ──────────────────────────────────────────────────
@@ -43,7 +47,7 @@ export interface ResolveSourceInput {
   /** Path to stored audio blob in Supabase storage (recovery). */
   audioPath?: string;
   visit: {
-    metadata: Record<string, unknown>;
+    metadata: VisitMetadata;
     patient_name?: string | null;
     patient_id?: string | null;
   };
@@ -67,7 +71,7 @@ export interface ResolvedSource {
   /** Total PHI redactions applied across all sources. */
   phiRedactionCount: number;
   /** Refreshed metadata after extraction (for downstream persistence). */
-  refreshedMetadata: Record<string, unknown>;
+  refreshedMetadata: VisitMetadata;
 }
 
 // ── Implementation ────────────────────────────────────────────────
@@ -94,9 +98,7 @@ export async function resolveSource(
   // transcription has landed in metadata. This avoids re-downloading
   // and re-transcribing the same audio blob.
   if (!transcriptText) {
-    const session = visitMeta.recording_session as
-      | { snapshotVersion?: number }
-      | undefined;
+    const session = visitMeta.recording_session;
     if (typeof session?.snapshotVersion === "number") {
       const { transcript } = await waitForTranscript(
         supabase,
@@ -148,7 +150,7 @@ export async function resolveSource(
   }
 
   // ── 2. File extraction ─────────────────────────────────────────
-  let uploadedFiles = (visitMeta.files ?? []) as FileMetadata[];
+  let uploadedFiles: FileMetadata[] = visitMeta.files ?? [];
 
   // 2a. Reset stuck extractions
   await resetStuckExtractions(supabase, visitId, uploadedFiles);
@@ -227,7 +229,7 @@ export async function resolveSource(
     .eq("id", visitId)
     .single();
   const refreshedMetadata =
-    (refreshedVisit?.metadata as Record<string, unknown>) || visitMeta;
+    (refreshedVisit?.metadata as VisitMetadata) || visitMeta;
 
   // ── 5. Build raw source ───────────────────────────────────────
   const rawSource: RawSource = {
@@ -254,14 +256,10 @@ export async function resolveSource(
 
 function resolveAudioPath(
   clientAudioPath: string | undefined,
-  visitMeta: Record<string, unknown>,
+  visitMeta: VisitMetadata,
 ): string | undefined {
-  const sessionAudioPath = (
-    visitMeta.recording_session as { audioPath?: string } | undefined
-  )?.audioPath;
-  const pendingAudioPath = (
-    visitMeta.generation_pending as { audioPath?: string } | undefined
-  )?.audioPath;
+  const sessionAudioPath = visitMeta.recording_session?.audioPath;
+  const pendingAudioPath = visitMeta.generation_pending?.audioPath;
   return clientAudioPath || pendingAudioPath || sessionAudioPath;
 }
 
@@ -402,8 +400,8 @@ async function waitForExtractions(
       .single();
     if (!refreshed) break;
 
-    const meta = (refreshed.metadata ?? {}) as Record<string, unknown>;
-    files = (meta.files ?? []) as FileMetadata[];
+    const meta = (refreshed.metadata ?? {}) as VisitMetadata;
+    files = meta.files ?? [];
 
     const stillPending = files.filter(
       (f) =>
@@ -524,19 +522,17 @@ export async function waitForTranscript(
 }
 
 function checkTranscriptReady(
-  meta: Record<string, unknown>,
+  meta: VisitMetadata,
   snapshotVersion: number,
 ): string | undefined {
-  const transcriptVersion = meta?.transcriptSnapshotVersion as
-    | number
-    | undefined;
+  const transcriptVersion = meta?.transcriptSnapshotVersion;
   if (
     typeof transcriptVersion !== "number" ||
     transcriptVersion !== snapshotVersion
   ) {
     return undefined;
   }
-  const transcript = meta?.transcript;
+  const transcript = meta.transcript;
   return typeof transcript === "string" && transcript.length > 0
     ? transcript
     : undefined;
@@ -545,13 +541,13 @@ function checkTranscriptReady(
 async function fetchVisitMetadata(
   supabase: SupabaseClient,
   visitId: string,
-): Promise<Record<string, unknown>> {
+): Promise<VisitMetadata> {
   const { data } = await supabase
     .from("visits")
     .select("metadata")
     .eq("id", visitId)
     .single();
-  return (data?.metadata ?? {}) as Record<string, unknown>;
+  return (data?.metadata ?? {}) as VisitMetadata;
 }
 
 function sleep(ms: number): Promise<void> {

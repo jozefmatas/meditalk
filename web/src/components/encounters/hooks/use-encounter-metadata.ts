@@ -46,8 +46,7 @@ export function useEncounterMetadata({
     if (patientName !== (visit.patient_name || ""))
       updates.patient_name = patientName.trim() || null;
 
-    const meta = (visit.metadata || {}) as Record<string, unknown>;
-    const storedPersonalId = (meta.patient_personal_id as string) || "";
+    const storedPersonalId = visit.metadata?.patient_personal_id || "";
     if (patientId !== storedPersonalId) {
       updates.metadata = {
         patient_personal_id: patientId.trim() || null,
@@ -63,8 +62,10 @@ export function useEncounterMetadata({
         // Merge metadata partial instead of replacing the whole object
         const merged = { ...prev, ...updates } as Encounter;
         if (updates.metadata) {
-          const current = (prev.metadata || {}) as Record<string, unknown>;
-          merged.metadata = { ...current, ...updates.metadata };
+          merged.metadata = {
+            ...prev.metadata,
+            ...(updates.metadata as Record<string, unknown>),
+          };
         }
         return merged;
       });

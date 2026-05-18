@@ -348,6 +348,8 @@ Files uploaded through signed URLs to `encounter-files` Supabase bucket.
 
 ### Metadata JSONB shape:
 
+The shape is typed as [`VisitMetadata`](../web/src/lib/types.ts) — that interface is the source of truth; this block illustrates a populated row.
+
 ```jsonc
 {
   "transcript": "...",

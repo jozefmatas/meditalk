@@ -27,7 +27,7 @@ import {
 import { extractSkeleton } from "@/lib/sections/note-skeleton";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { RawSource } from "@/lib/sections/section-agent";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 import { getTranscript } from "@/lib/encounters/sources";
 import { extractFileText } from "@/lib/extraction/extract-file";
 import { logger } from "@/lib/logger";
@@ -102,11 +102,8 @@ export async function POST(request: NextRequest) {
 
     const language =
       ((visit.language as string)?.trim() as SupportedLanguage) || "en";
-    const visitMeta = (visit.metadata ?? {}) as Record<string, unknown>;
-    const priorSectionContents = (visitMeta.section_contents ?? {}) as Record<
-      string,
-      string
-    >;
+    const visitMeta = (visit.metadata ?? {}) as VisitMetadata;
+    const priorSectionContents = visitMeta.section_contents ?? {};
     const uploadedFiles = (visitMeta.files ?? []) as UploadedFile[];
     const existingTranscript = getTranscript(visitMeta) ?? "";
 

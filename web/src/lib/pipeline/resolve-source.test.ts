@@ -341,6 +341,8 @@ describe("resolveSource", () => {
         visit: {
           metadata: {
             recording_session: {
+              state: "paused",
+              durationAtPause: 0,
               snapshotVersion: 200,
               audioPath: "audio/rec.webm",
             },
@@ -400,6 +402,8 @@ describe("resolveSource", () => {
       visit: {
         metadata: {
           recording_session: {
+            state: "paused",
+            durationAtPause: 0,
             snapshotVersion: 100,
             audioPath: "audio/rec.webm",
           },

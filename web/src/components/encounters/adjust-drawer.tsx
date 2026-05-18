@@ -44,7 +44,7 @@ import {
 import { TiptapEditor } from "@/components/editor/tiptap-editor";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { SparklesIcon, Loading03Icon } from "@hugeicons/core-free-icons";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 
 const GENERATION_LANGUAGES: { value: SupportedLanguage; label: string }[] = [
   { value: "en", label: "English" },
@@ -56,7 +56,7 @@ interface AdjustDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   visitId: string;
-  metadata?: Record<string, unknown>;
+  metadata?: VisitMetadata;
   files: EncounterFile[];
   onFilesChange: (files: EncounterFile[]) => void;
   generationLanguage: SupportedLanguage;

@@ -20,7 +20,8 @@ describe("getTranscript", () => {
   });
 
   it("returns null for non-string transcript", () => {
-    expect(getTranscript({ transcript: 42 })).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(getTranscript({ transcript: 42 } as any)).toBeNull();
   });
 
   it("returns the transcript text", () => {

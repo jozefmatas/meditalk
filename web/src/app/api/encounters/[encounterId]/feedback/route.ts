@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/supabase/auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { logger } from "@/lib/logger";
+import type { VisitMetadata } from "@/lib/types";
 
 interface RouteParams {
   params: Promise<{ encounterId: string }>;
@@ -49,10 +50,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const metadata = visit.metadata ?? {};
-    const templateId = metadata.template_id as string | undefined;
-    const sectionContents =
-      (metadata.section_contents as Record<string, string>) ?? {};
+    const metadata = (visit.metadata ?? {}) as VisitMetadata;
+    const templateId = metadata.template_id;
+    const sectionContents = metadata.section_contents ?? {};
 
     if (!templateId) {
       return NextResponse.json(

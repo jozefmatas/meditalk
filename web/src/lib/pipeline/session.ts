@@ -22,7 +22,7 @@ import { buildSectionLabelsFromTemplate } from "@/lib/templates";
 import { buildTemplateHtml, flattenSectionIds } from "@/lib/templates/html";
 import type { RawSource } from "@/lib/sections/section-agent";
 import type { Template } from "@/lib/templates/types";
-import type { SupportedLanguage } from "@/lib/types";
+import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 import { getActiveFeedback, buildFeedbackMap } from "@/lib/pipeline/feedback";
 import { logger } from "@/lib/logger";
 
@@ -35,7 +35,7 @@ export interface PipelineSessionInput {
   language: SupportedLanguage;
   rawSource: RawSource;
   fileIds: string[];
-  visitMetadata: Record<string, unknown>;
+  visitMetadata: VisitMetadata;
   template: Template;
   sendEvent: (data: Record<string, unknown>) => void;
   /** Adjust-specific: only re-render these leaf sections. */

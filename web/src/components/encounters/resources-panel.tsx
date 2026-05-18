@@ -43,8 +43,8 @@ function resourceTypeLabelKey(file: EncounterFile): string {
 
 export function ResourcesPanel({ visit, t }: ResourcesPanelProps) {
   const isAdmin = useIsAdmin();
-  const meta = visit.metadata as Record<string, unknown> | undefined;
-  const doctorNotes = (meta?.doctor_notes as string) || "";
+  const meta = visit.metadata;
+  const doctorNotes = meta?.doctor_notes || "";
   const files = ((meta?.files as EncounterFile[]) || []).filter((f) =>
     f.extracted_text?.trim(),
   );

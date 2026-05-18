@@ -5,7 +5,7 @@ import { logAudit, createAuditContext } from "@/lib/audit";
 import { logUsage } from "@/lib/usage";
 import { logger } from "@/lib/logger";
 import { getTranscript } from "@/lib/encounters/sources";
-import type { FileMetadata } from "@/lib/types";
+import type { FileMetadata, VisitMetadata } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -94,11 +94,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Gather sources for context
-    const metadata = (visit.metadata as Record<string, unknown>) || {};
+    const metadata = (visit.metadata as VisitMetadata) || {};
     const transcript = getTranscript(metadata);
-    const doctorNotes = (metadata.doctor_notes as string) || "";
-    const uploadedFiles = ((metadata.files ?? []) as FileMetadata[]).filter(
-      (f) => f.extracted_text?.trim(),
+    const doctorNotes = metadata.doctor_notes || "";
+    const uploadedFiles = (metadata.files ?? []).filter((f) =>
+      f.extracted_text?.trim(),
     );
 
     // Build sources section

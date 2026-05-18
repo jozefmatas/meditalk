@@ -3,7 +3,6 @@ import {
   isFileUploading,
   hasUploadingFiles,
   isFileExtracting,
-  hasExtractingFiles,
   type EncounterFile,
 } from "./file-state";
 
@@ -199,56 +198,6 @@ describe("isFileExtracting", () => {
         }),
       ),
     ).toBe(true);
-  });
-});
-
-// ─── hasExtractingFiles ─────────────────────────────────────────────
-
-describe("hasExtractingFiles", () => {
-  it("returns false for an empty list", () => {
-    expect(hasExtractingFiles([])).toBe(false);
-  });
-
-  it("returns false when all files have extracted_text", () => {
-    expect(
-      hasExtractingFiles([
-        makeFile({ id: "a", extracted_text: "text a" }),
-        makeFile({ id: "b", extracted_text: "text b" }),
-      ]),
-    ).toBe(false);
-  });
-
-  it("returns true when at least one file is extracting", () => {
-    expect(
-      hasExtractingFiles([
-        makeFile({ id: "a", extracted_text: "text a" }),
-        makeFile({
-          id: "b",
-          pending: false,
-          extraction_status: "extracting",
-        }),
-      ]),
-    ).toBe(true);
-  });
-
-  it("ignores recording files", () => {
-    expect(
-      hasExtractingFiles([makeFile({ id: "rec", source: "recording" })]),
-    ).toBe(false);
-  });
-
-  it("returns false when the only extracting file has timed out", () => {
-    const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString();
-    expect(
-      hasExtractingFiles([
-        makeFile({
-          id: "a",
-          pending: false,
-          extraction_status: "extracting",
-          extraction_started_at: sixMinutesAgo,
-        }),
-      ]),
-    ).toBe(false);
   });
 });
 
