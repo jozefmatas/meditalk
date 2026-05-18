@@ -4,20 +4,32 @@ updates:
     directory: "/web"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     groups:
+      # Bundle weekly minor/patch updates into one PR.
       minor-and-patch:
+        applies-to: version-updates
         update-types:
           - "minor"
           - "patch"
+      # Bundle all security advisories into one PR instead of opening one per CVE.
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: "npm"
     directory: "/admin"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     groups:
       minor-and-patch:
+        applies-to: version-updates
         update-types:
           - "minor"
           - "patch"
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
