@@ -181,6 +181,19 @@ export const POST = withAuth<{ encounterId: string }>(
           break;
         }
 
+        // The user deleted the file mid-OCR — the RPC raises P0001
+        // "File not found". Retrying won't help; exit silently.
+        if (isFileNotFoundError(error)) {
+          logger.debug(
+            `[extract] File ${fileId} was deleted during extraction — skipping persist`,
+          );
+          return NextResponse.json({
+            extracted: true,
+            persisted: false,
+            fileDeleted: true,
+          });
+        }
+
         rpcError = error;
         if (attempt < RETRY_DELAYS.length) {
           logger.warn(
@@ -235,3 +248,19 @@ export const POST = withAuth<{ encounterId: string }>(
   },
   { logPrefix: "extract-file" },
 );
+
+/**
+ * The `update_file_extraction_status` RPC raises Postgres P0001 with a
+ * "File not found" message when the file was removed from
+ * `metadata.files[]` between extraction start and save. We detect this
+ * specific shape so we can exit silently instead of retrying + logging.
+ */
+function isFileNotFoundError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  return (
+    e.code === "P0001" &&
+    typeof e.message === "string" &&
+    e.message.startsWith("File not found")
+  );
+}

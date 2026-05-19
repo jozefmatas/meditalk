@@ -203,6 +203,32 @@ describe("POST /api/encounters/[encounterId]/extract", () => {
     expect(body.error).toContain("save");
   }, 30000);
 
+  it("silently exits without retries when file is deleted mid-extraction", async () => {
+    // "extracting" status succeeds; then the user deletes the file
+    // mid-OCR — the "completed" save RPC returns the database's
+    // "File not found" error (code P0001).
+    mockSupabase.rpc
+      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({
+        error: { code: "P0001", message: "File not found: f1" },
+      });
+
+    const req = makeJsonRequest("/api/encounters/v1/extract", { fileId: "f1" });
+    const res = await POST(req, routeParams());
+
+    // Only 2 RPC calls — no retries (file is gone, retrying won't help).
+    expect(mockSupabase.rpc).toHaveBeenCalledTimes(2);
+
+    // No error logs — this is expected behaviour, not a bug.
+    const { logger } = await import("@/lib/logger");
+    expect(vi.mocked(logger.error)).not.toHaveBeenCalled();
+
+    // Response: 200 with a flag indicating the file was deleted.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.fileDeleted).toBe(true);
+  });
+
   it("returns 400 when file has no path", async () => {
     mockSupabase.single.mockResolvedValueOnce({
       data: {
