@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { transcribeAudio } from "@/lib/elevenlabs";
 import { logger } from "@/lib/logger";
 
@@ -18,16 +18,8 @@ export const maxDuration = 600;
  * 2. **Direct blob mode** (FormData) — for small blobs (pause-time snapshots).
  *    The blob is sent as multipart form data. Subject to Vercel body limit.
  */
-export async function POST(request: NextRequest) {
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
-  try {
-    authResult = await requireAuth();
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
+export const POST = withAuth(
+  async ({ request, auth: authResult }) => {
     const contentType = request.headers.get("content-type") || "";
 
     // ── Storage path mode (JSON body) ──────────────────────────
@@ -149,11 +141,6 @@ export async function POST(request: NextRequest) {
     logger.info(`[batch-transcribe] Transcribed ${text.length} chars`);
 
     return NextResponse.json({ text });
-  } catch (err) {
-    logger.error("[batch-transcribe] Failed:", err);
-    return NextResponse.json(
-      { error: "Transcription failed" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "batch-transcribe" },
+);

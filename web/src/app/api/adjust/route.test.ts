@@ -113,7 +113,10 @@ beforeEach(() => {
 
 describe("POST /api/adjust", () => {
   it("returns 401 when auth fails", async () => {
-    mockRequireAuth.mockRejectedValueOnce(new Error("no auth"));
+    // Production requireAuth() throws a Response with status 401.
+    mockRequireAuth.mockRejectedValueOnce(
+      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+    );
 
     const res = await POST(makeRequest({ visitId: "v1" }));
     expect(res.status).toBe(401);

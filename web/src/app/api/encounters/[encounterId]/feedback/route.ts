@@ -1,22 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { logger } from "@/lib/logger";
 import type { VisitMetadata } from "@/lib/types";
 
-interface RouteParams {
-  params: Promise<{ encounterId: string }>;
-}
+type FeedbackParams = { encounterId: string };
 
 /**
  * POST /api/encounters/[encounterId]/feedback
  * Submit feedback on a generated note section (or globally).
  */
-export async function POST(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const POST = withAuth<FeedbackParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     const body = await request.json();
     const {
@@ -144,25 +141,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json({ id: data[0].id });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Feedback submit error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "feedback-submit" },
+);
 
 /**
  * DELETE /api/encounters/[encounterId]/feedback
  * Remove feedback for a section (toggle thumbs-up off).
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const DELETE = withAuth<FeedbackParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     const body = await request.json();
     const { sectionId } = body;
@@ -193,25 +183,18 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Feedback remove error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "feedback-remove" },
+);
 
 /**
  * GET /api/encounters/[encounterId]/feedback
  * Retrieve all feedback for this encounter by the current user.
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const GET = withAuth<FeedbackParams>(
+  async ({ auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     const { data, error } = await supabase
       .from("section_feedback")
@@ -228,12 +211,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     return NextResponse.json({ feedback: data ?? [] });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Feedback fetch error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "feedback-fetch" },
+);

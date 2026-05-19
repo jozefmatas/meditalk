@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type {
   Encounter,
@@ -14,10 +14,9 @@ import { logger } from "@/lib/logger";
  * GET /api/encounters
  * List user's encounters with pagination
  */
-export async function GET(request: NextRequest) {
-  try {
-    const { userId, supabase } = await requireAuth();
-
+export const GET = withAuth(
+  async ({ request, auth }) => {
+    const { userId, supabase } = auth;
     const searchParams = request.nextUrl.searchParams;
     const params: EncounterListParams = {
       page: parseInt(searchParams.get("page") || "1"),
@@ -93,25 +92,17 @@ export async function GET(request: NextRequest) {
       page: params.page,
       limit: params.limit,
     });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visits list error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "encounters-list" },
+);
 
 /**
  * POST /api/encounters
  * Create a new encounter
  */
-export async function POST(request: NextRequest) {
-  try {
-    const auth = await requireAuth();
+export const POST = withAuth(
+  async ({ request, auth }) => {
     const { userId, supabase } = auth;
-
     const body: CreateEncounterRequest = await request.json();
 
     const { data: visit, error } = await supabase
@@ -146,12 +137,6 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(visit, { status: 201 });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit creation error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "encounters-create" },
+);

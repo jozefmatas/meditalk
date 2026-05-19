@@ -11,8 +11,8 @@
  *   3. Uses the file-focus cache so Past-mode documents don't get
  *      re-filtered on every adjust.
  */
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import {
   DEFAULT_TEMPLATE_ID,
   buildSectionLabelsFromTemplate,
@@ -44,21 +44,9 @@ interface UploadedFile {
   context?: string | null;
 }
 
-export async function POST(request: NextRequest) {
-  let userId: string;
-  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
-
-  try {
-    authResult = await requireAuth();
-    userId = authResult.userId;
-    supabase = authResult.supabase;
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  try {
+export const POST = withAuth(
+  async ({ request, auth: authResult }) => {
+    const { userId, supabase } = authResult;
     const body = await request.json();
     const visitId: string | undefined = body.visitId;
     const templateId: string | undefined = body.templateId;
@@ -237,8 +225,6 @@ export async function POST(request: NextRequest) {
       },
       label: "adjust",
     });
-  } catch (err) {
-    logger.error("[adjust] top-level error:", err);
-    return NextResponse.json({ error: "adjust_failed" }, { status: 500 });
-  }
-}
+  },
+  { logPrefix: "adjust" },
+);

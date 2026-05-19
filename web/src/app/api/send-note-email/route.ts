@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { withAuth } from "@/lib/api/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { dispatchNoteEmail } from "@/lib/email/send-note-email";
-import { logger } from "@/lib/logger";
 
-export async function POST(request: Request) {
-  try {
-    const auth = await requireAuth();
+export const POST = withAuth(
+  async ({ request, auth }) => {
     const { userId, supabase } = auth;
     const { visitId } = await request.json();
 
@@ -60,12 +58,6 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (error) {
-    if (error instanceof Response) throw error;
-    logger.error("Send note email error:", error);
-    return NextResponse.json(
-      { error: "Failed to send email" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "send-note-email" },
+);

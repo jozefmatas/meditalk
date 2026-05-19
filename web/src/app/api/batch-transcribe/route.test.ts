@@ -37,7 +37,10 @@ beforeEach(() => {
 
 describe("POST /api/batch-transcribe", () => {
   it("returns 401 when auth fails", async () => {
-    mockRequireAuth.mockRejectedValueOnce(new Error("no auth"));
+    // Production requireAuth() throws a Response with status 401.
+    mockRequireAuth.mockRejectedValueOnce(
+      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+    );
 
     const req = new NextRequest("http://localhost:3000/api/batch-transcribe", {
       method: "POST",
@@ -98,12 +101,10 @@ describe("POST /api/batch-transcribe", () => {
     });
 
     it("returns 500 when storage download fails after retries", async () => {
-      mockSupabase.storage
-        .from("encounter-files")
-        .download.mockResolvedValue({
-          data: null,
-          error: { message: "not found" },
-        });
+      mockSupabase.storage.from("encounter-files").download.mockResolvedValue({
+        data: null,
+        error: { message: "not found" },
+      });
 
       const req = new NextRequest(
         "http://localhost:3000/api/batch-transcribe",

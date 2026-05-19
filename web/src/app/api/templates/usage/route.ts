@@ -1,15 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { logger } from "@/lib/logger";
 
 /**
  * GET /api/templates/usage
  * Returns { [templateId]: usageCount } for the current user.
  */
-export async function GET() {
-  try {
-    const { userId, supabase } = await requireAuth();
-
+export const GET = withAuth(
+  async ({ auth }) => {
+    const { userId, supabase } = auth;
     const { data, error } = await supabase
       .from("template_usage")
       .select("template_id, usage_count")
@@ -29,23 +28,18 @@ export async function GET() {
     }
 
     return NextResponse.json(usage);
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "templates-usage-get" },
+);
 
 /**
  * POST /api/templates/usage
  * Body: { templateId: string }
  * Upserts usage count (increment by 1).
  */
-export async function POST(request: NextRequest) {
-  try {
-    const { userId, supabase } = await requireAuth();
+export const POST = withAuth(
+  async ({ request, auth }) => {
+    const { userId, supabase } = auth;
     const { templateId } = await request.json();
 
     if (!templateId || typeof templateId !== "string") {
@@ -69,11 +63,6 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "templates-usage-post" },
+);

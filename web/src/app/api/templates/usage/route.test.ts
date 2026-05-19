@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { createMockSupabase, makeJsonRequest } from "@/test/route-helpers";
 
 // ── Mocks ─────────────────────────────────────────────────────────
@@ -35,7 +36,9 @@ describe("GET /api/templates/usage", () => {
       error: null,
     });
 
-    const res = await GET();
+    const res = await GET(
+      new NextRequest("http://localhost/api/templates/usage"),
+    );
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ t1: 5, t2: 2 });
@@ -47,7 +50,9 @@ describe("GET /api/templates/usage", () => {
       error: { message: "db error" },
     });
 
-    const res = await GET();
+    const res = await GET(
+      new NextRequest("http://localhost/api/templates/usage"),
+    );
     expect(res.status).toBe(500);
   });
 });

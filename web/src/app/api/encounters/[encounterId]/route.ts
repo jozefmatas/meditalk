@@ -1,24 +1,21 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import type { Encounter, UpdateEncounterRequest } from "@/lib/types";
 import { normalizeStatus } from "@/lib/encounters/normalize-status";
 import { mergeVisitMetadata } from "@/lib/supabase/merge-metadata";
 import { logger } from "@/lib/logger";
 
-interface RouteParams {
-  params: Promise<{ encounterId: string }>;
-}
+type EncounterParams = { encounterId: string };
 
 /**
  * GET /api/encounters/[encounterId]
  * Get a single visit
  */
-export async function GET(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const GET = withAuth<EncounterParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     // Get visit
     const { data: visit, error } = await supabase
@@ -43,25 +40,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       ...visit,
       status: normalizeStatus(visit.status),
     } as Encounter);
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit fetch error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "encounter-get" },
+);
 
 /**
  * PATCH /api/encounters/[encounterId]
  * Update a visit
  */
-export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const PATCH = withAuth<EncounterParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     const body: UpdateEncounterRequest = await request.json();
 
@@ -151,25 +141,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json(visit as Encounter);
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit update error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "encounter-patch" },
+);
 
 /**
  * DELETE /api/encounters/[encounterId]
  * Delete a visit (soft delete by default, hard delete with ?hard=true)
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const DELETE = withAuth<EncounterParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId: visitId } = await params;
+    const { encounterId: visitId } = params;
 
     const searchParams = request.nextUrl.searchParams;
     const hardDelete = searchParams.get("hard") === "true";
@@ -262,12 +245,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Visit delete error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "encounter-delete" },
+);

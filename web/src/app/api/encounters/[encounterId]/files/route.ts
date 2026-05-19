@@ -1,21 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { logAudit, createAuditContext } from "@/lib/audit";
 import { logger } from "@/lib/logger";
 import type { VisitMetadata, FileMetadata } from "@/lib/types";
 
-interface RouteParams {
-  params: Promise<{ encounterId: string }>;
-}
+type FileParams = { encounterId: string };
 
 /**
  * GET /api/encounters/[encounterId]/files
  * List files stored in encounter metadata.files[]
  */
-export async function GET(_request: NextRequest, { params }: RouteParams) {
-  try {
-    const { userId, supabase } = await requireAuth();
-    const { encounterId } = await params;
+export const GET = withAuth<FileParams>(
+  async ({ auth, params }) => {
+    const { userId, supabase } = auth;
+    const { encounterId } = params;
 
     const { data: visit, error } = await supabase
       .from("visits")
@@ -32,25 +30,19 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
     const files: FileMetadata[] = meta.files ?? [];
 
     return NextResponse.json({ files });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "files-list" },
+);
 
 /**
  * POST /api/encounters/[encounterId]/files
  * Register file metadata in visit.metadata.files[].
  * Accepts JSON (files already uploaded to storage by client) or FormData (legacy).
  */
-export async function POST(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const POST = withAuth<FileParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId } = await params;
+    const { encounterId } = params;
 
     // Verify ownership
     const { data: visit, error: visitError } = await supabase
@@ -183,25 +175,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json({ files: newFiles });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("File upload error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "files-upload" },
+);
 
 /**
  * DELETE /api/encounters/[encounterId]/files?fileId=...
  * Remove a file from storage and metadata
  */
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
-  try {
-    const auth = await requireAuth();
+export const DELETE = withAuth<FileParams>(
+  async ({ request, auth, params }) => {
     const { userId, supabase } = auth;
-    const { encounterId } = await params;
+    const { encounterId } = params;
     const fileId = request.nextUrl.searchParams.get("fileId");
 
     if (!fileId) {
@@ -251,12 +236,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("File delete error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "files-delete" },
+);

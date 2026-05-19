@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/supabase/auth";
+import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/api/with-auth";
 import { DEFAULT_TEMPLATE_ID } from "@/lib/templates";
 import { resolveTemplate } from "@/lib/templates/server";
 import { resolveSource, createPipelineStream } from "@/lib/pipeline";
@@ -14,27 +14,15 @@ import { logger } from "@/lib/logger";
 
 export const maxDuration = 800;
 
-export async function POST(request: NextRequest) {
-  const t0 = Date.now();
-  const lap = (label: string) =>
-    logger.debug(`[generate] ${label} — ${Date.now() - t0}ms`);
+export const POST = withAuth(
+  async ({ request, auth: authResult }) => {
+    const t0 = Date.now();
+    const lap = (label: string) =>
+      logger.debug(`[generate] ${label} — ${Date.now() - t0}ms`);
 
-  // Auth
-  let userId: string;
-  let supabase: Awaited<ReturnType<typeof requireAuth>>["supabase"];
-  let authResult: Awaited<ReturnType<typeof requireAuth>>;
-
-  try {
-    authResult = await requireAuth();
-    userId = authResult.userId;
-    supabase = authResult.supabase;
+    const { userId, supabase } = authResult;
     lap("auth");
-  } catch (err) {
-    if (err instanceof Response) return err;
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
 
-  try {
     const body = await request.json();
     const visitId = body.visitId || body.transcriptId;
     const templateId: string | undefined = body.templateId;
@@ -292,12 +280,6 @@ export async function POST(request: NextRequest) {
         label: "generate",
       });
     }
-  } catch (err) {
-    if (err instanceof Response) return err;
-    logger.error("Generate route error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
+  },
+  { logPrefix: "generate" },
+);
