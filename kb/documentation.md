@@ -13,7 +13,7 @@ This document provides a comprehensive overview of how MediTalk works from end t
 ## What's new (2026-05-13)
 
 - **File-focus grounding robustness** — passage validation now uses two tiers: (1) whitespace-normalized substring match, (2) word-overlap fallback (≥80% of passage words in source). When ALL passages fail, returns full text as fallback instead of empty (prevents silent data loss). 5 new tests in `file-focus.test.ts`.
-- **Current-visit-only routing** — `exam-narrative` and `vital-numeric` sections now exclude past-mode files (those with a `context` directive) entirely via `CURRENT_VISIT_ONLY` in `pipeline.ts`. Past-mode detection uses the `context` field, not `classifiedPassages`. Prevents past-file vitals/findings from leaking into the current physical exam section. 4 new routing tests.
+- **Current-visit-only routing** — `exam-narrative` and `vital-numeric` sections now exclude past-mode files (those with a `context` directive) entirely via `CURRENT_VISIT_ONLY` in `kind-policy.ts`. Past-mode detection uses the `context` field, not `classifiedPassages`. Prevents past-file vitals/findings from leaking into the current physical exam section. 4 new routing tests.
 - **Adjust-section file context** — `POST /api/adjust-section` now reads actual `metadata.files[]` with `extracted_text` and per-file `context` directives (was reading dead `uploaded_files_context` field). 4 new tests.
 
 ## What's new (2026-05-07)

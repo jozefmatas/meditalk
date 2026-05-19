@@ -67,6 +67,8 @@ The test: Every changed line should trace directly to the user's request.
 
 Define success criteria. Loop until verified.
 
+**Always invoke the `/tdd` skill for new behavior (features, bug fixes).** Red-green-refactor — write the failing test first, then the code to make it pass. For pure refactors (no behavior change), invoke `/tdd` is not required; instead, run the existing test suite before and after as the regression check.
+
 Transform tasks into verifiable goals:
 
 - "Add validation" → "Write tests for invalid inputs, then make them pass"

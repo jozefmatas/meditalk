@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { KIND_POLICY, resolveKind, formatConclusionContent } from "./pipeline";
+import { KIND_POLICY, resolveKind } from "./kind-policy";
+import { formatConclusionContent } from "./pipeline";
 import type { TemplateSection } from "../templates/types";
 
 function mkSection(partial: Partial<TemplateSection>): TemplateSection {

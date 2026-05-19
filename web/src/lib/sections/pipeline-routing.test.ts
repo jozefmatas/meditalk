@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { CATEGORY_ROUTING, filterSourceForKind } from "./pipeline";
+import { CATEGORY_ROUTING, filterSourceForKind } from "./kind-policy";
 import type { ClassifiedPassage, RawSource } from "./section-agent";
 
 // ── Helper ─────────────────────────────────────────────────────────
