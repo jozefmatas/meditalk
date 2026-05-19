@@ -2,10 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useTranslations } from "next-intl";
-import { Textarea } from "@/components/shared/textarea";
-import { Badge } from "@/components/shared/badge";
 import { ErrorAlert } from "@/components/shared/error-alert";
-import { Button } from "@/components/shared/button";
 import { TextShimmer } from "@/components/shared/text-shimmer";
 import {
   Tabs,
@@ -28,6 +25,8 @@ import { TemplateSelector } from "@/components/templates/template-selector";
 import { IcdPanelContent } from "@/components/encounters/icd-panel";
 import { NoteSectionsList } from "@/components/encounters/note-sections-list";
 import { ResourcesPanel } from "@/components/encounters/resources-panel";
+import { ReviewHeader } from "@/components/encounters/review-header";
+import { NoteActionButtons } from "@/components/encounters/note-action-buttons";
 import { useMobileHeaderCollapse } from "@/components/encounters/hooks/use-mobile-header-collapse";
 import { useNoteActions } from "@/components/encounters/hooks/use-note-actions";
 import type { Template } from "@/lib/templates";
@@ -395,35 +394,15 @@ export function ReviewView({
         >
           <div className="overflow-hidden">
             <div className="flex flex-col gap-4 pt-4 pb-2">
-              <div className="flex min-w-0 flex-col gap-1">
-                <Textarea
-                  value={title}
-                  onChange={(e) => onTitleChange(e.target.value)}
-                  onBlur={onMetadataBlur}
-                  placeholder={t("untitled")}
-                  rows={1}
-                  className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                  onInput={(e) => {
-                    const target = e.currentTarget;
-                    target.style.height = "auto";
-                    target.style.height = `${target.scrollHeight}px`;
-                  }}
-                  ref={(el) => {
-                    if (el) {
-                      el.style.height = "auto";
-                      el.style.height = `${el.scrollHeight}px`;
-                    }
-                  }}
-                />
-                <div className="flex items-center gap-3">
-                  <Badge variant={`status-${visit.status}` as "status-started"}>
-                    {t(`status.${visit.status}`)}
-                  </Badge>
-                  <span className="text-sm text-foreground/65">
-                    {formattedDate}
-                  </span>
-                </div>
-              </div>
+              <ReviewHeader
+                title={title}
+                onTitleChange={onTitleChange}
+                onBlur={onMetadataBlur}
+                placeholder={t("untitled")}
+                status={visit.status}
+                statusLabel={t(`status.${visit.status}`)}
+                formattedDate={formattedDate}
+              />
 
               {/* Template picker + action buttons */}
               <div className="flex flex-col gap-2">
@@ -442,35 +421,18 @@ export function ReviewView({
                     {streamingTimerLabel}
                   </TextShimmer>
                 ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      className="flex-1"
-                      onClick={handleSendEmail}
-                      disabled={!generatedNoteHtml || emailStatus === "sending"}
-                    >
-                      <HugeiconsIcon
-                        icon={emailIcon}
-                        size={16}
-                        className={
-                          emailStatus === "sending" ? "animate-spin" : undefined
-                        }
-                      />
-                      {emailLabel}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="lg"
-                      className="flex-1"
-                      onClick={handleCopyNote}
-                      disabled={!generatedNoteHtml}
-                    >
-                      {noteCopied
-                        ? t("detail.noteCopied")
-                        : t("detail.copyNote")}
-                    </Button>
-                  </div>
+                  <NoteActionButtons
+                    emailIcon={emailIcon}
+                    emailLabel={emailLabel}
+                    emailStatus={emailStatus}
+                    hasNote={!!generatedNoteHtml}
+                    noteCopied={noteCopied}
+                    copyLabel={t("detail.copyNote")}
+                    copiedLabel={t("detail.noteCopied")}
+                    onSendEmail={handleSendEmail}
+                    onCopyNote={handleCopyNote}
+                    fullWidth
+                  />
                 )}
               </div>
             </div>
@@ -519,35 +481,16 @@ export function ReviewView({
           className="sticky top-0 z-10 flex flex-col gap-5 bg-background pt-6"
         >
           <div className="flex items-center gap-4">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <Textarea
-                value={title}
-                onChange={(e) => onTitleChange(e.target.value)}
-                onBlur={onMetadataBlur}
-                placeholder={t("untitled")}
-                rows={1}
-                className="min-h-0 h-auto resize-none overflow-hidden rounded-none border-none bg-transparent px-0 py-0.5 text-2xl md:text-2xl shadow-none placeholder:text-foreground/65 focus-visible:ring-0"
-                onInput={(e) => {
-                  const target = e.currentTarget;
-                  target.style.height = "auto";
-                  target.style.height = `${target.scrollHeight}px`;
-                }}
-                ref={(el) => {
-                  if (el) {
-                    el.style.height = "auto";
-                    el.style.height = `${el.scrollHeight}px`;
-                  }
-                }}
-              />
-              <div className="flex items-center gap-3">
-                <Badge variant={`status-${visit.status}` as "status-started"}>
-                  {t(`status.${visit.status}`)}
-                </Badge>
-                <span className="text-sm text-foreground/65">
-                  {formattedDate}
-                </span>
-              </div>
-            </div>
+            <ReviewHeader
+              title={title}
+              onTitleChange={onTitleChange}
+              onBlur={onMetadataBlur}
+              placeholder={t("untitled")}
+              status={visit.status}
+              statusLabel={t(`status.${visit.status}`)}
+              formattedDate={formattedDate}
+              className="flex-1"
+            />
           </div>
           <div className="flex items-center gap-1 border-b border-border">
             <TabsList variant="line">
@@ -603,33 +546,17 @@ export function ReviewView({
                     {streamingTimerLabel}
                   </TextShimmer>
                 ) : (
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="lg"
-                      onClick={handleSendEmail}
-                      disabled={!generatedNoteHtml || emailStatus === "sending"}
-                    >
-                      <HugeiconsIcon
-                        icon={emailIcon}
-                        size={16}
-                        className={
-                          emailStatus === "sending" ? "animate-spin" : undefined
-                        }
-                      />
-                      {emailLabel}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="lg"
-                      onClick={handleCopyNote}
-                      disabled={!generatedNoteHtml}
-                    >
-                      {noteCopied
-                        ? t("detail.noteCopied")
-                        : t("detail.copyNote")}
-                    </Button>
-                  </div>
+                  <NoteActionButtons
+                    emailIcon={emailIcon}
+                    emailLabel={emailLabel}
+                    emailStatus={emailStatus}
+                    hasNote={!!generatedNoteHtml}
+                    noteCopied={noteCopied}
+                    copyLabel={t("detail.copyNote")}
+                    copiedLabel={t("detail.noteCopied")}
+                    onSendEmail={handleSendEmail}
+                    onCopyNote={handleCopyNote}
+                  />
                 )}
               </div>
               <div className="flex flex-col gap-2">{noteSectionCards}</div>
