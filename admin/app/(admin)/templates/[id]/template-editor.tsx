@@ -444,7 +444,11 @@ function SectionRow({
 // ── Main editor component ───────────────────────────────────────────
 
 export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
-  const [editLocale, setEditLocale] = useState<Locale>(PRIMARY_LOCALE);
+  const [editLocale, setEditLocale] = useState<Locale>(() =>
+    initialData.locales.includes(PRIMARY_LOCALE)
+      ? PRIMARY_LOCALE
+      : ((initialData.locales[0] as Locale) ?? PRIMARY_LOCALE),
+  );
   const [name, setName] = useState(initialData.name);
   const [description, setDescription] = useState(initialData.description);
   const [specialties, setSpecialties] = useState(initialData.specialties);
@@ -488,20 +492,15 @@ export function TemplateEditor({ initialData }: { initialData: TemplateRow }) {
     resizeTextarea(styleGuideRef.current);
   }, [styleGuide, resizeTextarea]);
 
-  // ── Guard editLocale — reset if current locale is removed ──
-
-  useEffect(() => {
-    if (!locales.includes(editLocale)) {
-      setEditLocale((locales[0] as Locale) ?? PRIMARY_LOCALE);
-    }
-  }, [locales, editLocale]);
-
   // ── Handle locale changes — auto-translate when a locale is added ──
 
   const handleLocalesChange = useCallback(
     async (newLocales: string[]) => {
       const added = newLocales.filter((l) => !locales.includes(l));
       setLocales(newLocales);
+      if (!newLocales.includes(editLocale)) {
+        setEditLocale((newLocales[0] as Locale) ?? PRIMARY_LOCALE);
+      }
 
       if (added.length === 0) return;
 
