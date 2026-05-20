@@ -37,7 +37,6 @@
     "@capacitor/ios": "^8.3.0",
     "@capacitor/splash-screen": "^8.0.1",
     "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
-    "@elevenlabs/client": "^0.15.1",
     "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@fontsource-variable/figtree": "^5.2.10",
     "@google/genai": "^2.4.0",
