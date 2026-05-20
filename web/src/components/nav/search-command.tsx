@@ -30,10 +30,16 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
   const getHref = useLocalizedHref();
 
   const [query, setQuery] = useState("");
-  const [encounterResults, setEncounterResults] = useState<Encounter[]>([]);
+  const [rawEncounterResults, setRawEncounterResults] = useState<Encounter[]>(
+    [],
+  );
   const [recentEncounters, setRecentEncounters] = useState<Encounter[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Empty-query case is purely derived — no effect needed to "clear" stale
+  // results when the user types a single character then deletes it.
+  const encounterResults = query.trim() ? rawEncounterResults : [];
 
   // Keyboard shortcut: Cmd+K / Ctrl+K
   useEffect(() => {
@@ -66,14 +72,9 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
       .catch(() => {});
   }, [open, templates.length]);
 
-  // Debounced encounter search — network-driven results are the legitimate
-  // external-source use of useEffect.
+  // Debounced encounter search — only runs for non-empty queries.
   useEffect(() => {
-    if (!query.trim()) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setEncounterResults([]);
-      return;
-    }
+    if (!query.trim()) return;
 
     const timeout = setTimeout(async () => {
       setIsSearching(true);
@@ -85,7 +86,7 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
         const res = await fetch(`/api/encounters?${params}`);
         if (res.ok) {
           const data: EncounterListResponse = await res.json();
-          setEncounterResults(data.encounters);
+          setRawEncounterResults(data.encounters);
         }
       } catch {
         // Silently fail

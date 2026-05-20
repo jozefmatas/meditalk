@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { File01Icon } from "@hugeicons/core-free-icons";
@@ -31,8 +31,6 @@ export function FileContextDialog({
   files,
   onSave,
 }: FileContextDialogProps) {
-  const t = useTranslations("encounters.detail");
-
   // Filter to non-audio, non-pending files only
   const eligibleFiles = files.filter(
     (f) =>
@@ -41,30 +39,46 @@ export function FileContextDialog({
       f.source !== "recording-upload",
   );
 
-  const [contexts, setContexts] = useState<Record<string, string>>({});
-  // Mode per file: "actual" = use everything, "past" = distill to `contexts[id]`.
-  // Seeded from existing `file.context`: non-empty → "past", else "actual".
-  const [modes, setModes] = useState<Record<string, "actual" | "past">>({});
+  if (eligibleFiles.length === 0) return null;
 
-  // Seed local state from file contexts when the dialog opens.
-  // TODO(react-19-cleanup): replace with key-based remount of the dialog
-  // (parent passes `key={open ? "open" : "closed"}`) to drop this seeding.
-  useEffect(() => {
-    if (!open) return;
-    const seededContexts: Record<string, string> = {};
-    const seededModes: Record<string, "actual" | "past"> = {};
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Body remounts each time the dialog opens so its useState seeds
+          fresh from the latest file.context — no effect-driven sync. */}
+      {open && (
+        <DialogBody
+          eligibleFiles={eligibleFiles}
+          onOpenChange={onOpenChange}
+          onSave={onSave}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+interface DialogBodyProps {
+  eligibleFiles: FileMetadata[];
+  onOpenChange: (open: boolean) => void;
+  onSave: (contexts: Record<string, string>) => void;
+}
+
+function DialogBody({ eligibleFiles, onOpenChange, onSave }: DialogBodyProps) {
+  const t = useTranslations("encounters.detail");
+
+  // Mode per file: "actual" = use everything, "past" = distill to `contexts[id]`.
+  // Seeded once on mount from existing `file.context`: non-empty → "past".
+  const [contexts, setContexts] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const f of eligibleFiles) seed[f.id] = f.context?.trim() ?? "";
+    return seed;
+  });
+  const [modes, setModes] = useState<Record<string, "actual" | "past">>(() => {
+    const seed: Record<string, "actual" | "past"> = {};
     for (const f of eligibleFiles) {
-      const existing = f.context?.trim() ?? "";
-      seededContexts[f.id] = existing;
-      seededModes[f.id] = existing ? "past" : "actual";
+      seed[f.id] = (f.context?.trim() ?? "") ? "past" : "actual";
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setContexts(seededContexts);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setModes(seededModes);
-    // Only re-seed when dialog opens
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    return seed;
+  });
 
   const handleModeChange = (fileId: string, mode: "actual" | "past") => {
     setModes((prev) => ({ ...prev, [fileId]: mode }));
@@ -94,76 +108,72 @@ export function FileContextDialog({
     (f) => modes[f.id] === "past" && !(contexts[f.id] ?? "").trim(),
   );
 
-  if (eligibleFiles.length === 0) return null;
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{t("fileContextTitle")}</DialogTitle>
-          <DialogDescription>{t("fileContextDescription")}</DialogDescription>
-        </DialogHeader>
-        <div className="-mx-1 flex max-h-96 flex-col gap-5 overflow-y-auto px-1 py-1 -my-1">
-          {eligibleFiles.map((file) => {
-            const mode = modes[file.id] ?? "actual";
-            return (
-              <div key={file.id} className="flex flex-col gap-2">
-                <label className="flex items-center gap-1.5 text-sm font-medium">
-                  <HugeiconsIcon
-                    icon={File01Icon}
-                    size={14}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                  <span className="truncate">{file.name}</span>
-                </label>
+    <DialogContent className="sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle>{t("fileContextTitle")}</DialogTitle>
+        <DialogDescription>{t("fileContextDescription")}</DialogDescription>
+      </DialogHeader>
+      <div className="-mx-1 flex max-h-96 flex-col gap-5 overflow-y-auto px-1 py-1 -my-1">
+        {eligibleFiles.map((file) => {
+          const mode = modes[file.id] ?? "actual";
+          return (
+            <div key={file.id} className="flex flex-col gap-2">
+              <label className="flex items-center gap-1.5 text-sm font-medium">
+                <HugeiconsIcon
+                  icon={File01Icon}
+                  size={14}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="truncate">{file.name}</span>
+              </label>
 
-                <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-2">
-                  <ModeOption
-                    name={`mode-${file.id}`}
-                    value="actual"
-                    checked={mode === "actual"}
-                    onChange={() => handleModeChange(file.id, "actual")}
-                    title={t("fileContextModeActualTitle")}
-                    help={t("fileContextModeActualHelp")}
-                  />
-                  <ModeOption
-                    name={`mode-${file.id}`}
-                    value="past"
-                    checked={mode === "past"}
-                    onChange={() => handleModeChange(file.id, "past")}
-                    title={t("fileContextModePastTitle")}
-                    help={t("fileContextModePastHelp")}
-                  />
-                </div>
-
-                {mode === "past" && (
-                  <Textarea
-                    autoFocus
-                    placeholder={t("fileContextPlaceholder")}
-                    rows={2}
-                    value={contexts[file.id] ?? ""}
-                    onChange={(e) =>
-                      setContexts((prev) => ({
-                        ...prev,
-                        [file.id]: e.target.value,
-                      }))
-                    }
-                  />
-                )}
+              <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-2">
+                <ModeOption
+                  name={`mode-${file.id}`}
+                  value="actual"
+                  checked={mode === "actual"}
+                  onChange={() => handleModeChange(file.id, "actual")}
+                  title={t("fileContextModeActualTitle")}
+                  help={t("fileContextModeActualHelp")}
+                />
+                <ModeOption
+                  name={`mode-${file.id}`}
+                  value="past"
+                  checked={mode === "past"}
+                  onChange={() => handleModeChange(file.id, "past")}
+                  title={t("fileContextModePastTitle")}
+                  help={t("fileContextModePastHelp")}
+                />
               </div>
-            );
-          })}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t("fileContextSkip")}
-          </Button>
-          <Button onClick={handleSave} disabled={hasIncompletePast}>
-            {t("fileContextSave")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+
+              {mode === "past" && (
+                <Textarea
+                  autoFocus
+                  placeholder={t("fileContextPlaceholder")}
+                  rows={2}
+                  value={contexts[file.id] ?? ""}
+                  onChange={(e) =>
+                    setContexts((prev) => ({
+                      ...prev,
+                      [file.id]: e.target.value,
+                    }))
+                  }
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          {t("fileContextSkip")}
+        </Button>
+        <Button onClick={handleSave} disabled={hasIncompletePast}>
+          {t("fileContextSave")}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }
 

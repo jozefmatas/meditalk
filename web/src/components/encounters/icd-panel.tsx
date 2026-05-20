@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { Badge } from "@/components/shared/badge";
@@ -49,10 +49,13 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   const t = useTranslations("encounters.detail");
   const locale = useLocale();
 
-  // Selected codes from visit metadata
-  const [selectedCodes, setSelectedCodes] = useState<IcdCode[]>(() => {
-    return dedupeByCode(visit.metadata.selected_icd_codes || []);
-  });
+  // Selected codes are derived directly from visit metadata. Mutations go
+  // through `setVisit` (optimistic) + `persistCodes` (debounced PATCH), so
+  // there's no local copy to keep in sync with the prop.
+  const selectedCodes = useMemo(
+    () => dedupeByCode(visit.metadata.selected_icd_codes || []),
+    [visit.metadata.selected_icd_codes],
+  );
 
   // Suggested codes from clinical analysis — prefer the full pre-filter list
   // (suggestedIcdCodes) so the doctor sees all candidates, not just the
@@ -83,22 +86,18 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   })();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<IcdCode[]>([]);
+  const [rawSearchResults, setRawSearchResults] = useState<IcdCode[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Empty/short query is purely derived — no effect needed to "clear" stale
+  // results.
+  const searchResults = searchQuery.length < 2 ? [] : rawSearchResults;
   // Maps inputCode → { code (WHO format), description (localized) }
   const [localizedMap, setLocalizedMap] = useState<
     Map<string, { code: string; description: string }>
   >(new Map());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Sync selected codes when visit metadata changes externally.
-  // TODO(react-19-cleanup): split into derived-from-prop + local-edit state
-  // so this re-sync can disappear.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelectedCodes(dedupeByCode(visit.metadata.selected_icd_codes || []));
-  }, [visit.metadata]);
 
   // Resolve codes + descriptions for selected + suggested codes in the current locale
   useEffect(() => {
@@ -156,38 +155,39 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
             description: descFor(c),
           }));
 
-  // Persist selected codes to visit metadata (debounced)
+  // Persist selected codes to visit metadata (debounced). The optimistic
+  // setVisit already happened in the event handler — this just durably
+  // saves the result. PATCH failures are silently dropped (same as before).
   const persistCodes = useCallback(
     (codes: IcdCode[]) => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = setTimeout(async () => {
-        const partial = { selected_icd_codes: codes };
-
-        const res = await patchEncounter(visit.id, { metadata: partial });
-        if (res?.ok) {
-          setVisit((prev) => {
-            if (!prev) return prev;
-            const current = (prev.metadata || {}) as Record<string, unknown>;
-            return {
-              ...prev,
-              metadata: { ...current, ...partial },
-            } as typeof prev;
-          });
-        }
+        await patchEncounter(visit.id, {
+          metadata: { selected_icd_codes: codes },
+        });
       }, 500);
     },
-    [visit.id, setVisit],
+    [visit.id],
   );
 
   const removeCode = useCallback(
     (code: string) => {
-      setSelectedCodes((prev) => {
-        const next = prev.filter((c) => c.code !== code);
-        persistCodes(next);
-        return next;
+      const next = selectedCodes.filter((c) => c.code !== code);
+      // Optimistic: update visit immediately so the UI reflects the removal
+      // before the debounced PATCH lands.
+      setVisit((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          metadata: {
+            ...(prev.metadata || {}),
+            selected_icd_codes: next,
+          },
+        } as typeof prev;
       });
+      persistCodes(next);
     },
-    [persistCodes],
+    [selectedCodes, persistCodes, setVisit],
   );
 
   const copyCodeToClipboard = useCallback(
@@ -200,27 +200,20 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     [t],
   );
 
-  // Search ICD-10 database (debounced).
-  // Network-driven results are the legitimate external-source use of useEffect.
+  // Search ICD-10 database (debounced) — only runs for queries ≥ 2 chars.
   useEffect(() => {
+    if (searchQuery.length < 2) return;
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
-    if (searchQuery.length < 2) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
+      setIsSearching(true);
       try {
         const res = await fetch(
           `/api/icd-search?q=${encodeURIComponent(searchQuery)}&locale=${locale}`,
         );
         if (res.ok) {
           const data = await res.json();
-          setSearchResults(data.results || []);
+          setRawSearchResults(data.results || []);
         }
       } catch {
         // Silent fail

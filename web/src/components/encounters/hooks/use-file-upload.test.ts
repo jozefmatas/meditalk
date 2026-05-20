@@ -163,7 +163,7 @@ describe("useFileUpload", () => {
     expect(filtered).toEqual([]);
   });
 
-  it("sets shouldPromptContext for non-audio uploads", async () => {
+  it("calls onShouldPromptContext for non-audio uploads", async () => {
     setupSuccessfulUpload();
     // Extraction
     mockFetch.mockResolvedValueOnce({
@@ -171,18 +171,19 @@ describe("useFileUpload", () => {
       json: () => Promise.resolve({ text: "extracted" }),
     });
 
+    const onShouldPromptContext = vi.fn();
     const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
+      useFileUpload(defaultProps({ onShouldPromptContext })),
     );
 
     await act(async () => {
       await result.current.uploadFiles([makeFile("report.pdf")]);
     });
 
-    expect(result.current.shouldPromptContext).toBe(true);
+    expect(onShouldPromptContext).toHaveBeenCalledTimes(1);
   });
 
-  it("does not set shouldPromptContext for audio uploads", async () => {
+  it("does not call onShouldPromptContext for audio uploads", async () => {
     mockUploadWithRetry.mockResolvedValue({
       id: "upload-1",
       name: "recording.webm",
@@ -201,8 +202,9 @@ describe("useFileUpload", () => {
     });
     // No extraction for audio
 
+    const onShouldPromptContext = vi.fn();
     const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
+      useFileUpload(defaultProps({ onShouldPromptContext })),
     );
 
     await act(async () => {
@@ -211,29 +213,7 @@ describe("useFileUpload", () => {
       ]);
     });
 
-    expect(result.current.shouldPromptContext).toBe(false);
-  });
-
-  it("clearContextPrompt resets shouldPromptContext", async () => {
-    setupSuccessfulUpload();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ text: "extracted" }),
-    });
-
-    const { result } = renderHook(() =>
-      useFileUpload(defaultProps()),
-    );
-
-    await act(async () => {
-      await result.current.uploadFiles([makeFile("report.pdf")]);
-    });
-    expect(result.current.shouldPromptContext).toBe(true);
-
-    act(() => {
-      result.current.clearContextPrompt();
-    });
-    expect(result.current.shouldPromptContext).toBe(false);
+    expect(onShouldPromptContext).not.toHaveBeenCalled();
   });
 
   it("triggers extraction and updates file on success", async () => {
