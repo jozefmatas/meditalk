@@ -92,8 +92,11 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Sync selected codes when visit metadata changes externally
+  // Sync selected codes when visit metadata changes externally.
+  // TODO(react-19-cleanup): split into derived-from-prop + local-edit state
+  // so this re-sync can disappear.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedCodes(dedupeByCode(visit.metadata.selected_icd_codes || []));
   }, [visit.metadata]);
 
@@ -197,11 +200,13 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     [t],
   );
 
-  // Search ICD-10 database (debounced)
+  // Search ICD-10 database (debounced).
+  // Network-driven results are the legitimate external-source use of useEffect.
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     if (searchQuery.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchResults([]);
       setIsSearching(false);
       return;

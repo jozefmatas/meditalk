@@ -50,6 +50,8 @@ function AuthConfirmContent() {
 
   useEffect(() => {
     if (tokenHash && type) {
+      // OTP verify is a legitimate external-source call on mount.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleConfirm();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

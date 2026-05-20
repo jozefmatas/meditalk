@@ -66,9 +66,11 @@ export function SearchCommand({ open, onOpenChange }: SearchCommandProps) {
       .catch(() => {});
   }, [open, templates.length]);
 
-  // Debounced encounter search
+  // Debounced encounter search — network-driven results are the legitimate
+  // external-source use of useEffect.
   useEffect(() => {
     if (!query.trim()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEncounterResults([]);
       return;
     }

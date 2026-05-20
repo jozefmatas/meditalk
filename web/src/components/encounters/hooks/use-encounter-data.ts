@@ -48,7 +48,9 @@ export function useEncounterData({
 
   // Stable ref for onLoaded callback
   const onLoadedRef = useRef(onLoaded);
-  onLoadedRef.current = onLoaded;
+  useEffect(() => {
+    onLoadedRef.current = onLoaded;
+  });
 
   // Fetch visit data
   useEffect(() => {

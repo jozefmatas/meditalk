@@ -107,14 +107,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
     setVisit: data.setVisit,
   });
 
-  // Wire refs to actual setters
-  metadataSettersRef.current = {
-    setTitle: metadata.setTitle,
-    setPatientName: metadata.setPatientName,
-    setPatientId: metadata.setPatientId,
-    setVisitType: metadata.setVisitType,
-  };
-
   // --- updateTitle bridges metadata + page title + sidebar ---
   const { setTitle: setMetadataTitle } = metadata;
   const updateTitle = useCallback(
@@ -125,7 +117,18 @@ export default function EncounterDetailPage({ params }: PageProps) {
     },
     [visitId, setPageTitle, setMetadataTitle],
   );
-  updateTitleRef.current = updateTitle;
+
+  // Wire refs after render so onLoaded (called from data hook's effect)
+  // always sees the latest values.
+  useEffect(() => {
+    metadataSettersRef.current = {
+      setTitle: metadata.setTitle,
+      setPatientName: metadata.setPatientName,
+      setPatientId: metadata.setPatientId,
+      setVisitType: metadata.setVisitType,
+    };
+    updateTitleRef.current = updateTitle;
+  });
 
   useEffect(() => {
     return () => setPageTitle(null);
@@ -161,7 +164,9 @@ export default function EncounterDetailPage({ params }: PageProps) {
   });
 
   // Wire generation init ref
-  initGenerationRef.current = generation.initFromVisit;
+  useEffect(() => {
+    initGenerationRef.current = generation.initFromVisit;
+  });
 
   // Keep generation's titleRef in sync
   const { syncTitle } = generation;

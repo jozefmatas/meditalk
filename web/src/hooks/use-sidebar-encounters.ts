@@ -95,8 +95,10 @@ export function useSidebarEncounters() {
     [setVisits, setTotal],
   );
 
-  // Fetch once on mount
+  // Fetch once on mount — fetchVisits drives loading/results state from a
+  // network call, which is the legitimate external-source use of useEffect.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchVisits(1);
   }, [fetchVisits]);
 
