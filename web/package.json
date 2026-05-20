@@ -124,7 +124,9 @@
       "brace-expansion@<1.1.13": "1.1.13",
       "brace-expansion@>=4.0.0 <5.0.5": "5.0.5",
       "hono@<=4.12.11": "4.12.12",
-      "@hono/node-server@<1.19.13": "1.19.13"
+      "@hono/node-server@<1.19.13": "1.19.13",
+      "@types/react": "19.2.15",
+      "@types/react-dom": "19.2.3"
     },
     "onlyBuiltDependencies": [
       "@parcel/watcher",
