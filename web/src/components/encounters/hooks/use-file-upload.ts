@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import type { EncounterFile } from "@/lib/encounters/file-state";
 import { emit } from "@/lib/events";
 import { logger } from "@/lib/logger";
@@ -14,27 +14,29 @@ interface UseFileUploadParams {
     files: EncounterFile[] | ((prev: EncounterFile[]) => EncounterFile[]),
   ) => void;
   hasActiveRecording: boolean;
+  /** Called once per upload batch that includes a non-audio file. */
+  onShouldPromptContext?: () => void;
 }
 
 interface UseFileUploadReturn {
   uploadFiles: (files: File[]) => Promise<void>;
   isUploading: boolean;
-  /** True when newly uploaded non-audio files need context — trigger dialog */
-  shouldPromptContext: boolean;
-  clearContextPrompt: () => void;
 }
 
 export function useFileUpload({
   visitId,
   onFilesChange,
   hasActiveRecording,
+  onShouldPromptContext,
 }: UseFileUploadParams): UseFileUploadReturn {
   const [isUploading, setIsUploading] = useState(false);
-  const [shouldPromptContext, setShouldPromptContext] = useState(false);
 
-  const clearContextPrompt = useCallback(() => {
-    setShouldPromptContext(false);
-  }, []);
+  // Keep the latest callback in a ref so uploadFiles stays stable without
+  // re-running whenever the caller passes a new function identity.
+  const onShouldPromptContextRef = useRef(onShouldPromptContext);
+  useEffect(() => {
+    onShouldPromptContextRef.current = onShouldPromptContext;
+  });
 
   const uploadFiles = useCallback(
     async (fileList: File[]) => {
@@ -120,7 +122,7 @@ export function useFileUpload({
             f.source !== "recording-upload",
         );
         if (hasNonAudioUploads) {
-          setShouldPromptContext(true);
+          onShouldPromptContextRef.current?.();
         }
 
         // Trigger extraction for each uploaded file (background)
@@ -213,7 +215,5 @@ export function useFileUpload({
   return {
     uploadFiles,
     isUploading,
-    shouldPromptContext,
-    clearContextPrompt,
   };
 }

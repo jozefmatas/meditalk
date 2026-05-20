@@ -464,7 +464,7 @@ export function ReviewView({
         {/* Mobile Codes content */}
         {mobileTab === "codes" && (
           <div className="flex flex-col gap-2 pt-4">
-            <IcdPanelContent visit={visit} setVisit={setVisit} />
+            <IcdPanelContent visit={visit} />
           </div>
         )}
       </div>

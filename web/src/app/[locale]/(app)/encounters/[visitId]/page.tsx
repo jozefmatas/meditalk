@@ -500,7 +500,7 @@ export default function EncounterDetailPage({ params }: PageProps) {
           />
 
           {/* Right panel — ICD codes */}
-          <IcdPanel visit={data.visit} setVisit={data.setVisit} />
+          <IcdPanel visit={data.visit} />
         </>
       )}
 

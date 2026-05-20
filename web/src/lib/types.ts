@@ -1,13 +1,5 @@
 // DB row types (matching supabase/migrations)
 
-// ─── ICD codes ──────────────────────────────────────────────────────
-
-export interface IcdCode {
-  code: string;
-  description: string;
-  confidence?: string;
-}
-
 // Encounter types
 export type EncounterStatus =
   | "started"
@@ -144,14 +136,18 @@ export interface VisitMetadata {
   transcriptSnapshotVersion?: number;
   generation_pending?: GenerationPending | null;
   clinical_analysis?: {
-    suggestedIcdCodes?: Array<IcdCode & { differential?: string }>;
+    suggestedIcdCodes?: Array<{
+      code: string;
+      description: string;
+      confidence?: string;
+      differential?: string;
+    }>;
   };
   /** Keyed by file ID — pipeline-managed cache, typed loosely here. */
   file_focus_cache?: Record<string, unknown>;
   recording_consent?: boolean;
   recording_consent_date?: string;
   patient_personal_id?: string;
-  selected_icd_codes?: IcdCode[];
 }
 
 // Encounter list query params
