@@ -60,9 +60,12 @@ export function FilesContent({
   const { uploadFiles, isUploading, shouldPromptContext, clearContextPrompt } =
     useFileUpload({ visitId, onFilesChange, hasActiveRecording });
 
-  // Open context dialog when non-audio files are uploaded
+  // Open context dialog when non-audio files are uploaded.
+  // TODO(react-19-cleanup): expose an onShouldPromptContext callback from
+  // useFileUpload instead of a polled boolean to remove this effect.
   useEffect(() => {
     if (shouldPromptContext) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setContextDialogOpen(true);
       clearContextPrompt();
     }

@@ -76,7 +76,9 @@ export function useEncounterGeneration({
 
   // Stable refs for callbacks
   const updateTitleRef = useRef(updateTitle);
-  updateTitleRef.current = updateTitle;
+  useEffect(() => {
+    updateTitleRef.current = updateTitle;
+  });
   const titleRef = useRef("");
   const syncTitle = useCallback((t: string) => {
     titleRef.current = t;
@@ -515,9 +517,11 @@ export function useEncounterGeneration({
 
   const pollTimeoutResumedRef = useRef(false);
   const visitRef = useRef(visit);
-  visitRef.current = visit;
   const handleGenerateRef = useRef(handleGenerate);
-  handleGenerateRef.current = handleGenerate;
+  useEffect(() => {
+    visitRef.current = visit;
+    handleGenerateRef.current = handleGenerate;
+  });
 
   const handlePollTimeout = useCallback(() => {
     if (pollTimeoutResumedRef.current) return;
@@ -580,8 +584,11 @@ export function useEncounterGeneration({
     [setCachedTemplate, visitId, initDoctorNotes, stream],
   );
 
-  // Auto-resume interrupted generation
+  // Auto-resume interrupted generation.
+  // TODO(react-19-cleanup): convert to useReducer — current state-machine
+  // legitimately drives several setState calls in this effect.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (!pendingResume || resumeCheckedRef.current) return;
     if (!visit || stream.isGenerating || stream.isStreaming) return;
 
@@ -623,6 +630,7 @@ export function useEncounterGeneration({
       `[generate] Auto-resuming interrupted generation (audioPath: ${!!pending?.audioPath}, transcript: ${hasTranscript})`,
     );
     handleGenerate();
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [
     pendingResume,
     visit,

@@ -46,7 +46,9 @@ export function FileContextDialog({
   // Seeded from existing `file.context`: non-empty → "past", else "actual".
   const [modes, setModes] = useState<Record<string, "actual" | "past">>({});
 
-  // Seed local state from file contexts whenever the dialog opens or files change
+  // Seed local state from file contexts when the dialog opens.
+  // TODO(react-19-cleanup): replace with key-based remount of the dialog
+  // (parent passes `key={open ? "open" : "closed"}`) to drop this seeding.
   useEffect(() => {
     if (!open) return;
     const seededContexts: Record<string, string> = {};
@@ -56,7 +58,9 @@ export function FileContextDialog({
       seededContexts[f.id] = existing;
       seededModes[f.id] = existing ? "past" : "actual";
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setContexts(seededContexts);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setModes(seededModes);
     // Only re-seed when dialog opens
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -224,13 +224,16 @@ export function useGenerationStream(
       setIsStreaming(false);
     });
 
-    // Catch any updates that arrived between mount and this effect
+    // Catch any updates that arrived between mount and this effect.
+    // Reading from the generationTracker singleton is an external source.
     const cached = generationTracker.getCache(visitId);
     if (cached && cached.sectionIds.length > 0) {
+      /* eslint-disable react-hooks/set-state-in-effect */
       setIsStreaming(true);
       setStreamedSections(cached.sections);
       setStreamingSectionIds(cached.sectionIds);
       setStreamingSectionLabels(cached.sectionLabels);
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
 
     return () => {
