@@ -1,12 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  useState,
+  useReducer,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import type { Encounter, SupportedLanguage } from "@/lib/types";
 import {
   type EncounterFile,
   awaitPendingContextSave,
   awaitPendingExtractions,
 } from "@/lib/encounters/file-state";
+import { decideResumeAction } from "./auto-resume";
 import { type RecordingBarRef } from "@/components/encounters/recording-bar";
 import {
   DEFAULT_TEMPLATE_ID,
@@ -546,8 +554,20 @@ export function useEncounterGeneration({
 
   // ── Auto-resume ─────────────────────────────────────────────────
 
-  const [pendingResume, setPendingResume] = useState(false);
-  const resumeCheckedRef = useRef(false);
+  // 3-phase state machine for resuming an interrupted generation:
+  //   idle    → no resume scheduled
+  //   pending → initFromVisit detected an interrupted generation; the
+  //             effect below will fire once streaming state is stable
+  //             and run the decision via `decideResumeAction`
+  //   done    → terminal; effect never reruns the decision in this
+  //             component instance
+  const [autoResumePhase, dispatchAutoResume] = useReducer(
+    (phase: "idle" | "pending" | "done", action: "request" | "complete") => {
+      if (phase === "done") return phase;
+      return action === "request" ? "pending" : "done";
+    },
+    "idle",
+  );
 
   const initFromVisit = useCallback(
     (data: Encounter) => {
@@ -578,45 +598,29 @@ export function useEncounterGeneration({
         logger.debug(
           "[generate] Detected interrupted generation — will auto-resume",
         );
-        setPendingResume(true);
+        dispatchAutoResume("request");
       }
     },
     [setCachedTemplate, visitId, initDoctorNotes, stream],
   );
 
-  // Auto-resume interrupted generation.
-  // TODO(react-19-cleanup): convert to useReducer — current state-machine
-  // legitimately drives several setState calls in this effect.
+  // Auto-resume interrupted generation. Decision logic lives in
+  // `decideResumeAction` (pure, unit-tested in auto-resume.test.ts);
+  // this effect only sequences the dispatch + side effects once
+  // streaming state has settled.
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    if (!pendingResume || resumeCheckedRef.current) return;
+    if (autoResumePhase !== "pending") return;
     if (!visit || stream.isGenerating || stream.isStreaming) return;
 
-    if (visit.status === "processing") {
-      resumeCheckedRef.current = true;
-      setPendingResume(false);
-      return;
-    }
+    const action = decideResumeAction(visit);
+    dispatchAutoResume("complete");
 
-    const meta = visit.metadata;
-    const pending = meta?.generation_pending;
-    const session = meta?.recording_session;
-    const hasTranscript = !!getTranscript(meta ?? null);
-    const metaFiles = meta?.files ?? [];
-    const hasExtractedFiles = metaFiles.some(
-      (f) => f.extracted_text && f.source !== "recording",
-    );
-    if (
-      !hasTranscript &&
-      !hasExtractedFiles &&
-      !pending?.audioPath &&
-      !session?.audioPath
-    ) {
+    if (action === "no-op") return;
+
+    if (action === "reset") {
       logger.warn(
         "[generate] Auto-resume: no transcript or audio available, resetting",
       );
-      resumeCheckedRef.current = true;
-      setPendingResume(false);
       setVisit((prev) => (prev ? { ...prev, status: "started" } : prev));
       patchEncounter(visitId, {
         status: "started",
@@ -624,15 +628,15 @@ export function useEncounterGeneration({
       });
       return;
     }
-    resumeCheckedRef.current = true;
-    setPendingResume(false);
+
+    // action === "generate"
+    const meta = visit.metadata;
     logger.debug(
-      `[generate] Auto-resuming interrupted generation (audioPath: ${!!pending?.audioPath}, transcript: ${hasTranscript})`,
+      `[generate] Auto-resuming interrupted generation (audioPath: ${!!meta?.generation_pending?.audioPath}, transcript: ${!!getTranscript(meta ?? null)})`,
     );
     handleGenerate();
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [
-    pendingResume,
+    autoResumePhase,
     visit,
     stream.isGenerating,
     stream.isStreaming,
