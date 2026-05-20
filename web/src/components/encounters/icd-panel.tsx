@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { toast } from "sonner";
 import { Badge } from "@/components/shared/badge";
@@ -11,13 +11,8 @@ import {
   InputGroupInput,
 } from "@/components/shared/input-group";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Search01Icon,
-  Cancel01Icon,
-  Copy01Icon,
-} from "@hugeicons/core-free-icons";
+import { Search01Icon, Copy01Icon } from "@hugeicons/core-free-icons";
 import type { Encounter } from "@/lib/types";
-import { patchEncounter } from "@/lib/encounters/api";
 
 interface IcdCode {
   code: string;
@@ -27,35 +22,12 @@ interface IcdCode {
 
 interface IcdPanelProps {
   visit: Encounter;
-  setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
-}
-
-/** Keep first occurrence of each code — older encounters persisted
- *  duplicates before the suggester learned to dedup, and React uses
- *  `code` as the list key. */
-function dedupeByCode(codes: IcdCode[]): IcdCode[] {
-  const seen = new Set<string>();
-  const out: IcdCode[] = [];
-  for (const c of codes) {
-    if (!c?.code || seen.has(c.code)) continue;
-    seen.add(c.code);
-    out.push(c);
-  }
-  return out;
 }
 
 /** Inner content of the ICD panel — reusable without the desktop sidebar wrapper. */
-export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
+export function IcdPanelContent({ visit }: IcdPanelProps) {
   const t = useTranslations("encounters.detail");
   const locale = useLocale();
-
-  // Selected codes are derived directly from visit metadata. Mutations go
-  // through `setVisit` (optimistic) + `persistCodes` (debounced PATCH), so
-  // there's no local copy to keep in sync with the prop.
-  const selectedCodes = useMemo(
-    () => dedupeByCode(visit.metadata.selected_icd_codes || []),
-    [visit.metadata.selected_icd_codes],
-  );
 
   // Suggested codes from clinical analysis — prefer the full pre-filter list
   // (suggestedIcdCodes) so the doctor sees all candidates, not just the
@@ -97,17 +69,13 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     Map<string, { code: string; description: string }>
   >(new Map());
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Resolve codes + descriptions for selected + suggested codes in the current locale
+  // Resolve codes + descriptions for suggested codes in the current locale
   useEffect(() => {
-    const allCodes = [
-      ...selectedCodes.map((c) => c.code),
-      ...suggestedCodesRaw.map((c) => c.code),
-    ];
-    if (allCodes.length === 0 || locale === "en") return;
+    const codes = suggestedCodesRaw.map((c) => c.code);
+    if (codes.length === 0 || locale === "en") return;
 
-    const unique = [...new Set(allCodes)];
+    const unique = [...new Set(codes)];
     fetch("/api/icd-resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -155,41 +123,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
             description: descFor(c),
           }));
 
-  // Persist selected codes to visit metadata (debounced). The optimistic
-  // setVisit already happened in the event handler — this just durably
-  // saves the result. PATCH failures are silently dropped (same as before).
-  const persistCodes = useCallback(
-    (codes: IcdCode[]) => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(async () => {
-        await patchEncounter(visit.id, {
-          metadata: { selected_icd_codes: codes },
-        });
-      }, 500);
-    },
-    [visit.id],
-  );
-
-  const removeCode = useCallback(
-    (code: string) => {
-      const next = selectedCodes.filter((c) => c.code !== code);
-      // Optimistic: update visit immediately so the UI reflects the removal
-      // before the debounced PATCH lands.
-      setVisit((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          metadata: {
-            ...(prev.metadata || {}),
-            selected_icd_codes: next,
-          },
-        } as typeof prev;
-      });
-      persistCodes(next);
-    },
-    [selectedCodes, persistCodes, setVisit],
-  );
-
   const copyCodeToClipboard = useCallback(
     (code: IcdCode) => {
       const text = `${code.code} ${code.description}`;
@@ -227,12 +160,8 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
     };
   }, [searchQuery, locale]);
 
-  // Determine which codes to show in the list
-  const selectedSet = new Set(selectedCodes.map((c) => c.code));
   const listCodes: IcdCode[] =
-    searchQuery.length >= 2
-      ? searchResults.filter((c) => !selectedSet.has(c.code))
-      : suggestedCodes.filter((c) => !selectedSet.has(c.code));
+    searchQuery.length >= 2 ? searchResults : suggestedCodes;
 
   return (
     <>
@@ -243,39 +172,6 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
           ICD 10
         </Badge>
       </div>
-
-      {/* Selected codes — hide unresolved codes for non-EN locales */}
-      {selectedCodes.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-foreground/65">{t("icdSelected")}</p>
-          {selectedCodes
-            .filter((c) => locale === "en" || localizedMap.has(c.code))
-            .map((code) => (
-              <div
-                key={code.code}
-                className="group flex items-center justify-between rounded-xl bg-accent p-3"
-              >
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="text-sm font-normal text-primary">
-                    {codeFor(code)}
-                  </span>
-                  <span className="line-clamp-2 text-xs text-foreground">
-                    {descFor(code)}
-                  </span>
-                </div>
-                <button
-                  onClick={() => removeCode(code.code)}
-                  className="flex shrink-0 items-center justify-center rounded-lg opacity-0 transition-opacity size-8 hover:bg-background/50 group-hover:opacity-100"
-                >
-                  <HugeiconsIcon
-                    icon={Cancel01Icon}
-                    className="size-4 text-muted-foreground"
-                  />
-                </button>
-              </div>
-            ))}
-        </div>
-      )}
 
       {/* Search */}
       <InputGroup>
@@ -303,9 +199,7 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
           <p className="py-4 text-center text-xs text-foreground/65">
             {searchQuery.length >= 2
               ? t("icdNoResults")
-              : suggestedCodes.length === 0
-                ? t("icdNoSuggestions")
-                : t("icdAllSelected")}
+              : t("icdNoSuggestions")}
           </p>
         )}
 
@@ -331,10 +225,10 @@ export function IcdPanelContent({ visit, setVisit }: IcdPanelProps) {
 }
 
 /** Desktop sidebar wrapper for IcdPanelContent. */
-export function IcdPanel({ visit, setVisit }: IcdPanelProps) {
+export function IcdPanel({ visit }: IcdPanelProps) {
   return (
     <div className="hidden h-full w-70 shrink-0 flex-col gap-2 border-l bg-background p-4 desktop:flex">
-      <IcdPanelContent visit={visit} setVisit={setVisit} />
+      <IcdPanelContent visit={visit} />
     </div>
   );
 }
