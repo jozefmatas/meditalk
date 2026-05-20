@@ -15,34 +15,29 @@ interface MedicationIndex {
 /** Per-locale cache */
 const _cache = new Map<string, MedicationIndex>();
 
-/** Map locale to CSV filename */
-function csvFileForLocale(locale: string): string {
-  switch (locale) {
-    case "sk": {
-      const skPath = join(
-        process.cwd(),
-        "public",
-        "medicines",
-        "sk",
-        "medicines_sk.csv",
-      );
-      if (existsSync(skPath)) return "medicines_sk.csv";
-      return "medicines_sk.csv"; // fallback
-    }
-    case "cs": {
-      const csPath = join(
-        process.cwd(),
-        "public",
-        "medicines",
-        "cs",
-        "medicines_cs.csv",
-      );
-      if (existsSync(csPath)) return "medicines_cs.csv";
-      return "medicines_sk.csv"; // fallback to SK
-    }
-    default:
-      return "medicines_sk.csv";
+/** Absolute path to the medications CSV for this locale, falling back to SK
+ *  when the locale-specific file isn't shipped. Returning a single path
+ *  keeps the directory and filename in lockstep — earlier the directory
+ *  ("cs") could mismatch the fallback filename ("medicines_sk.csv"),
+ *  producing an ENOENT for every CS-locale critic run. */
+function csvPathForLocale(locale: string): string {
+  if (locale === "cs") {
+    const csPath = join(
+      process.cwd(),
+      "public",
+      "medicines",
+      "cs",
+      "medicines_cs.csv",
+    );
+    if (existsSync(csPath)) return csPath;
   }
+  return join(
+    process.cwd(),
+    "public",
+    "medicines",
+    "sk",
+    "medicines_sk.csv",
+  );
 }
 
 /**
@@ -53,15 +48,7 @@ function loadIndex(locale = "en"): MedicationIndex {
   const cached = _cache.get(locale);
   if (cached) return cached;
 
-  const filename = csvFileForLocale(locale);
-  const csvPath = join(
-    process.cwd(),
-    "public",
-    "medicines",
-    locale === "cs" ? "cs" : "sk",
-    filename,
-  );
-
+  const csvPath = csvPathForLocale(locale);
   const raw = readFileSync(csvPath, "utf-8");
   const byName = new Map<string, MedicationEntry>();
   const byActiveIngredient = new Map<string, MedicationEntry[]>();
