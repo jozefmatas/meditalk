@@ -40,7 +40,7 @@
     "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@fontsource-variable/figtree": "^5.2.10",
     "@google/genai": "^2.4.0",
-    "@hugeicons/core-free-icons": "^3.1.1",
+    "@hugeicons/core-free-icons": "^4.1.4",
     "@hugeicons/react": "^1.1.5",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-scroll-area": "^1.2.10",
