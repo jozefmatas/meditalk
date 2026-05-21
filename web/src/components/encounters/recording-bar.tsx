@@ -44,13 +44,6 @@ import type { SupportedLanguage, VisitMetadata } from "@/lib/types";
 
 type RecordingState = "idle" | "recording" | "paused";
 
-/** Persisted to visits.metadata.recording_session */
-interface RecordingSession {
-  state: "recording" | "paused";
-  durationAtPause: number;
-  audioPath?: string;
-}
-
 export interface RecordingBarRef {
   /** Stop recorder and return blob + whether this is a restored session.
    *  Does NOT tear down the foreground service — call `releaseGuards()` after
