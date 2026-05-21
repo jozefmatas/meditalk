@@ -36,7 +36,6 @@ import type { Encounter } from "@/lib/types";
 
 interface ReviewViewProps {
   visit: Encounter;
-  setVisit: React.Dispatch<React.SetStateAction<Encounter | null>>;
   title: string;
   onTitleChange: (value: string) => void;
   onMetadataBlur: () => void;
@@ -107,7 +106,6 @@ interface ReviewViewProps {
 
 export function ReviewView({
   visit,
-  setVisit,
   title,
   onTitleChange,
   onMetadataBlur,

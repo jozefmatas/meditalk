@@ -349,7 +349,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
           <div className="flex w-full max-w-5xl flex-col gap-6 min-h-full">
             <ReviewView
               visit={data.visit}
-              setVisit={data.setVisit}
               title={metadata.title}
               onTitleChange={updateTitle}
               onMetadataBlur={metadata.handleMetadataBlur}
@@ -453,7 +452,6 @@ export default function EncounterDetailPage({ params }: PageProps) {
             <div className="flex w-full max-w-5xl flex-col gap-6 min-h-full">
               <ReviewView
                 visit={data.visit}
-                setVisit={data.setVisit}
                 title={metadata.title}
                 onTitleChange={updateTitle}
                 onMetadataBlur={metadata.handleMetadataBlur}
