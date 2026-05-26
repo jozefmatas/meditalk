@@ -262,10 +262,12 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
       ref,
       () => ({
         finalize: async () => {
+          const tStart = performance.now();
           const rec = recorderRef.current;
 
           // Stop recorder and get merged blob
           const blob = await rec.stop();
+          const tStopped = performance.now();
           logger.debug(
             `[recording] finalize() — blob: ${blob?.size || 0} bytes`,
           );
@@ -279,6 +281,11 @@ export const RecordingBar = forwardRef<RecordingBarRef, RecordingBarProps>(
           // so the WebView network stays available on native (Android).
           closeRecordingNotification();
           rec.reset();
+          const tDone = performance.now();
+
+          logger.info(
+            `[rec-perf] bar.finalize total=${(tDone - tStart).toFixed(0)}ms (rec.stop=${(tStopped - tStart).toFixed(0)}ms wrap-up=${(tDone - tStopped).toFixed(0)}ms)`,
+          );
 
           // durationOffset > 0 means user resumed a restored session (after
           // page refresh). The prior recording's transcript is already in
