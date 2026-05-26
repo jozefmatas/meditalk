@@ -75,6 +75,11 @@ export function useEncounterGeneration({
   );
   const [generatedNoteHtml, setGeneratedNoteHtml] = useState("");
   const [isRegenerating, setIsRegenerating] = useState(false);
+  // True from the moment Generate (or Adjust) is clicked until the
+  // pipeline either flips visit.status to "processing" or fails. Used
+  // ONLY for button-disable — folding this into `isGenerating` would
+  // unmount the recording bar mid-finalize and lose the audio blob.
+  const [isStarting, setIsStarting] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [hasActiveRecording, setHasActiveRecording] = useState(false);
   const recordingBarRef = useRef<RecordingBarRef>(null);
@@ -232,22 +237,24 @@ export function useEncounterGeneration({
 
   const handleGenerate = useCallback(
     async (options?: { sendAsEmail?: boolean }) => {
-      const capturedTemplateId = selectedTemplateId;
-      const capturedDoctorNotes = doctorNotes;
-      const capturedTitle = titleRef.current;
+      setIsStarting(true);
+      try {
+        const capturedTemplateId = selectedTemplateId;
+        const capturedDoctorNotes = doctorNotes;
+        const capturedTitle = titleRef.current;
 
-      // 1. Finalize recording (fast, local-only — must happen before UI switch)
-      const bar = recordingBarRef.current;
-      const finalized = bar
-        ? {
-            ...(await bar.finalize()),
-            releaseGuards: bar.releaseGuards,
-          }
-        : null;
+        // 1. Finalize recording (fast, local-only — must happen before UI switch)
+        const bar = recordingBarRef.current;
+        const finalized = bar
+          ? {
+              ...(await bar.finalize()),
+              releaseGuards: bar.releaseGuards,
+            }
+          : null;
 
-      // 2. Switch to processing UI immediately
-      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
-      emit("encounter-update", { id: visitId, status: "processing" });
+        // 2. Switch to processing UI immediately
+        setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
+        emit("encounter-update", { id: visitId, status: "processing" });
 
       // 3. Upload blob + resolve audio recovery path
       // (server-side waitForTranscript handles transcript reuse)
@@ -275,27 +282,30 @@ export function useEncounterGeneration({
       releaseGuards?.();
 
       await executeGenerationFlow({
-        url: "/api/generate",
-        body: {
-          visitId,
+          url: "/api/generate",
+          body: {
+            visitId,
+            templateId: capturedTemplateId,
+            doctorNotes: capturedDoctorNotes || undefined,
+            transcriptText: transcriptText || undefined,
+            audioPath: audioRecoveryPath || undefined,
+            sendAsEmail: options?.sendAsEmail || false,
+          },
+          retry: true,
           templateId: capturedTemplateId,
-          doctorNotes: capturedDoctorNotes || undefined,
-          transcriptText: transcriptText || undefined,
-          audioPath: audioRecoveryPath || undefined,
-          sendAsEmail: options?.sendAsEmail || false,
-        },
-        retry: true,
-        templateId: capturedTemplateId,
-        transcriptText: transcriptText ?? undefined,
-        errorRecoveryStatus: "started",
-        clearGenerationPending: true,
-        autoTitleCapture: capturedTitle,
-        preStream: async () => {
-          setAudioBlob(null);
-          await awaitPendingContextSave(visitId);
-          await awaitPendingExtractions(visitId);
-        },
-      });
+          transcriptText: transcriptText ?? undefined,
+          errorRecoveryStatus: "started",
+          clearGenerationPending: true,
+          autoTitleCapture: capturedTitle,
+          preStream: async () => {
+            setAudioBlob(null);
+            await awaitPendingContextSave(visitId);
+            await awaitPendingExtractions(visitId);
+          },
+        });
+      } finally {
+        setIsStarting(false);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- executeGenerationFlow captures the same deps listed here
     [
@@ -319,62 +329,67 @@ export function useEncounterGeneration({
       adjustRecordingBarRef: React.RefObject<RecordingBarRef | null>;
       additionalNotes?: string;
     }) => {
-      const capturedTemplateId = selectedTemplateId;
-      const mergedNotes = [doctorNotes, opts.additionalNotes]
-        .filter(Boolean)
-        .join("\n\n");
+      setIsStarting(true);
+      try {
+        const capturedTemplateId = selectedTemplateId;
+        const mergedNotes = [doctorNotes, opts.additionalNotes]
+          .filter(Boolean)
+          .join("\n\n");
 
-      // 1. Finalize recording (fast, local-only)
-      const bar = opts.adjustRecordingBarRef.current;
-      const finalized = bar
-        ? {
-            ...(await bar.finalize()),
-            releaseGuards: bar.releaseGuards,
-          }
-        : null;
+        // 1. Finalize recording (fast, local-only)
+        const bar = opts.adjustRecordingBarRef.current;
+        const finalized = bar
+          ? {
+              ...(await bar.finalize()),
+              releaseGuards: bar.releaseGuards,
+            }
+          : null;
 
-      // 2. Switch to processing UI immediately
-      setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
+        // 2. Switch to processing UI immediately
+        setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
 
-      // 3. Upload blob + transcribe (slow, network)
-      const { transcriptText, releaseGuards } = await prepareSource({
-        recordingBarRef: opts.adjustRecordingBarRef,
-        language: generationLanguage,
-        visit,
-        finalized,
-      });
+        // 3. Upload blob + transcribe (slow, network)
+        const { transcriptText, releaseGuards } = await prepareSource({
+          recordingBarRef: opts.adjustRecordingBarRef,
+          language: generationLanguage,
+          visit,
+          finalized,
+        });
 
-      await patchEncounterStatus(visitId, "processing", {
-        metadata: {
-          generation_pending: {
-            templateId: capturedTemplateId,
-            doctorNotes: mergedNotes || undefined,
-            startedAt: new Date().toISOString(),
+        await patchEncounterStatus(visitId, "processing", {
+          metadata: {
+            generation_pending: {
+              templateId: capturedTemplateId,
+              doctorNotes: mergedNotes || undefined,
+              startedAt: new Date().toISOString(),
+            },
           },
-        },
-      });
+        });
 
-      releaseGuards?.();
+        releaseGuards?.();
 
       await executeGenerationFlow({
-        url: "/api/adjust",
-        body: {
-          visitId,
+          url: "/api/adjust",
+          body: {
+            visitId,
+            templateId: capturedTemplateId,
+            adjustmentTranscript: transcriptText || undefined,
+          },
+          retry: false,
           templateId: capturedTemplateId,
-          adjustmentTranscript: transcriptText || undefined,
-        },
-        retry: false,
-        templateId: capturedTemplateId,
-        transcriptText: transcriptText ?? undefined,
-        errorRecoveryStatus: "to_review",
-        preStream: async () => {
-          clearCache();
-          await awaitPendingContextSave(visitId);
-        },
-        postSuccess: () => {
-          if (mergedNotes) setDoctorNotes(mergedNotes);
-        },
-      });
+          transcriptText: transcriptText ?? undefined,
+          errorRecoveryStatus: "to_review",
+          preStream: async () => {
+            clearCache();
+            await awaitPendingContextSave(visitId);
+          },
+          postSuccess: () => {
+            if (mergedNotes) setDoctorNotes(mergedNotes);
+          },
+        });
+      } finally {
+        setIsStarting(false);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- executeGenerationFlow captures the same deps listed here
     [
@@ -634,6 +649,10 @@ export function useEncounterGeneration({
     logger.debug(
       `[generate] Auto-resuming interrupted generation (audioPath: ${!!meta?.generation_pending?.audioPath}, transcript: ${!!getTranscript(meta ?? null)})`,
     );
+    // handleGenerate flips `isStarting` synchronously, which the rule sees
+    // as setState-in-effect; here it's the legitimate "kick off async work"
+    // path that useEffect exists for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     handleGenerate();
   }, [
     autoResumePhase,
@@ -676,6 +695,12 @@ export function useEncounterGeneration({
     setGeneratedNoteHtml,
     isStreaming: stream.isStreaming,
     isGenerating: stream.isGenerating,
+    /** True between Generate-click and the first downstream state flip.
+     *  Use this to disable the Generate/Adjust buttons during the
+     *  recording finalize gap so repeat clicks don't fire duplicate
+     *  generations. NOT for view-switching (would unmount the recording
+     *  bar mid-finalize). */
+    isStarting,
     isRegenerating,
     streamedSections: stream.streamedSections,
     streamingSectionIds: stream.streamingSectionIds,
