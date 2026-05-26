@@ -237,6 +237,7 @@ export function useEncounterGeneration({
 
   const handleGenerate = useCallback(
     async (options?: { sendAsEmail?: boolean }) => {
+      const tClick = performance.now();
       setIsStarting(true);
       try {
         const capturedTemplateId = selectedTemplateId;
@@ -255,6 +256,9 @@ export function useEncounterGeneration({
         // 2. Switch to processing UI immediately
         setVisit((prev) => (prev ? { ...prev, status: "processing" } : prev));
         emit("encounter-update", { id: visitId, status: "processing" });
+        logger.info(
+          `[rec-perf] handleGenerate click→processing=${(performance.now() - tClick).toFixed(0)}ms`,
+        );
 
       // 3. Upload blob + resolve audio recovery path
       // (server-side waitForTranscript handles transcript reuse)

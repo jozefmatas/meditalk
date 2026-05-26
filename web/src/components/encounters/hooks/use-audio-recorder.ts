@@ -424,17 +424,31 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     // ── Native path ──
     if (isNative) {
       try {
+        const t0 = performance.now();
         // Remove listener first to stop receiving chunks
         await nativeListenerRef.current?.remove();
         nativeListenerRef.current = null;
+        const tListenerRemoved = performance.now();
 
         await nativePluginRef.current?.stop();
         nativePluginRef.current = null;
+        const tPluginStopped = performance.now();
 
         const builder = wavBuilderRef.current;
-        if (!builder?.hasData) return null;
+        if (!builder?.hasData) {
+          logger.info(
+            `[rec-perf] native stop (no data): listener.remove=${(tListenerRemoved - t0).toFixed(0)}ms plugin.stop=${(tPluginStopped - tListenerRemoved).toFixed(0)}ms`,
+          );
+          return null;
+        }
 
         const blob = builder.toBlob();
+        const tBlobBuilt = performance.now();
+        const sizeKb = (blob.size / 1024).toFixed(0);
+        logger.info(
+          `[rec-perf] native stop total=${(tBlobBuilt - t0).toFixed(0)}ms (listener.remove=${(tListenerRemoved - t0).toFixed(0)}ms plugin.stop=${(tPluginStopped - tListenerRemoved).toFixed(0)}ms wav.toBlob=${(tBlobBuilt - tPluginStopped).toFixed(0)}ms) blob=${sizeKb}KB`,
+        );
+
         builder.reset();
         return blob;
       } catch (err) {
