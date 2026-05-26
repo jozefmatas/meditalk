@@ -241,7 +241,13 @@ export default function EncounterDetailPage({ params }: PageProps) {
       generation.doctorNotes.trim() ||
       data.files.length > 0 ||
       generation.hasActiveRecording
-    ) && !filesUploading;
+    ) &&
+    !filesUploading &&
+    // Block re-clicks during the recording-finalize gap and the active
+    // generation/streaming window.
+    !generation.isStarting &&
+    !generation.isGenerating &&
+    !generation.isStreaming;
   const isDraft = data.visit
     ? data.visit.status === "started" || data.visit.status === "recording"
     : true;
