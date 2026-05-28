@@ -34,11 +34,11 @@ function MarketingFooter() {
 
   return (
     <footer className="relative z-10 border-t border-border/60 bg-accent">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <div className="mx-auto flex max-w-6xl flex-col items-center gap-3 px-6 py-6 text-center sm:h-16 sm:flex-row sm:justify-between sm:py-0 sm:text-left">
         <p className="text-sm text-foreground/65">
           {t("copyright", { year: new Date().getFullYear() })}
         </p>
-        <div className="flex items-center gap-6">
+        <div className="flex flex-col items-center gap-3 sm:flex-row sm:gap-6">
           <Link
             href="/privacy-policy"
             className="text-sm text-foreground/65 transition-colors hover:text-foreground"
