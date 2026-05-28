@@ -116,8 +116,19 @@ export async function proxy(request: NextRequest) {
         return NextResponse.redirect(new URL("/", appUrl));
       }
 
-      const rewriteUrl = request.nextUrl.clone();
+      // For the unprefixed root (`/`), run next-intl locale detection so
+      // visitors get redirected to `/en` or `/cs` when their browser
+      // prefers a non-default locale (cookie → Accept-Language). Without
+      // this, every first-time visitor lands in Slovak.
       const localeMatch = pathname.match(/^\/(sk|cs|en)/);
+      if (!localeMatch) {
+        const i18nResponse = handleI18nRouting(request);
+        if (i18nResponse.headers.get("location")) {
+          return i18nResponse;
+        }
+      }
+
+      const rewriteUrl = request.nextUrl.clone();
       const locale = localeMatch
         ? localeMatch[1]
         : routing.defaultLocale || "sk";
