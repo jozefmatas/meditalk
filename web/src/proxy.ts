@@ -86,7 +86,21 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL(`${pathname}${url.search}`, appUrl));
   }
 
-  // STEP 3b: Marketing domain — rewrite root path to /landing
+  // STEP 3b: Marketing domain — canonicalize /landing → locale root
+  // (the /landing path is an internal route; the public URL is `/`, `/cs`, `/en`)
+  if (isMarketingDomain) {
+    const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
+    if (withoutLocale === "/landing") {
+      const localeMatch = pathname.match(/^\/(sk|cs|en)/);
+      const canonicalPath = localeMatch ? `/${localeMatch[1]}` : "/";
+      return NextResponse.redirect(
+        new URL(`${canonicalPath}${url.search}`, request.url),
+        308,
+      );
+    }
+  }
+
+  // STEP 3c: Marketing domain — rewrite root path to /landing
   // (Next.js can't have two page.tsx at the same path, so we use an internal route)
   if (isMarketingDomain) {
     const withoutLocale = pathname.replace(/^\/(sk|cs|en)/, "") || "/";
