@@ -122,7 +122,17 @@ export async function proxy(request: NextRequest) {
         ? localeMatch[1]
         : routing.defaultLocale || "sk";
       rewriteUrl.pathname = `/${locale}/landing`;
-      return NextResponse.rewrite(rewriteUrl);
+
+      // Set the locale header next-intl reads in server components.
+      // Without this, useTranslations() inside nested marketing components
+      // falls back to the default locale because the rewrite bypassed
+      // next-intl's own middleware.
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set("X-NEXT-INTL-LOCALE", locale);
+
+      return NextResponse.rewrite(rewriteUrl, {
+        request: { headers: requestHeaders },
+      });
     }
   }
 
