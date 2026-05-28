@@ -30,7 +30,7 @@ export default function LandingPage() {
 
         <a
           href={appUrl ? `${appUrl}/login` : "/login"}
-          className="mt-6 inline-flex h-12 items-center rounded-2xl bg-secondary px-6 text-lg font-medium text-secondary-foreground transition-colors hover:bg-secondary/90"
+          className="mt-6 inline-flex h-12 items-center rounded-2xl bg-secondary px-6 text-base font-medium text-secondary-foreground transition-colors hover:bg-secondary/90"
         >
           {t("cta")}
         </a>

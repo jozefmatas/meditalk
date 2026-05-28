@@ -32,6 +32,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Storybook compiled output
     "storybook-static/**",
+    // Vendored third-party bundles served as static assets
+    "public/**",
+    // Capacitor / Android Gradle build outputs
+    "android/**/build/**",
   ]),
   ...storybook.configs["flat/recommended"],
 ]);
