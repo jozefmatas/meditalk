@@ -406,12 +406,15 @@
     "nav": {
       "login": "Sign In",
       "features": "Features",
-      "pricing": "Pricing"
+      "pricing": "Pricing",
+      "startFree": "Start free"
     },
     "hero": {
-      "title": "AI documentation for doctors",
-      "subtitle": "MediTalk automatically transcribes and documents your patient encounters. Save time and focus on what matters.",
-      "cta": "Get started free"
+      "eyebrow": "Built for clinicians who refuse to choose between speed and accuracy",
+      "titleLead": "Clinical notes. Done right.",
+      "titleEmphasis": "Every time.",
+      "subtitle": "MediTalk turns real clinical conversations into fully structured, evidence-backed documentation in seconds.",
+      "cta": "Start your first encounter"
     },
     "footer": {
       "copyright": "© {year} MediTalk. All rights reserved.",
