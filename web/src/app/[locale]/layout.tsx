@@ -66,11 +66,13 @@ export default async function LocaleLayout({
   // Make the locale from route params authoritative — this matters for
   // marketing rewrites (`/en` → `/en/landing`) where next-intl's middleware
   // is bypassed by the proxy, so requestLocale would otherwise fall back to
-  // the default locale and load the wrong messages.
+  // the default locale. Pass `locale` explicitly to `getMessages` so it
+  // doesn't rely on cached request locale at all.
   setRequestLocale(locale);
 
-  // Fetch messages for the locale
-  const messages = await getMessages();
+  // Fetch messages for the locale (explicit locale defeats any stale
+  // request-locale cache from middleware-bypassed routes)
+  const messages = await getMessages({ locale });
 
   return (
     <html lang={locale} suppressHydrationWarning>
