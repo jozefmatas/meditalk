@@ -26,9 +26,9 @@ const csp = [
   // 'unsafe-inline' required for Next.js inline scripts; 'unsafe-eval' only in dev (HMR)
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""} https://va.vercel-scripts.com`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.supabase.co",
+  "img-src 'self' data: blob: https://*.supabase.co https://assets.unicorn.studio",
   "font-src 'self' data: https://fonts.gstatic.com",
-  `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://va.vercel-scripts.com wss://*.elevenlabs.io${isDev ? " ws: wss: http://localhost:* https://localhost:*" : ""}`,
+  `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://va.vercel-scripts.com wss://*.elevenlabs.io https://assets.unicorn.studio${isDev ? " ws: wss: http://localhost:* https://localhost:*" : ""}`,
   "media-src 'self' blob: https://*.supabase.co",
   "worker-src 'self' blob:",
   "frame-ancestors 'none'",

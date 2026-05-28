@@ -406,12 +406,15 @@
     "nav": {
       "login": "Prihlásiť sa",
       "features": "Funkcie",
-      "pricing": "Cenník"
+      "pricing": "Cenník",
+      "startFree": "Začať zadarmo"
     },
     "hero": {
-      "title": "AI dokumentácia pre lekárov",
-      "subtitle": "MediTalk automaticky prepíše a zdokumentuje vaše stretnutia s pacientmi. Šetrite čas a sústreďte sa na to, čo je dôležité.",
-      "cta": "Začať zadarmo"
+      "eyebrow": "Pre lekárov, ktorí odmietajú voliť medzi rýchlosťou a presnosťou",
+      "titleLead": "Klinické zápisy. Bezchybne.",
+      "titleEmphasis": "Vždy.",
+      "subtitle": "MediTalk premení reálne klinické rozhovory na plne štruktúrovanú, evidence‑based dokumentáciu za pár sekúnd.",
+      "cta": "Začnite prvé vyšetrenie"
     },
     "footer": {
       "copyright": "© {year} MediTalk. Všetky práva vyhradené.",

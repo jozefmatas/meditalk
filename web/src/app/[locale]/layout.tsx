@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Figtree } from "next/font/google";
+import { Figtree, Fraunces } from "next/font/google";
 
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
@@ -18,6 +18,12 @@ import "../globals.css";
 
 const figtree = Figtree({
   subsets: ["latin", "latin-ext"],
+});
+
+const fraunces = Fraunces({
+  subsets: ["latin", "latin-ext"],
+  variable: "--font-serif",
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -65,7 +71,9 @@ export default async function LocaleLayout({
       <head>
         <script async src="/theme.js" />
       </head>
-      <body className={`${figtree.className} antialiased`}>
+      <body
+        className={`${fraunces.variable} ${figtree.className} antialiased`}
+      >
         <NextIntlClientProvider messages={messages}>
           <PageTitleProvider>
             <HeaderActionsProvider>
