@@ -4,7 +4,7 @@ import { Figtree, Fraunces } from "next/font/google";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages } from "next-intl/server";
+import { getMessages, setRequestLocale } from "next-intl/server";
 import { PageTitleProvider } from "@/components/nav/page-title-context";
 import { HeaderActionsProvider } from "@/components/nav/header-actions-context";
 import { ImpersonationProvider } from "@/components/admin/impersonation-context";
@@ -63,6 +63,12 @@ export default async function LocaleLayout({
     notFound();
   }
 
+  // Make the locale from route params authoritative — this matters for
+  // marketing rewrites (`/en` → `/en/landing`) where next-intl's middleware
+  // is bypassed by the proxy, so requestLocale would otherwise fall back to
+  // the default locale and load the wrong messages.
+  setRequestLocale(locale);
+
   // Fetch messages for the locale
   const messages = await getMessages();
 
@@ -71,9 +77,7 @@ export default async function LocaleLayout({
       <head>
         <script async src="/theme.js" />
       </head>
-      <body
-        className={`${fraunces.variable} ${figtree.className} antialiased`}
-      >
+      <body className={`${fraunces.variable} ${figtree.className} antialiased`}>
         <NextIntlClientProvider messages={messages}>
           <PageTitleProvider>
             <HeaderActionsProvider>
